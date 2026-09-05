@@ -1,4 +1,4 @@
-import { SecretNetworkClient } from 'secretjs'
+import type { SecretNetworkClient } from 'secretjs'
 import { create } from 'zustand'
 
 import { CHAIN_ID } from '@/chains/secret4'
@@ -56,7 +56,27 @@ export function lastUsedWallet(): WalletId | undefined {
   }
 }
 
-function buildSigningClient(url: string, connection: Connection): SecretNetworkClient {
+/**
+ * secretjs is ~3MB once its protobuf dependencies are counted, and the welcome
+ * screen needs none of it: choosing a wallet is pure DOM. Loading it on demand
+ * keeps the first paint off that download, which matters most for exactly the
+ * newcomer this dashboard exists to onboard.
+ *
+ * The promise is cached, so the module is fetched once however many callers ask.
+ */
+let secretjs: Promise<typeof import('secretjs')> | undefined
+function loadSecretjs(): Promise<typeof import('secretjs')> {
+  secretjs ??= import('secretjs')
+  return secretjs
+}
+
+async function buildQueryClient(url: string): Promise<SecretNetworkClient> {
+  const { SecretNetworkClient } = await loadSecretjs()
+  return new SecretNetworkClient({ url, chainId: CHAIN_ID })
+}
+
+async function buildSigningClient(url: string, connection: Connection): Promise<SecretNetworkClient> {
+  const { SecretNetworkClient } = await loadSecretjs()
   return new SecretNetworkClient({
     url,
     chainId: CHAIN_ID,
@@ -72,7 +92,7 @@ export const useWallet = create<WalletState>()((set, get) => ({
   initQueryClient: async () => {
     if (get().queryClient) return
     const url = await resolveLcdUrl(useSettings.getState().lcdOverride)
-    set({ queryClient: new SecretNetworkClient({ url, chainId: CHAIN_ID }) })
+    set({ queryClient: await buildQueryClient(url) })
   },
 
   connectWallet: async (id) => {
@@ -83,13 +103,15 @@ export const useWallet = create<WalletState>()((set, get) => ({
         connect(id)
       ])
 
+      const client = await buildSigningClient(url, connection)
+
       set({
         status: 'connected',
         walletId: id,
         address: connection.address,
         accountName: connection.accountName,
-        client: buildSigningClient(url, connection),
-        queryClient: get().queryClient ?? new SecretNetworkClient({ url, chainId: CHAIN_ID }),
+        client,
+        queryClient: get().queryClient ?? (await buildQueryClient(url)),
         error: undefined,
         notInstalled: undefined
       })

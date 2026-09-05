@@ -4,10 +4,17 @@ import { cn } from '@/lib/cn'
 
 export type ButtonVariant = 'primary' | 'secondary' | 'soft' | 'ghost'
 export type ButtonSize = 'sm' | 'md' | 'lg'
+/**
+ * The design uses two shapes with a rule, not at random: fully rounded for the
+ * page's primary calls to action, and the 10px control radius for the tonal
+ * action buttons that sit inside a card.
+ */
+export type ButtonShape = 'pill' | 'control'
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   size?: ButtonSize
+  shape?: ButtonShape
   /** Rendered on the left. Pass a Lucide icon with an explicit size. */
   icon?: ReactNode
   /** Rendered on the right, opposite `icon`. */
@@ -28,8 +35,8 @@ const VARIANTS: Record<ButtonVariant, string> = {
   // "Continue with Keplr" — a translucent wash over the page rather than a
   // solid grey, so it works on any background.
   secondary: 'bg-surface text-text',
-  // The wallet screen's Send / Receive / Wrap / Bridge row.
-  soft: 'bg-accent-soft text-accent',
+  // The wallet screen's Send / Receive / Wrap / Bridge row, and Stake.
+  soft: 'bg-accent-container text-accent',
   ghost: 'bg-transparent text-text-muted hover:text-text'
 }
 
@@ -42,6 +49,7 @@ const SIZES: Record<ButtonSize, string> = {
 export default function Button({
   variant = 'primary',
   size = 'md',
+  shape = 'pill',
   icon,
   trailing,
   block = false,
@@ -58,7 +66,8 @@ export default function Button({
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={cn(
-        'inline-flex items-center rounded-pill font-medium',
+        'inline-flex items-center font-medium',
+        shape === 'pill' ? 'rounded-pill' : 'rounded-control',
         'transition-[transform,background-color] duration-[var(--duration-short)] ease-[var(--ease-standard)]',
         // A press should feel like it went in. Transform only, so it stays on
         // the compositor.

@@ -23,6 +23,7 @@ export default {
         accent: 'var(--color-accent)',
         'accent-strong': 'var(--color-accent-strong)',
         'accent-soft': 'var(--color-accent-soft)',
+        'accent-container': 'var(--color-accent-container)',
         'accent-text': 'var(--color-accent-text)',
         positive: 'var(--color-positive)',
         negative: 'var(--color-negative)'

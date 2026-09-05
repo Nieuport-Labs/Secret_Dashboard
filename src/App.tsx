@@ -49,7 +49,27 @@ export default function App() {
             <Placeholder
               title="Bridge"
               phase="phase 6"
-              summary="IBC transfer with auto-wrap on arrival, and Get gas — swapping a slice of what you bridge into gas credits in flight, so an empty Secret wallet can still transact."
+              summary="IBC transfer with auto-wrap on arrival, and Get gas, which swaps a slice of what you bridge into gas credits in flight, so an empty Secret wallet can still transact."
+            />
+          }
+        />
+        <Route
+          path="/send"
+          element={
+            <Placeholder
+              title="Send"
+              phase="phase 3b"
+              summary="Send SCRT or any private token, with the fee paid by a grant when one covers it."
+            />
+          }
+        />
+        <Route
+          path="/wrap"
+          element={
+            <Placeholder
+              title="Wrap"
+              phase="phase 3b"
+              summary="Turn public SCRT into private sSCRT and back."
             />
           }
         />
@@ -59,7 +79,7 @@ export default function App() {
             <Placeholder
               title="Staking"
               phase="phase 7"
-              summary="Delegate, redelegate, claim, and auto-restake through MsgSetAutoRestake — which the chain only honours above 10 SCRT per validator."
+              summary="Delegate, redelegate, claim, and auto-restake through MsgSetAutoRestake, which the chain only honours above 10 SCRT per validator."
             />
           }
         />

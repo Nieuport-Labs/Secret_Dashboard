@@ -34,6 +34,17 @@
   }
 }
 
+@keyframes drawer-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 @layer components {
   /*
    * Material's state layer: a translucent wash of the element's own foreground

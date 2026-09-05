@@ -1,139 +1,93 @@
-import { KeyRound, ShieldCheck } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { KeyRound } from 'lucide-react'
+import { useState } from 'react'
 
 import Button from '@/components/ui/Button'
+import BalanceList from '@/components/wallet/BalanceList'
+import ProfileHeader from '@/components/wallet/ProfileHeader'
+import ReceiveDrawer from '@/components/wallet/ReceiveDrawer'
 import { DISPLAY_DENOM } from '@/chains/secret4'
+import { useBalances } from '@/hooks/useBalances'
 import { usePermit } from '@/hooks/usePermit'
-import { formatAmount } from '@/lib/format'
-import { queryBalance, type BalanceOutcome } from '@/lib/snip20'
-import { SSCRT_ADDRESS, tokenByAddress } from '@/tokens/registry'
 import { useWallet } from '@/store/wallet'
 
-/**
- * The connected wallet.
- *
- * Phase 2 scope: prove the permit path end to end, by reading an sSCRT balance
- * with no viewing key and no transaction. Phase 3 builds this into the design's
- * full screen (profile photo, QR, the action row, every balance).
- */
+/** The connected wallet (Figma 34:594 and 36:181). */
 export default function Wallet() {
   const address = useWallet((state) => state.address)
-  const accountName = useWallet((state) => state.accountName)
-  const queryClient = useWallet((state) => state.queryClient)
-  const disconnect = useWallet((state) => state.disconnect)
-  const { permit, signing, error, sign } = usePermit()
-
-  const [balance, setBalance] = useState<BalanceOutcome | undefined>()
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    if (!permit || !queryClient) {
-      setBalance(undefined)
-      return
-    }
-
-    let cancelled = false
-    setLoading(true)
-    void queryBalance(queryClient, permit, SSCRT_ADDRESS)
-      .then((outcome) => {
-        if (!cancelled) setBalance(outcome)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [permit, queryClient])
+  const { permit, staleTokens, signing, error, sign } = usePermit()
+  const balances = useBalances(permit)
+  const [receiveOpen, setReceiveOpen] = useState(false)
 
   if (!address) return null
 
-  const sscrt = tokenByAddress(SSCRT_ADDRESS)
-
   return (
-    <section className="mx-auto flex max-w-[720px] flex-col gap-8">
-      <header>
-        <h1 className="text-3xl font-semibold">Hello 👋</h1>
-        <p className="break-address mt-1 text-base text-text-muted">{address}</p>
-        {accountName ? <p className="mt-1 text-base text-text-faint">{accountName}</p> : null}
-      </header>
+    <div className="mx-auto flex max-w-[1100px] flex-col gap-10">
+      <ProfileHeader
+        address={address}
+        native={balances.native}
+        nativeFiat={balances.nativeFiat}
+        loading={balances.loading}
+        onReceive={() => setReceiveOpen(true)}
+      />
 
-      <div className="rounded-card bg-surface-2 p-6">
-        {!permit ? (
-          <div className="flex flex-col items-start gap-4">
-            <div className="flex items-start gap-3">
-              <KeyRound size={20} aria-hidden className="mt-0.5 shrink-0 text-accent" />
-              <div>
-                <h2 className="text-lg font-medium">Sign a query permit</h2>
-                <p className="mt-1 text-base text-text-muted">
-                  Reading your own token balances needs your signature, not a transaction. Nothing is written
-                  to the chain and there is no fee.
-                </p>
-              </div>
-            </div>
-            <Button variant="primary" size="md" loading={signing} onClick={() => void sign()}>
-              Sign permit
-            </Button>
-            {error ? (
-              <p className="text-base text-negative" role="alert">
-                {error}
-              </p>
-            ) : null}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center gap-2 text-base text-text-muted">
-              <ShieldCheck size={18} aria-hidden className="text-positive" />
-              Permit signed, covering {permit.params.allowed_tokens.length} tokens
-            </div>
+      {balances.error ? (
+        <p className="rounded-card bg-surface-1 px-4 py-3 text-base text-text-muted" role="alert">
+          Your {DISPLAY_DENOM} balance could not be read: {balances.error}
+        </p>
+      ) : null}
 
-            <div className="flex items-center justify-between gap-4">
-              <span className="flex items-center gap-2.5">
-                {sscrt ? (
-                  <img src={`/img/tokens/${sscrt.image}`} alt="" className="size-8 rounded-pill" />
-                ) : null}
-                <span className="text-base font-medium">s{DISPLAY_DENOM}</span>
-              </span>
-              <BalanceReadout loading={loading} outcome={balance} decimals={sscrt?.decimals ?? 6} />
-            </div>
-          </div>
-        )}
-      </div>
+      {!permit ? <PermitPrompt signing={signing} error={error} onSign={() => void sign()} /> : null}
 
-      <div>
-        <Button variant="ghost" size="sm" onClick={disconnect}>
-          Disconnect
-        </Button>
-      </div>
-    </section>
+      {/*
+        A permit names the tokens it covers, so one signed before a token joined
+        the registry does not cover it. Saying so beats a row reading "could not
+        be read" for a reason nobody can act on.
+      */}
+      {permit && staleTokens.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-card bg-surface-1 px-4 py-3">
+          <p className="text-base text-text-muted">
+            {staleTokens.length} {staleTokens.length === 1 ? 'token is' : 'tokens are'} newer than your permit
+            and cannot be read yet.
+          </p>
+          <Button variant="soft" shape="control" size="sm" loading={signing} onClick={() => void sign()}>
+            Re-sign permit
+          </Button>
+        </div>
+      ) : null}
+
+      <BalanceList
+        tokens={balances.tokens}
+        loading={balances.loading}
+        scanning={balances.scanning}
+        scanProgress={balances.scanProgress}
+        onScanAll={balances.scanAll}
+      />
+
+      <ReceiveDrawer open={receiveOpen} onClose={() => setReceiveOpen(false)} address={address} />
+    </div>
   )
 }
 
-/**
- * Every outcome gets its own words. "0" and "could not read" look identical on
- * screen and only one of them is safe to act on, so they never share a state.
- */
-function BalanceReadout({
-  loading,
-  outcome,
-  decimals
-}: {
-  loading: boolean
-  outcome: BalanceOutcome | undefined
-  decimals: number
-}) {
-  if (loading) return <span className="h-6 w-24 animate-pulse rounded-control bg-surface" />
-  if (!outcome) return null
-
-  switch (outcome.status) {
-    case 'ok':
-      return <span className="text-lg font-medium">{formatAmount(outcome.amount, { decimals })}</span>
-    case 'not-covered':
-      return <span className="text-base text-text-muted">Not covered by this permit</span>
-    case 'unauthorized':
-      return <span className="text-base text-text-muted">The token rejected the permit</span>
-    case 'error':
-      return <span className="text-base text-text-muted">Could not read</span>
-  }
+function PermitPrompt({ signing, error, onSign }: { signing: boolean; error?: string; onSign: () => void }) {
+  return (
+    <div className="flex flex-col items-start gap-4 rounded-card bg-surface-2 p-6">
+      <div className="flex items-start gap-3">
+        <KeyRound size={20} aria-hidden className="mt-0.5 shrink-0 text-accent" />
+        <div>
+          <h2 className="text-lg font-medium">Sign a query permit</h2>
+          <p className="mt-1 max-w-[62ch] text-base text-text-muted">
+            Reading your own private balances needs your signature, not a transaction. Nothing is written to
+            the chain and there is no fee. Older dashboards made you pay for a viewing key first.
+          </p>
+        </div>
+      </div>
+      <Button variant="primary" loading={signing} onClick={onSign}>
+        Sign permit
+      </Button>
+      {error ? (
+        <p className="text-base text-negative" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  )
 }

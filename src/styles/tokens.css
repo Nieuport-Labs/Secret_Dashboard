@@ -75,7 +75,15 @@
    * control does not have to trade legibility for it.
    */
   --color-accent-strong: #de2e0d;
+  /* Nav active state. */
   --color-accent-soft: rgb(255 57 18 / 0.1);
+  /*
+   * Material's "secondary container": a tonal fill carrying accent-coloured
+   * text. The design uses it for the wallet action row and the Stake button.
+   * 20% over the background puts accent text at 4.76:1, which clears AA; going
+   * lighter would not.
+   */
+  --color-accent-container: rgb(255 57 18 / 0.2);
   /* Sits on the accent, so it is fixed — --color-text inverts and this must not
      follow it. */
   --color-accent-text: #ffffff;
@@ -129,6 +137,9 @@
   --color-accent: #c62a09;
   --color-accent-strong: #c62a09;
   --color-accent-soft: rgb(198 42 9 / 0.09);
+  /* Lower than the dark theme's 20%: on a light ground the container has to stay
+     pale for the accent text to keep its contrast. 8% measures 4.61:1. */
+  --color-accent-container: rgb(198 42 9 / 0.08);
 
   --color-positive: #128855;
   --color-negative: #cc2b2b;
