@@ -1,0 +1,47 @@
+{
+  "name": "secret-dashboard",
+  "description": "Secret Dashboard 1.9 — an entry point into Secret Network",
+  "version": "1.9.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write --ignore-unknown .",
+    "verify:chain": "node --experimental-strip-types --no-warnings scripts/verify-chain.ts"
+  },
+  "dependencies": {
+    "@solar-republic/neutrino": "^1.9.0",
+    "lucide-react": "^0.460.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.1.1",
+    "secretjs": "1.21.2",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^5.1.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "globals": "^17.12.0",
+    "postcss": "^8.4.49",
+    "prettier": "^3.4.2",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.2",
+    "vite": "^7.3.6",
+    "vite-tsconfig-paths": "^5.1.4"
+  },
+  "overrides": {
+    "protobufjs": "^7.5.4",
+    "elliptic": "^6.6.1"
+  }
+}
