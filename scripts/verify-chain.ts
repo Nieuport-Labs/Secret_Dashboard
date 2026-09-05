@@ -227,6 +227,40 @@ async function main(): Promise<void> {
     ]
   })
 
+  /* 3a — The transfer_history query shape the wallet screen sends. Same probe
+     technique: a wrong signature proves the contract parsed the query. */
+  await check('SNIP-24 transfer_history query shape', async () => {
+    const codeHash = await codeHashOf(client, SSCRT)
+    const bogusPermit = {
+      params: {
+        permit_name: 'verify-chain-probe',
+        allowed_tokens: [SSCRT],
+        chain_id: CHAIN_ID,
+        permissions: ['history']
+      },
+      signature: {
+        pub_key: { type: 'tendermint/PubKeySecp256k1', value: 'A'.repeat(44) },
+        signature: 'A'.repeat(86) + '=='
+      }
+    }
+
+    const reply = await client.query.compute
+      .queryContract({
+        contract_address: SSCRT,
+        code_hash: codeHash,
+        query: {
+          with_permit: { permit: bogusPermit, query: { transfer_history: { page: 0, page_size: 1 } } }
+        }
+      })
+      .then((r) => JSON.stringify(r))
+      .catch((error: unknown) => (error instanceof Error ? error.message : String(error)))
+
+    if (/unknown variant|missing field/i.test(reply)) {
+      return ['fail', `the contract does not accept this query shape: ${reply.slice(0, 200)}`]
+    }
+    return ['pass', `shape accepted; rejected on the signature as expected\n  ${reply.slice(0, 160)}`]
+  })
+
   /* 3b — The WebSocket SNIP-52 actually subscribes over, not just the HTTP RPC. */
   await check('Tendermint WebSocket reachable', async () => {
     const candidates = DEFAULT_RPC_URLS.map(

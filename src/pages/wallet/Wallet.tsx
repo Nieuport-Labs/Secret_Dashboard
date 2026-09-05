@@ -3,11 +3,13 @@ import { useState } from 'react'
 
 import Button from '@/components/ui/Button'
 import BalanceList from '@/components/wallet/BalanceList'
+import HistoryList from '@/components/wallet/HistoryList'
 import ProfileHeader from '@/components/wallet/ProfileHeader'
 import ReceiveDrawer from '@/components/wallet/ReceiveDrawer'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { useBalances } from '@/hooks/useBalances'
 import { usePermit } from '@/hooks/usePermit'
+import { useTransferHistory } from '@/hooks/useTransferHistory'
 import { useWallet } from '@/store/wallet'
 
 /** The connected wallet (Figma 34:594 and 36:181). */
@@ -15,6 +17,7 @@ export default function Wallet() {
   const address = useWallet((state) => state.address)
   const { permit, staleTokens, signing, error, sign } = usePermit()
   const balances = useBalances(permit)
+  const history = useTransferHistory(permit)
   const [receiveOpen, setReceiveOpen] = useState(false)
 
   if (!address) return null
@@ -60,6 +63,13 @@ export default function Wallet() {
         scanning={balances.scanning}
         scanProgress={balances.scanProgress}
         onScanAll={balances.scanAll}
+      />
+
+      <HistoryList
+        entries={history.entries}
+        loading={history.loading}
+        unreadable={history.unreadable}
+        hasPermit={Boolean(permit)}
       />
 
       <ReceiveDrawer open={receiveOpen} onClose={() => setReceiveOpen(false)} address={address} />

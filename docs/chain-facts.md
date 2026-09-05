@@ -4,7 +4,7 @@ What `scripts/verify-chain.ts` and manual source reading established against **s
 before any UI was written. Everything here is a fact the build depends on, so re-run
 `npm run verify:chain` when something behaves unexpectedly rather than assuming this is current.
 
-Verified **2026-09-06**. Result: 10 pass, 1 warn (deliberate), 0 fail.
+Verified **2026-09-06**. Result: 11 pass, 1 warn (deliberate), 0 fail.
 
 ---
 
@@ -89,6 +89,10 @@ unknown-variant error. Viewing keys can go.
 
 (A _null_ permit proves nothing here: it only shows malformed JSON was rejected. The probe has
 to reach signature verification to be evidence.)
+
+The same probe confirms the `transfer_history` query shape the wallet screen sends: wrapped in
+`with_permit` with `page` and `page_size`, it is parsed and rejected on the signature rather than
+as an unknown variant.
 
 ## Auto-restake
 
