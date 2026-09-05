@@ -6,7 +6,7 @@ import Avatar from '@/components/wallet/Avatar'
 import Button from '@/components/ui/Button'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { useProfileImage } from '@/hooks/useProfileImage'
-import { formatAmount, formatFiat } from '@/lib/format'
+import { formatAmount, formatFiat, shortenAddress } from '@/lib/format'
 import { useSettings } from '@/store/settings'
 
 interface Props {
@@ -61,7 +61,14 @@ export default function ProfileHeader({ address, native, nativeFiat, loading, on
               onClick={() => void copy()}
               className="state-layer -mx-1 mt-0.5 flex max-w-full items-center gap-1.5 rounded-control px-1 text-base font-semibold text-text-faint"
             >
-              <span className="break-address text-left">{address}</span>
+              {/*
+                A bech32 address is 45 characters and will not fit narrow
+                layouts. Breaking it anywhere leaves a line holding one letter,
+                so it is elided in the middle instead, and shown whole only
+                where the design's single line actually fits.
+              */}
+              <span className="whitespace-nowrap md:hidden">{shortenAddress(address, 12, 6)}</span>
+              <span className="hidden whitespace-nowrap md:inline">{address}</span>
               {copied ? (
                 <Check size={14} aria-hidden className="shrink-0 text-positive" />
               ) : (
