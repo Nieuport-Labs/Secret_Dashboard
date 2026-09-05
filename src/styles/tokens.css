@@ -37,28 +37,67 @@
     U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/*
+ * Structure borrows Material 3's model, since the design's own typeface is
+ * Google Sans Flex and it reads as Material-adjacent: tonal elevation rather
+ * than drop shadows, state layers rather than one-off hover colours, and
+ * Material's emphasised easing. The palette stays the Figma file's own.
+ *
+ * `@material/web` is deliberately not installed. Material components carry
+ * their own layout, shape and colour opinions, which would fight the design
+ * rather than serve it. What is borrowed here is the system, not the widgets.
+ */
+
 /* Dark is the design's own theme and the default. */
 :root {
   --font-sans: 'Google Sans Flex', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   --color-bg: #040404;
+  /* Tonal elevation: in a dark theme a raised surface gets lighter, it does not
+     cast a shadow. A shadow on near-black is invisible anyway. */
   --color-surface: rgb(255 255 255 / 0.1);
-  --color-surface-raised: #131313;
+  --color-surface-1: #0d0d0d;
+  --color-surface-2: #141414;
+  --color-surface-3: #1c1c1c;
   --color-border: rgb(255 255 255 / 0.1);
 
   --color-text: #ffffff;
   --color-text-muted: rgb(255 255 255 / 0.6);
   --color-text-faint: rgb(255 255 255 / 0.3);
 
+  /* Brand orange. 5.71:1 on the background, so it is safe as text and icons. */
   --color-accent: #ff3912;
-  --color-accent-hover: #ff5733;
+  /*
+   * The same orange as a *filled surface*, darkened until white on it clears
+   * WCAG AA for body text. #ff3912 with a white label measures 3.59:1, which
+   * passes only as large text, and the design's button label is 16px. This
+   * measures 4.66:1. Brand identity lives in --color-accent; this exists so a
+   * control does not have to trade legibility for it.
+   */
+  --color-accent-strong: #de2e0d;
   --color-accent-soft: rgb(255 57 18 / 0.1);
-  /* Text sitting on the accent. Fixed, because --color-text inverts and this
-     must not follow it. */
+  /* Sits on the accent, so it is fixed — --color-text inverts and this must not
+     follow it. */
   --color-accent-text: #ffffff;
 
   --color-positive: #21c17a;
   --color-negative: #ff4d4d;
+
+  /*
+   * State layers. Material's interaction model: a translucent wash of the
+   * foreground colour over the component, rather than a separate colour per
+   * state. One rule covers hover, focus and press on every surface.
+   */
+  --state-hover: 0.08;
+  --state-focus: 0.1;
+  --state-pressed: 0.12;
+
+  /* Material's emphasised easing — decelerates hard, which reads as physical. */
+  --ease-emphasised: cubic-bezier(0.2, 0, 0, 1);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --duration-short: 150ms;
+  --duration-medium: 250ms;
+  --duration-long: 400ms;
 
   --radius-card: 20px;
   --radius-control: 10px;
@@ -75,16 +114,21 @@
 :root.light {
   --color-bg: #f7f6f5;
   --color-surface: rgb(4 4 4 / 0.05);
-  --color-surface-raised: #ffffff;
-  --color-border: rgb(4 4 4 / 0.1);
+  /* Elevation inverts: on a light ground a raised surface gets lighter toward
+     white, and the page itself is the darkest tone. */
+  --color-surface-1: #fffefd;
+  --color-surface-2: #ffffff;
+  --color-surface-3: #ffffff;
+  --color-border: rgb(4 4 4 / 0.12);
 
   --color-text: #0a0a0a;
   --color-text-muted: rgb(10 10 10 / 0.62);
   --color-text-faint: rgb(10 10 10 / 0.38);
 
-  --color-accent: #e02f0c;
-  --color-accent-hover: #c72806;
-  --color-accent-soft: rgb(224 47 12 / 0.09);
+  /* Darkened so it clears AA against a light ground, as #ff3912 does not. */
+  --color-accent: #c62a09;
+  --color-accent-strong: #c62a09;
+  --color-accent-soft: rgb(198 42 9 / 0.09);
 
   --color-positive: #128855;
   --color-negative: #cc2b2b;

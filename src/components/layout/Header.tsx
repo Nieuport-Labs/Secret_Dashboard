@@ -11,7 +11,7 @@ export default function Header() {
     <div className="flex items-center justify-end gap-4 px-5 pt-6 lg:px-12">
       <button
         type="button"
-        className="flex items-center gap-1.5 rounded-control px-2 py-1 text-base text-text transition-colors hover:bg-surface"
+        className="state-layer flex items-center gap-1.5 rounded-control px-2 py-1 text-base text-text"
       >
         <Globe size={16} aria-hidden />
         English

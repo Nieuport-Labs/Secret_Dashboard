@@ -1,15 +1,48 @@
+import { useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import AppShell from '@/components/layout/AppShell'
+import { onAccountChange } from '@/lib/wallet'
 import Placeholder from '@/pages/Placeholder'
+import Wallet from '@/pages/wallet/Wallet'
 import Welcome from '@/pages/welcome/Welcome'
+import { applyTheme, useSettings } from '@/store/settings'
+import { handleAccountChange, lastUsedWallet, useWallet } from '@/store/wallet'
 
 export default function App() {
+  const theme = useSettings((state) => state.theme)
+  const status = useWallet((state) => state.status)
+  const connectWallet = useWallet((state) => state.connectWallet)
+  const initQueryClient = useWallet((state) => state.initQueryClient)
+
+  useEffect(() => applyTheme(theme), [theme])
+
+  // A read-only client, so prices, validators and chain stats work before
+  // anyone connects. Endpoint probing means this can fail; the pages that need
+  // it report that themselves rather than blocking the shell.
+  useEffect(() => {
+    void initQueryClient()
+  }, [initQueryClient])
+
+  // Reconnect silently to the wallet last used. The extension still asks for
+  // approval the first time per session, so this cannot connect behind the
+  // user's back.
+  useEffect(() => {
+    const previous = lastUsedWallet()
+    if (previous) void connectWallet(previous)
+  }, [connectWallet])
+
+  // Switching account or network in the wallet invalidates every address-keyed
+  // thing on screen at once.
+  useEffect(() => onAccountChange(handleAccountChange), [])
+
+  const connected = status === 'connected'
+
   return (
     <AppShell>
       <Routes>
         <Route path="/" element={<Navigate to="/wallet" replace />} />
-        <Route path="/wallet" element={<Welcome />} />
+        <Route path="/wallet" element={connected ? <Wallet /> : <Welcome />} />
         <Route
           path="/bridge"
           element={

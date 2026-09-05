@@ -19,14 +19,18 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  // The design's call-to-action: solid accent, white label in both themes.
-  primary: 'bg-accent text-[var(--color-accent-text)] hover:bg-accent-hover',
-  // "Continue with Keplr" — a translucent wash over the page, not a solid grey,
-  // so it works on any background.
-  secondary: 'bg-surface text-text hover:bg-[rgb(255_255_255/0.16)]',
+  /*
+   * The design's call to action. The surface is --color-accent-strong rather
+   * than --color-accent: the brand orange with a white label measures 3.59:1,
+   * which is not enough for a 16px label. See tokens.css.
+   */
+  primary: 'bg-accent-strong text-[var(--color-accent-text)]',
+  // "Continue with Keplr" — a translucent wash over the page rather than a
+  // solid grey, so it works on any background.
+  secondary: 'bg-surface text-text',
   // The wallet screen's Send / Receive / Wrap / Bridge row.
-  soft: 'bg-accent-soft text-accent hover:bg-[rgb(255_57_18/0.18)]',
-  ghost: 'bg-transparent text-text-muted hover:text-text hover:bg-surface'
+  soft: 'bg-accent-soft text-accent',
+  ghost: 'bg-transparent text-text-muted hover:text-text'
 }
 
 const SIZES: Record<ButtonSize, string> = {
@@ -54,12 +58,18 @@ export default function Button({
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={cn(
-        'inline-flex items-center rounded-pill font-medium transition-colors',
-        'disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex items-center rounded-pill font-medium',
+        'transition-[transform,background-color] duration-[var(--duration-short)] ease-[var(--ease-standard)]',
+        // A press should feel like it went in. Transform only, so it stays on
+        // the compositor.
+        'active:scale-[0.98]',
+        'disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100',
+        // Hover, focus and press come from one Material state layer; see index.css.
+        'state-layer',
         VARIANTS[variant],
         SIZES[size],
-        // The welcome screen's buttons space their icon, label and trailing slot
-        // apart rather than clustering them; that only reads right full-width.
+        // The welcome screen's buttons space icon, label and trailing slot apart
+        // rather than clustering them; that only reads right at full width.
         block ? 'w-full justify-between' : 'justify-center',
         className
       )}
@@ -67,7 +77,7 @@ export default function Button({
     >
       {loading ? <Spinner /> : icon}
       <span className={cn(block && 'flex-1 text-center')}>{children}</span>
-      {/* Keeps the label optically centred when only one side has an icon. */}
+      {/* Keeps the label optically centred when only one side carries an icon. */}
       {trailing ?? (block ? <span aria-hidden className="size-[30px]" /> : null)}
     </button>
   )
@@ -77,7 +87,7 @@ function Spinner() {
   return (
     <span
       aria-hidden
-      className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+      className="size-4 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
     />
   )
 }

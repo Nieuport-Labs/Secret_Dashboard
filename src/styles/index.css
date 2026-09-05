@@ -34,6 +34,51 @@
   }
 }
 
+@layer components {
+  /*
+   * Material's state layer: a translucent wash of the element's own foreground
+   * colour, at one opacity per interaction state. `background: currentColor`
+   * makes it correct on every variant without a per-variant hover colour —
+   * white over a filled button, orange over a soft one.
+   *
+   * Applied through a pseudo-element behind the content, so it tints the whole
+   * control including its padding without touching the label's own opacity.
+   */
+  .state-layer {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+  }
+
+  .state-layer::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: currentColor;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-short) var(--ease-standard);
+  }
+
+  .state-layer:hover::before {
+    opacity: var(--state-hover);
+  }
+
+  .state-layer:focus-visible::before {
+    opacity: var(--state-focus);
+  }
+
+  .state-layer:active::before {
+    opacity: var(--state-pressed);
+  }
+
+  .state-layer:disabled::before,
+  .state-layer[aria-disabled='true']::before {
+    opacity: 0;
+  }
+}
+
 @layer utilities {
   /* Long, unbreakable strings — bech32 addresses, tx hashes, code hashes —
      appear all over this app and will otherwise blow out any container. */

@@ -22,7 +22,7 @@ export default function Sidebar() {
     >
       <NavLink
         to="/wallet"
-        className="hidden items-start gap-2.5 lg:flex"
+        className="hidden items-start gap-2.5 rounded-control lg:flex"
         aria-label="Secret Dashboard, version 1.9"
       >
         <img src="/img/logo-mark.svg" alt="" className="h-[50px] w-[48px] shrink-0" />
@@ -43,11 +43,12 @@ export default function Sidebar() {
               to={to}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-2.5 rounded-control transition-colors',
+                  'state-layer flex items-center gap-2.5 rounded-control',
+                  'transition-colors duration-[var(--duration-short)] ease-[var(--ease-standard)]',
                   'flex-col px-1 py-2 text-[11px] lg:flex-row lg:px-[15px] lg:py-2.5 lg:text-xl',
                   isActive
                     ? 'bg-accent-soft font-medium text-accent'
-                    : 'font-medium text-text-muted hover:bg-surface hover:text-text'
+                    : 'font-medium text-text-muted hover:text-text'
                 )
               }
             >

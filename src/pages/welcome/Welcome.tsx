@@ -1,6 +1,9 @@
+import { ExternalLink } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
+import { WALLETS, type WalletId } from '@/lib/wallet'
+import { useWallet } from '@/store/wallet'
 
 /**
  * The unconnected state (Figma 30:386). Wallet choice on the left, a sentence
@@ -12,6 +15,13 @@ import Button from '@/components/ui/Button'
  */
 export default function Welcome() {
   const navigate = useNavigate()
+  const status = useWallet((state) => state.status)
+  const walletId = useWallet((state) => state.walletId)
+  const error = useWallet((state) => state.error)
+  const notInstalled = useWallet((state) => state.notInstalled)
+  const connectWallet = useWallet((state) => state.connectWallet)
+
+  const connecting = status === 'connecting'
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
@@ -25,23 +35,40 @@ export default function Welcome() {
           </div>
 
           <div className="flex flex-col gap-[15px]">
-            <Button
-              variant="secondary"
-              size="lg"
-              block
-              icon={<img src="/img/wallet-keplr.png" alt="" className="size-[30px] rounded-pill" />}
-            >
-              Continue with Keplr
-            </Button>
-            <Button
-              variant="secondary"
-              size="lg"
-              block
-              icon={<img src="/img/wallet-starshell.png" alt="" className="size-[30px] rounded-pill" />}
-            >
-              Continue with Starshell
-            </Button>
+            {(['keplr', 'starshell'] as WalletId[]).map((id) => (
+              <Button
+                key={id}
+                variant="secondary"
+                size="lg"
+                block
+                loading={connecting && walletId === id}
+                disabled={connecting}
+                onClick={() => void connectWallet(id)}
+                icon={<img src={WALLETS[id].icon} alt="" className="size-[30px] rounded-pill" />}
+              >
+                Continue with {WALLETS[id].name}
+              </Button>
+            ))}
           </div>
+
+          {/* A missing extension is not an error to apologise for, it is a next
+              step, so it gets a link rather than a red message. */}
+          {status === 'error' && error ? (
+            <p className="text-base text-text-muted" role="status">
+              {error}{' '}
+              {notInstalled && walletId ? (
+                <a
+                  className="inline-flex items-center gap-1 text-accent underline underline-offset-4"
+                  href={WALLETS[walletId].installUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  Install {WALLETS[walletId].name}
+                  <ExternalLink size={14} aria-hidden />
+                </a>
+              ) : null}
+            </p>
+          ) : null}
 
           <div className="flex items-center gap-2.5">
             <span className="h-px flex-1 bg-border" />
