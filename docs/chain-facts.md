@@ -246,6 +246,35 @@ a memo carrying both `ibc_callback` and `wasm` cannot be settled without sending
 Landing native SCRT avoids the question entirely — no `wasm` key, no hook, nothing to misparse —
 so that is the default.
 
+### Getting there: each source chain needs its own channel to Osmosis
+
+The gas leg's `MsgTransfer` has to reach _Osmosis_, not Secret — its receiver is the
+`osmo1…` swap contract above, and only Osmosis can credit that address. Depositing directly
+from Osmosis needs no extra hop. Depositing from anywhere else does, and that hop travels
+over a channel this chain has to Osmosis specifically — which is **not** the same channel
+the main leg uses to reach Secret.
+
+**Found the hard way:** a live deposit of 4 USDC from Noble with both Wrap and Get gas
+checked wrapped correctly but delivered no gas. Before this was caught, the code sent the
+gas leg over `chain.depositChannel` for every chain but Osmosis — Noble's ordinary route to
+_Secret_. Secret cannot credit an `osmo1` receiver, so that packet failed while the
+unrelated wrap packet, sent separately, succeeded on its own. Nothing in the UI or the
+broadcast result said so: `sendDeposit` only reports whether the source chain accepted the
+messages for relay, not what happened to either packet afterward.
+
+Each source chain now needs a verified `osmosisChannel` before "Get gas" is offered from it
+at all — see `SourceChain.osmosisChannel` in `chains/sources.ts`. Verified so far:
+
+| Chain | Channel   | Checked                                                                                                |
+| ----- | --------- | ------------------------------------------------------------------------------------------------------ |
+| Noble | channel-1 | Noble's own LCD: `STATE_OPEN`, counterparty `channel-750`, `connection-2`'s client reports `osmosis-1` |
+
+Every other chain is deliberately left unrouted rather than filled in from the chain-registry's
+`preferred` flag alone — the registry has been wrong about which chain an entry actually serves
+before (see Bridge channels, below), and a wrong channel here does not error, it just quietly
+fails to deliver gas the same way this one did. Adding a chain means querying that chain's own
+LCD the way Noble's was, not copying the registry number.
+
 ## Bridge channels
 
 All **37** of Secret's outgoing transfer channels are `STATE_OPEN` and their light clients report

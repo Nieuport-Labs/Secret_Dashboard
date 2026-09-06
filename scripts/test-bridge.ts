@@ -12,7 +12,13 @@
 import { quoteGasSlice, shouldOfferGas, buildGasLeg, fittingGasSliceUsd } from '../src/lib/getGas.ts'
 import { gasCreditMemo, wrapDepositMemo, osmosisSwapToSecretMemo } from '../src/lib/ibcMemo.ts'
 import { GAS_VAULT_ADDRESS, IBC_HOOKS_WRAPPER } from '../src/chains/secret4.ts'
-import { CROSSCHAIN_SWAPS_CONTRACT, SCRT_ON_OSMOSIS } from '../src/chains/osmosis.ts'
+import {
+  CROSSCHAIN_SWAPS_CONTRACT,
+  SCRT_ON_OSMOSIS,
+  canRouteToOsmosis,
+  osmosisRouteChannel
+} from '../src/chains/osmosis.ts'
+import { SOURCE_CHAINS } from '../src/chains/sources.ts'
 
 let passed = 0
 let failed = 0
@@ -226,6 +232,52 @@ check(
 check(
   'credit delivery nests the hook in next_memo, the slot that reaches Secret',
   creditsInner.wasm.msg.osmosis_swap.next_memo.wasm.contract === GAS_VAULT_ADDRESS
+)
+
+/* -------------------------------------------------------------------------- */
+/* Routing the gas leg to Osmosis, not to Secret                              */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * Regression: a live deposit of 4 USDC from Noble with both Wrap and Get gas
+ * checked wrapped correctly but never delivered gas. The gas leg's receiver is
+ * an `osmo1…` swap contract, and the code sent that packet over whatever
+ * channel a chain other than Osmosis itself happened to have on hand — which,
+ * before `osmosisChannel` existed as a field, was `chain.depositChannel`: the
+ * ordinary route to *Secret*. Secret cannot credit an `osmo1` receiver, so the
+ * packet failed while the unrelated wrap packet, sent separately, succeeded on
+ * its own. These assertions pin both halves of the fix: a chain without a
+ * verified route must not be treated as routable, and a chain that has one
+ * must route over *that* channel rather than its deposit channel to Secret.
+ */
+
+const noble = SOURCE_CHAINS.find((c) => c.chainId === 'noble-1')
+const osmosisChain = SOURCE_CHAINS.find((c) => c.chainId === 'osmosis-1')
+const akash = SOURCE_CHAINS.find((c) => c.chainId === 'akashnet-2')
+if (!noble || !osmosisChain || !akash) {
+  throw new Error('fixture chains missing from SOURCE_CHAINS — check chain ids')
+}
+
+check('Osmosis itself is always routable', canRouteToOsmosis(osmosisChain))
+check('Noble is routable — it carries a verified osmosisChannel', canRouteToOsmosis(noble))
+check(
+  'a chain with no verified osmosisChannel is not routable',
+  canRouteToOsmosis(akash) === false,
+  akash.osmosisChannel
+)
+
+check(
+  "Noble's gas leg travels its own channel to Osmosis, not its deposit channel to Secret",
+  osmosisRouteChannel(noble, 'channel-17' /* Noble's depositChannel, for contrast */) === 'channel-1' &&
+    osmosisRouteChannel(noble) !== noble.depositChannel
+)
+check(
+  'depositing directly from Osmosis needs no hop — it uses the deposit route channel',
+  osmosisRouteChannel(osmosisChain, 'channel-750') === 'channel-750'
+)
+check(
+  'an unrouted chain resolves to no channel at all, rather than a guess',
+  osmosisRouteChannel(akash) === undefined
 )
 
 /* -------------------------------------------------------------------------- */

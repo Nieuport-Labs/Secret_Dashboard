@@ -16,6 +16,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import AmountField from '@/components/ui/AmountField'
 import Picker from '@/components/ui/Picker'
 import { DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
+import { canRouteToOsmosis, osmosisRouteChannel } from '@/chains/osmosis'
 import { SOURCE_CHAINS, chainImageUrl, type SourceChain } from '@/chains/sources'
 import { depositGasLimit, sendDeposit, sendWithdraw, type Leg } from '@/lib/bridge'
 import { queryAllBalances } from '@/lib/bank'
@@ -182,7 +183,17 @@ export default function Bridge() {
    */
   const walletEmpty = depositing && BigInt(balances.native ?? '0') === 0n
   const gasUrgent = gasOffer.offer && gasOffer.urgent
-  const canGetGas = gasOffer.offer && Boolean(source.osmosisAddress)
+  /*
+   * Routable, separate from "the wallet is ready" — a chain either has a
+   * verified channel to Osmosis or it doesn't, and that has nothing to do with
+   * whether an Osmosis account was found. Folding both into one boolean is
+   * what let a Noble deposit tick the box, sign, and send the gas leg's
+   * `osmo1…`-addressed packet over Noble's ordinary channel to *Secret* —
+   * which can't credit an Osmosis address, so the packet fails and no gas
+   * arrives, while the unrelated wrap leg sails through as its own packet.
+   */
+  const routable = Boolean(chain) && canRouteToOsmosis(chain!)
+  const canGetGas = gasOffer.offer && routable && Boolean(source.osmosisAddress)
 
   // An empty wallet is not a suggestion. The box starts ticked and the panel it
   // lives in starts open — hiding a precondition behind a disclosure is how
@@ -226,12 +237,15 @@ export default function Bridge() {
             : plainTransfer(secretAddress)
         })
 
-        if (useGas && source.osmosisAddress) {
+        const osmosisChannel = osmosisRouteChannel(chain, route.channel)
+        if (useGas && source.osmosisAddress && osmosisChannel) {
           legs.push({
             denom: route.denom,
             amount: gasOffer.quote.costBaseUnits,
-            // Through Osmosis, not straight to Secret: that is where the swap is.
-            channel: chain.chainId === 'osmosis-1' ? route.channel : undefined,
+            // To Osmosis, not to Secret: that is where the swap contract is,
+            // and the receiver this leg carries is an osmo1 address that only
+            // Osmosis itself can credit.
+            channel: osmosisChannel,
             transfer: buildGasLeg({
               secretAddress,
               osmosisAddress: source.osmosisAddress,
@@ -435,7 +449,9 @@ export default function Bridge() {
                       </button>
                       {!canGetGas ? (
                         <span className="mt-1 block text-text-faint">
-                          Needs an Osmosis account in your wallet, for recovering the swap if it fails.
+                          {routable
+                            ? 'Needs an Osmosis account in your wallet, for recovering the swap if it fails.'
+                            : `Not available from ${chain?.name ?? 'this chain'} yet — only a few chains have a verified route to Osmosis so far.`}
                         </span>
                       ) : null}
                     </>

@@ -11,6 +11,8 @@
  * docs/chain-facts.md.
  */
 
+import type { SourceChain } from '@/chains/sources'
+
 export const OSMOSIS_CHAIN_ID = 'osmosis-1'
 export const OSMOSIS_BECH32_PREFIX = 'osmo'
 
@@ -46,3 +48,25 @@ export const GAS_SLICE_MIN_RATIO = 5
 
 /** Native SCRT below which the dashboard offers to get the user some gas. */
 export const LOW_BALANCE_THRESHOLD_SCRT = 1
+
+/**
+ * The channel a deposit's gas leg should travel over to reach Osmosis, or
+ * `undefined` when this chain has no verified one.
+ *
+ * Depositing directly from Osmosis needs no hop at all — the swap contract is
+ * already on the chain the packet starts on, so this returns the *deposit*
+ * route's own channel to Secret's `depositRoute`, same as the main leg.
+ * Everywhere else it is `chain.osmosisChannel`, which only a handful of chains
+ * carry: see the comment on that field for why an absent value disables the
+ * feature rather than guessing `depositChannel`, which goes to Secret, not to
+ * Osmosis, and sends the gas leg's `osmo1…`-addressed packet nowhere useful.
+ */
+export function osmosisRouteChannel(chain: SourceChain, depositChannel?: string): string | undefined {
+  if (chain.chainId === OSMOSIS_CHAIN_ID) return depositChannel ?? chain.depositChannel
+  return chain.osmosisChannel
+}
+
+/** Whether "Get gas" can even be attempted from this chain, channel-wise. */
+export function canRouteToOsmosis(chain: SourceChain): boolean {
+  return chain.chainId === OSMOSIS_CHAIN_ID || Boolean(chain.osmosisChannel)
+}
