@@ -20,7 +20,7 @@ import { SOURCE_CHAINS, chainImageUrl, type SourceChain } from '@/chains/sources
 import { depositGasLimit, sendDeposit, sendWithdraw, type Leg } from '@/lib/bridge'
 import { queryAllBalances } from '@/lib/bank'
 import { codeHashFor } from '@/lib/codeHash'
-import { buildGasLeg, quoteGasSlice, shouldOfferGas } from '@/lib/getGas'
+import { buildGasLeg, fittingGasSliceUsd, quoteGasSlice, shouldOfferGas } from '@/lib/getGas'
 import { toBaseUnits } from '@/lib/format'
 import { plainTransfer, wrapDepositMemo } from '@/lib/ibcMemo'
 import { MSG_TRANSFER } from '@/lib/msgTypes'
@@ -170,7 +170,17 @@ export default function Bridge() {
 
   const gasOffer = depositing
     ? shouldOfferGas(balances.native, quote, amountBaseUnits)
-    : ({ offer: false } as const)
+    : ({ offer: false, reason: 'has-enough' } as const)
+  /*
+   * "Urgent" used to live entirely inside `gasOffer.urgent`, which is only set
+   * when an offer is actually made. That made a wallet holding exactly zero
+   * SCRT look identical to one holding plenty whenever the offer was blocked
+   * for some other reason — amount-too-small chief among them, since a small
+   * bridge is exactly what an empty wallet's first transfer tends to be. Read
+   * the balance directly instead, so the panel can tell a genuinely empty
+   * wallet from one that merely can't be offered a slice right now.
+   */
+  const walletEmpty = depositing && BigInt(balances.native ?? '0') === 0n
   const gasUrgent = gasOffer.offer && gasOffer.urgent
   const canGetGas = gasOffer.offer && Boolean(source.osmosisAddress)
 
@@ -397,8 +407,14 @@ export default function Bridge() {
                   checked={getGas && canGetGas}
                   disabled={!canGetGas}
                   onChange={setGetGas}
-                  highlight={gasUrgent}
-                  icon={<Fuel size={16} aria-hidden className={gasUrgent ? 'text-accent' : undefined} />}
+                  highlight={gasUrgent || (walletEmpty && !gasOffer.offer)}
+                  icon={
+                    <Fuel
+                      size={16}
+                      aria-hidden
+                      className={gasUrgent || walletEmpty ? 'text-accent' : undefined}
+                    />
+                  }
                   title={gasUrgent ? 'Get gas (recommended)' : 'Get gas'}
                 >
                   {gasOffer.offer ? (
@@ -423,10 +439,54 @@ export default function Bridge() {
                         </span>
                       ) : null}
                     </>
+                  ) : gasOffer.reason === 'amount-too-small' ? (
+                    /*
+                     * This is the case a genuinely empty wallet hits most
+                     * often: their first transfer in is small, by definition,
+                     * and the slice would have to eat an unreasonable share of
+                     * it. The old copy here said "you are not [short of gas]"
+                     * unconditionally — flatly false for exactly the person who
+                     * most needs to see this row make sense. "Take less" is
+                     * offered directly against a shrunk quote rather than the
+                     * settings value alone, so the amount actually shown is one
+                     * that would pass the ratio check, not just a smaller
+                     * number that might still fail it.
+                     */
+                    <>
+                      {walletEmpty
+                        ? `You hold no ${DISPLAY_DENOM}, but this transfer is too small to safely take gas from — `
+                        : 'This transfer is too small to safely take gas from — '}
+                      taking ${settings.gasSliceUsd.toFixed(2)} would be a large share of it.{' '}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          settings.set(
+                            'gasSliceUsd',
+                            fittingGasSliceUsd(
+                              settings.gasSliceUsd,
+                              prices.get('secret'),
+                              token?.coingeckoId ? prices.get(token.coingeckoId) : undefined,
+                              decimals,
+                              amountBaseUnits
+                            )
+                          )
+                        }
+                        className="underline underline-offset-4"
+                      >
+                        Take less
+                      </button>
+                    </>
+                  ) : gasOffer.reason === 'no-price' ? (
+                    <>
+                      {walletEmpty ? `You hold no ${DISPLAY_DENOM}. ` : ''}
+                      Pricing for this token or for SCRT is unavailable right now, so the slice can&rsquo;t be
+                      sized safely.
+                    </>
                   ) : (
                     <>
-                      Swaps about a dollar of this transfer into {DISPLAY_DENOM} on the way, so you can pay
-                      for transactions once it lands. Offered when you are short of gas — you are not.
+                      Swaps about ${settings.gasSliceUsd.toFixed(2)} of this transfer into {DISPLAY_DENOM} on
+                      the way, so you can pay for transactions once it lands. Offered when you are short of
+                      gas — you are not.
                     </>
                   )}
                 </Option>

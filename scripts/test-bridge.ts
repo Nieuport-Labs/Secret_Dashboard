@@ -9,7 +9,7 @@
  *   npm run test:bridge
  */
 
-import { quoteGasSlice, shouldOfferGas, buildGasLeg } from '../src/lib/getGas.ts'
+import { quoteGasSlice, shouldOfferGas, buildGasLeg, fittingGasSliceUsd } from '../src/lib/getGas.ts'
 import { gasCreditMemo, wrapDepositMemo, osmosisSwapToSecretMemo } from '../src/lib/ibcMemo.ts'
 import { GAS_VAULT_ADDRESS, IBC_HOOKS_WRAPPER } from '../src/chains/secret4.ts'
 import { CROSSCHAIN_SWAPS_CONTRACT, SCRT_ON_OSMOSIS } from '../src/chains/osmosis.ts'
@@ -119,6 +119,41 @@ check('allowed at exactly the five-times floor', justEnough.offer === true)
 
 const priceless = shouldOfferGas('0', undefined, '100000000')
 check('no price means no offer', priceless.offer === false && priceless.reason === 'no-price')
+
+/*
+ * Regression: a wallet with 2 AKT (~$1.13 at the prices this was reported
+ * with) and no SCRT saw "Get gas" greyed out with copy that flatly claimed it
+ * was "not" short of gas. The ratio guard above was correct to refuse the
+ * slice — taking $1 out of $1.13 is not a service — but the panel had no way
+ * to say why, or to offer a size that would actually work. `fittingGasSliceUsd`
+ * is what "Take less" now calls instead of a blind divide-by-four.
+ */
+const smallTransfer = shouldOfferGas('0', quote, '113000') // 0.113 token ≈ $1.13
+check(
+  'reproduces the reported amount-too-small case',
+  smallTransfer.offer === false && smallTransfer.reason === 'amount-too-small',
+  smallTransfer
+)
+
+const fitted = fittingGasSliceUsd(1, 0.25, 10, 6, '113000')
+const refitted = quoteGasSlice({
+  targetUsd: fitted,
+  scrtPrice: 0.25,
+  tokenPrice: 10,
+  tokenDecimals: 6,
+  bridgeAmountBaseUnits: '113000'
+})
+check(
+  'the fitted target actually clears the ratio check it was refused on',
+  shouldOfferGas('0', refitted, '113000').offer === true,
+  { fitted, refitted }
+)
+
+// A transfer worth less than the floor slice has no fitting size to find.
+// The function must still return something usable rather than looping forever
+// or producing NaN.
+const hopeless = fittingGasSliceUsd(1, 0.25, 10, 6, '100')
+check('gives up at the floor rather than hanging', hopeless === 0.02, hopeless)
 
 /* -------------------------------------------------------------------------- */
 /* Memo shapes                                                                 */

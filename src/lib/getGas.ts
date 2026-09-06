@@ -136,6 +136,45 @@ export function shouldOfferGas(
   return { offer: true, urgent: balance === 0n, quote }
 }
 
+/**
+ * The largest slice size, at or below `currentTargetUsd`, that would actually
+ * clear the minimum-ratio check for this transfer.
+ *
+ * Halves the target until `shouldOfferGas` would accept it, rather than
+ * solving the ratio algebraically: the check runs on amounts that have already
+ * been through `toBaseUnits`' rounding, and re-deriving a target through that
+ * same rounding in reverse is more code than just asking the real function.
+ * Balance is passed as zero on purpose — this answers "would the ratio pass",
+ * not "does this wallet also have enough SCRT already", which is a separate
+ * question the caller has already answered by getting here at all.
+ */
+export function fittingGasSliceUsd(
+  currentTargetUsd: number,
+  scrtPrice: number | undefined,
+  tokenPrice: number | undefined,
+  tokenDecimals: number,
+  bridgeAmountBaseUnits: string
+): number {
+  let target = currentTargetUsd
+  for (let i = 0; i < 12 && target > 0.02; i++) {
+    target /= 2
+    const quote = quoteGasSlice({
+      targetUsd: target,
+      scrtPrice,
+      tokenPrice,
+      tokenDecimals,
+      bridgeAmountBaseUnits
+    })
+    if (shouldOfferGas('0', quote, bridgeAmountBaseUnits).offer) {
+      return Math.round(target * 100) / 100
+    }
+  }
+  // Nothing found down to the floor — the transfer is too small for any slice
+  // worth taking. Return the floor itself; the caller still shows "too small"
+  // afterward; the button just stops help offering a number that cannot work.
+  return 0.02
+}
+
 export interface GasLegOptions {
   /** The user's Secret address. */
   secretAddress: string
