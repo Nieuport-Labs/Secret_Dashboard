@@ -14,6 +14,7 @@ import { gasCreditMemo, wrapDepositMemo, osmosisSwapToSecretMemo } from '../src/
 import { GAS_VAULT_ADDRESS, IBC_HOOKS_WRAPPER } from '../src/chains/secret4.ts'
 import {
   CROSSCHAIN_SWAPS_CONTRACT,
+  OSMOSIS_TO_SECRET_CHANNEL,
   SCRT_ON_OSMOSIS,
   canRouteToOsmosis,
   osmosisRouteChannel
@@ -218,16 +219,28 @@ const native = buildGasLeg({ secretAddress: USER, osmosisAddress: OSMO, delivery
 const nativeInner = JSON.parse(native.memo) as {
   wasm: { msg: { osmosis_swap: { receiver: string; next_memo: unknown } } }
 }
-check('native delivery sends SCRT to the user', nativeInner.wasm.msg.osmosis_swap.receiver === USER)
+check(
+  'native delivery sends SCRT to the user, addressed explicitly by channel',
+  nativeInner.wasm.msg.osmosis_swap.receiver === `ibc:${OSMOSIS_TO_SECRET_CHANNEL}/${USER}`
+)
 check('native delivery runs no hook on Secret', nativeInner.wasm.msg.osmosis_swap.next_memo === null)
 
 const credits = buildGasLeg({ secretAddress: USER, osmosisAddress: OSMO, delivery: 'credits' })
 const creditsInner = JSON.parse(credits.memo) as {
   wasm: { msg: { osmosis_swap: { receiver: string; next_memo: { wasm: { contract: string } } } } }
 }
+/*
+ * Regression: a live send with a bare `secret1…` receiver here failed with
+ * "invalid receiver". The deployed crosschain-swaps contract (v0.1.0, read
+ * from its own on-chain state — see docs/chain-facts.md) resolves a bare
+ * address through an internal CHANNEL_MAP keyed by bech32 prefix, and that
+ * map was never given an entry for `secret`. `ibc:channel-<n>/<addr>` is the
+ * contract's *other* receiver format, which the same source shows bypasses
+ * that map entirely and is used as given.
+ */
 check(
-  'credit delivery addresses the vault, not the user',
-  creditsInner.wasm.msg.osmosis_swap.receiver === GAS_VAULT_ADDRESS
+  'the receiver is explicit — channel-88, not a bare address the deployed contract cannot resolve',
+  creditsInner.wasm.msg.osmosis_swap.receiver === `ibc:${OSMOSIS_TO_SECRET_CHANNEL}/${GAS_VAULT_ADDRESS}`
 )
 check(
   'credit delivery nests the hook in next_memo, the slot that reaches Secret',

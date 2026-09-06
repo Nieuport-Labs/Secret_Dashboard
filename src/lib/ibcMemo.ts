@@ -117,6 +117,27 @@ export interface SwapToSecretOptions {
  * `on_failed_delivery` is always a recovery address, never `do_nothing`. With
  * `do_nothing` the contract does not track the packet at all, and a failed
  * delivery leaves the funds unreachable.
+ *
+ * The receiver is `ibc:channel-88/secret1…`, not a bare `secret1…` address —
+ * this is the one field this whole feature turned out to hinge on. The
+ * deployed contract (v0.1.0, predating Osmosis's registry-contract migration
+ * of March 2023) resolves a bare address by looking its bech32 prefix up in
+ * its own on-chain `CHANNEL_MAP`, populated only for the handful of chains
+ * whose governance proposal added them — `akash`, `axelar`, `cosmos`,
+ * `evmos`, `juno`, `stars`, `stride`, read directly from the contract's state
+ * at `osmo1uwk8x…qxwvxs`. `secret` was never one of them, and nothing this
+ * app does can add it — that map is governor-only. A live packet failed with
+ * `invalid receiver: secret1…` for exactly this reason: the swap succeeded,
+ * the forward never had anywhere to go, and the whole transfer bounced back
+ * to the sender by ordinary IBC ack-failure semantics.
+ *
+ * The contract's *other* receiver format sidesteps the map entirely:
+ * `ibc:channel-<n>/<addr>` is taken as an explicit instruction and used as
+ * given, with no lookup and no prefix check. Read out of the same source this
+ * deployed version runs, not the current `main` branch, which had already
+ * replaced this whole mechanism with the registry contract by the time it was
+ * first read for this project — the two do not agree, and only the deployed
+ * one's behaviour is real. See docs/chain-facts.md.
  */
 export function osmosisSwapToSecretMemo({
   secretReceiver,
@@ -134,7 +155,7 @@ export function osmosisSwapToSecretMemo({
         msg: {
           osmosis_swap: {
             output_denom: SCRT_ON_OSMOSIS,
-            receiver: secretReceiver,
+            receiver: `ibc:${OSMOSIS_TO_SECRET_CHANNEL}/${secretReceiver}`,
             slippage: {
               twap: { slippage_percentage: String(slippagePercent), window_seconds: 10 }
             } satisfies Slippage,

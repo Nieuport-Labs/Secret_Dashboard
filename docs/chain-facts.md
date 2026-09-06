@@ -223,28 +223,66 @@ The address widely quoted online for XCS
 mainnet** — the LCD returns `no such contract`. Resolve deployed addresses by querying, never
 from prose.
 
-**Settled in phase 6.** Despite the `v1.2` label, this deployment matches the current source. A
-malformed query returns `Error parsing into type crosschain_swaps::msg::QueryMsg: unknown variant
-..., expected 'recoverable'` — and `Recoverable { addr }` is the only variant in today's `msg.rs`.
-So `ExecuteMsg::OsmosisSwap` carries `next_memo`, `final_memo`, `on_failed_delivery` and `route`.
+**"Settled in phase 6" turned out to be wrong, and here is the correction.** The malformed-query
+trick (`Error parsing into type crosschain_swaps::msg::QueryMsg: unknown variant ..., expected
+'recoverable'`) only proves the deployed contract's `QueryMsg` enum has one variant named
+`recoverable` — which is true of every version of this contract, old and new, since that variant
+was never renamed. It says nothing about `ExecuteMsg`, and the conclusion drawn from it — "this
+deployment matches the current source" — did not hold. Read the actual deployed bytecode's own
+state instead of trusting that inference:
 
-Two things that decide whether the gas leg works at all, both read out of the source rather than
-guessed:
+```
+$ curl .../cosmwasm/wasm/v1/contract/osmo1uwk8x…qxwvxs/state
+contract_info  {"contract":"crates.io:crosschain-swaps","version":"0.1.0"}
+config         {"governor":"osmo1tfu4j…","swap_contract":"osmo1fy547…"}   — no registry_contract
+chain_mapakash    "channel-1"      chain_mapjuno     "channel-42"
+chain_mapaxelar   "channel-208"    chain_mapstars    "channel-75"
+chain_mapcosmos   "channel-0"      chain_mapstride   "channel-326"
+chain_mapevmos    "channel-204"
+```
 
-1. **`next_memo` is the slot that reaches Secret, not `final_memo`.** The contract calls
-   `registry.unwrap_coin_into(..., first_transfer_memo, last_transfer_memo, ...)` with `next_memo`
-   as the _first_. SCRT on Osmosis is `transfer/channel-88/uscrt`, so returning it to Secret is a
-   one-hop unwind: there is only one transfer, and its memo is the first one. Putting the hook in
-   `final_memo` would attach it to a packet that is never sent.
-2. **The receiver is prefix-checked.** `unwrap_coin_into` rejects a receiver whose bech32 prefix
-   does not match the destination chain, so the field must hold a real `secret1…` address — which
-   suits the vault, since Secret's own hook requires receiver and hooked contract to be equal.
+**Version 0.1.0 predates Osmosis's March 2023 registry-contract migration**
+(`osmosis-labs/osmosis` commit `1d76f4f39d`, "XCS + Registries integration"). It has no
+`registry_contract` field at all — routing is these `chain_map<prefix>` entries, hand-populated by
+governor-only management messages, one governance action per chain. **`secret` was never added.**
+A bare `secret1…` receiver goes through `validate_simplified_receiver`
+(`checks.rs` at the pre-migration commit `a9725d6`), decodes the bech32 prefix, and does
+`CHANNEL_MAP.load(storage, "secret")` — which fails, because the key does not exist. The error is
+`invalid receiver: secret1…`, and it is unconditional: no channel this app supplies, no memo
+shape, nothing on our side changes it. This is not fixable by adjusting anything this dashboard
+sends — only the contract's governor can add an entry, and no proposal to add Secret has been
+found.
 
-**Still unverified, and the reason gas credits are opt-in:** the contract merges its own
-`ibc_callback` key into that same memo so it can track the send. How Secret's `x/ibc-hooks` treats
-a memo carrying both `ibc_callback` and `wasm` cannot be settled without sending a real packet.
-Landing native SCRT avoids the question entirely — no `wasm` key, no hook, nothing to misparse —
-so that is the default.
+**What actually works, from the same source:** the contract accepts a second receiver format,
+`ibc:channel-<n>/<addr>`, handled by `validate_explicit_receiver` — no map lookup, no prefix
+check, the channel is used exactly as given. `execute.rs` confirms the string carries straight
+through to the outbound `MsgTransfer`'s `source_channel`, and `next_memo` handling is unaffected
+either way. So the receiver Get-gas sends is `ibc:channel-88/secret1…`, not a bare address —
+`channel-88` being Osmosis's own verified channel to Secret, above.
+
+Two things decide whether the gas leg works at all, both read out of the source that actually
+runs, not the source that happens to share a repository with it:
+
+1. **`next_memo` is the slot that reaches Secret, not `final_memo`.** Confirmed unchanged across
+   both versions: the reply handler builds the outbound `MsgTransfer`'s memo from
+   `forward_to.next_memo`, which is what `next_memo` in the request becomes. SCRT on Osmosis is
+   `transfer/channel-88/uscrt`, so returning it to Secret is a one-hop unwind — there is only one
+   transfer, and its memo is the one carried through. `final_memo` is not read by this version at
+   all.
+2. **The receiver must be the explicit `ibc:channel-88/secret1…` form**, for the reason above.
+
+**Live-verified, 2026-09-06:** a real deposit sent the bare-address form and failed exactly this
+way — `write_acknowledgement` on Osmosis carried `packet_ack: {"error":"ABCI code: 6…"}`, and the
+`ibccallbackerror-ibc-acknowledgement-error` event read `invalid receiver: secret1…`. Standard
+ICS-20 ack-failure semantics then refunded the gas slice back to the sender on the source chain —
+nothing was lost, the feature simply never delivered. The wrap leg, sent as a separate packet in
+the same broadcast, is unaffected by any of this and succeeded on its own; the two packets have
+no relationship the chain enforces.
+
+**Still open:** the contract merges its own `ibc_callback` key into the memo it forwards, to track
+the send. How Secret's `x/ibc-hooks` treats a memo carrying both `ibc_callback` and `wasm` remains
+unverified for `credits` delivery, which is why `native` stays the default — no `wasm` key on that
+leg, nothing to misparse.
 
 ### Getting there: each source chain needs its own channel to Osmosis
 
