@@ -80,6 +80,42 @@ Every token in the registry needs the same query before it is subscribed — cov
 contract, not chain-wide, because only migrated contracts carry `notifications.rs`. Tokens
 without channels stay on polling, and the UI says which is which rather than pretending.
 
+## The Tendermint event stream (what SNIP-52 rides on)
+
+Both working RPC endpoints proxy the WebSocket event stream, for blocks and for
+transactions:
+
+| Query                 | keplr.app      | lavenderfive   |
+| --------------------- | -------------- | -------------- |
+| `tm.event='NewBlock'` | 3 events / 18s | 3 events / 18s |
+| `tm.event='Tx'`       | 1 event / 30s  | 1 event / 30s  |
+
+**Mainnet traffic is sparse**, and that is the fact that shapes the feature. A
+first probe saw zero transactions in 25 seconds and looked exactly like a broken
+endpoint. It was not. Blocks arrive every ~6s regardless of traffic, which is the
+check that tells a dead subscription from a quiet chain.
+
+The consequence for the UI: silence is ambiguous. "Nothing arrived" and "the
+socket died half an hour ago" look identical, so the balance list states which
+mode it is in, and balances are re-read on a timer whatever the socket is doing.
+
+A captured mainnet transaction confirms the attribute shape the public-receipt
+watcher depends on: `transfer.recipient`, `transfer.amount` and `transfer.sender`
+arrive as **positional arrays**, one entry per transfer, and a single transaction
+commonly carries several (the sampled one carried two, only one of them for the
+address being watched). Amounts are concatenated coin strings — `3126uscrt`.
+
+## neutrino
+
+Loads in ~15ms and works against these endpoints unchanged: `SecretContract`
+resolves sSCRT to code hash `c8ac20dc…`, matching what the chain reports, and
+`TendermintEventFilter` opens a socket reaching `readyState 1`.
+
+Worth knowing before reimplementing any of it: the `recvd` channel is a
+**sequenced binary schema**, not CBOR, and its CDDL differs between contract
+builds — one ships `sender:bstr .size 20`, another `.size 54`. The schema has to
+be read from `channel_info` at runtime; it cannot be hardcoded.
+
 ## SNIP-24 — permits work
 
 A structurally valid permit carrying a deliberately wrong signature was rejected with

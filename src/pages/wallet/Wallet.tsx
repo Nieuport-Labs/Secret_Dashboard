@@ -11,6 +11,7 @@ import { PANEL_TITLES, type WalletPanel } from '@/components/wallet/panels'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { useBalances } from '@/hooks/useBalances'
 import { usePermit } from '@/hooks/usePermit'
+import { useArrivals } from '@/hooks/useArrivals'
 import { useTransferHistory } from '@/hooks/useTransferHistory'
 import { useWallet } from '@/store/wallet'
 
@@ -20,6 +21,7 @@ export default function Wallet() {
   const { permit, staleTokens, signing, error, sign } = usePermit()
   const balances = useBalances(permit)
   const history = useTransferHistory(permit)
+  const push = useArrivals(permit, { onArrival: balances.refresh })
   const [panel, setPanel] = useState<WalletPanel | null>(null)
 
   if (!address) return null
@@ -64,6 +66,7 @@ export default function Wallet() {
         loading={balances.loading}
         scanning={balances.scanning}
         scanProgress={balances.scanProgress}
+        pushStatus={push.status}
         onScanAll={balances.scanAll}
       />
 

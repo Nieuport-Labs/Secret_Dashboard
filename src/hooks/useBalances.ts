@@ -21,6 +21,15 @@ const SCRT_PRICE_ID = 'secret'
  */
 const QUERY_CONCURRENCY = 6
 
+/**
+ * Balances are re-read on this interval regardless of push notifications.
+ *
+ * A WebSocket can die without saying so, a node can drop a subscription, and a
+ * token may have no notification channels at all. SNIP-52 makes an arrival show
+ * up immediately; this is what makes it show up at all.
+ */
+const REFRESH_INTERVAL_MS = 120_000
+
 export interface TokenBalance {
   token: TokenInfo
   outcome: BalanceOutcome
@@ -72,10 +81,17 @@ export function useBalances(permit: Permit | undefined): Balances {
   const [sweep, setSweep] = useState(false)
 
   const refresh = useCallback(() => setNonce((n) => n + 1), [])
+
   const scanAll = useCallback(() => {
     setSweep(true)
     setNonce((n) => n + 1)
   }, [])
+
+  useEffect(() => {
+    if (!address) return
+    const timer = setInterval(refresh, REFRESH_INTERVAL_MS)
+    return () => clearInterval(timer)
+  }, [address, refresh])
 
   useEffect(() => {
     if (!address || !client) {

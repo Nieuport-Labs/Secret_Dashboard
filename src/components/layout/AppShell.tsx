@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import Toaster from '@/components/notifications/Toaster'
 import Header from './Header'
 import Sidebar from './Sidebar'
 
@@ -28,6 +29,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
           <img src="/img/secret-mark.svg" alt="" className="h-7 w-[27px]" />
         </footer>
       </div>
+
+      <Toaster />
     </div>
   )
 }

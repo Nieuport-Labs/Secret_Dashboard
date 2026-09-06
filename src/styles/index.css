@@ -56,6 +56,17 @@
   }
 }
 
+@keyframes toast-in {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 @layer components {
   /*
    * Material's state layer: a translucent wash of the element's own foreground

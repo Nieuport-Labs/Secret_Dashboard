@@ -1,7 +1,8 @@
-import { AlertCircle, RefreshCw, Search } from 'lucide-react'
+import { AlertCircle, RadioTower, RefreshCw, Search, Timer } from 'lucide-react'
 
 import Button from '@/components/ui/Button'
 import type { TokenBalance } from '@/hooks/useBalances'
+import type { PushStatus } from '@/hooks/useArrivals'
 import { formatAmount, formatFiat } from '@/lib/format'
 import { tokenImageUrl } from '@/tokens/registry'
 import { useSettings } from '@/store/settings'
@@ -12,6 +13,7 @@ interface Props {
   scanning: boolean
   scanProgress: [number, number]
   onScanAll: () => void
+  pushStatus: PushStatus
 }
 
 /**
@@ -21,7 +23,14 @@ interface Props {
  * failed read look identical if both render as "0", and only one of them means
  * the account holds nothing — so a token that could not be read says so.
  */
-export default function BalanceList({ tokens, loading, scanning, scanProgress, onScanAll }: Props) {
+export default function BalanceList({
+  tokens,
+  loading,
+  scanning,
+  scanProgress,
+  onScanAll,
+  pushStatus
+}: Props) {
   const currency = useSettings((state) => state.currency)
 
   const held = tokens.filter((row) => row.outcome.status === 'ok' && row.outcome.amount !== '0')
@@ -47,7 +56,10 @@ export default function BalanceList({ tokens, loading, scanning, scanProgress, o
   return (
     <section className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold">Private tokens</h2>
+        <span className="flex items-center gap-2.5">
+          <h2 className="text-lg font-semibold">Private tokens</h2>
+          <PushIndicator status={pushStatus} />
+        </span>
         <Button
           variant="ghost"
           size="sm"
@@ -116,5 +128,38 @@ export default function BalanceList({ tokens, loading, scanning, scanProgress, o
         </p>
       ) : null}
     </section>
+  )
+}
+
+/**
+ * Whether arrivals show up the instant they happen, or on the next refresh.
+ *
+ * Worth saying out loud: silence means something different in each mode, and a
+ * user watching for an incoming transfer deserves to know which one they are in.
+ */
+function PushIndicator({ status }: { status: PushStatus }) {
+  if (status === 'live') {
+    return (
+      <span className="flex items-center gap-1 text-sm text-positive" title="Arrivals appear immediately">
+        <RadioTower size={14} aria-hidden />
+        Live
+      </span>
+    )
+  }
+  if (status === 'connecting') {
+    return <span className="text-sm text-text-faint">Connecting…</span>
+  }
+  return (
+    <span
+      className="flex items-center gap-1 text-sm text-text-faint"
+      title={
+        status === 'off'
+          ? 'Push notifications are off. Balances refresh every couple of minutes.'
+          : 'Push is unavailable. Balances refresh every couple of minutes.'
+      }
+    >
+      <Timer size={14} aria-hidden />
+      Checking periodically
+    </span>
   )
 }
