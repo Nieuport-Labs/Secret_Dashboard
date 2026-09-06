@@ -16,6 +16,7 @@ import { usePermit } from '@/hooks/usePermit'
 import { useSourceWallet } from '@/hooks/useSourceWallet'
 import { chainsWithDeposits, depositRoute, tokensFromChain } from '@/tokens/routes'
 import { tokenByAddress, tokenImageUrl } from '@/tokens/registry'
+import { transactionsCovered } from '@/store/feePayer'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 
@@ -287,6 +288,24 @@ export default function Bridge() {
                 : ''}
               {gasOffer.quote.amountScrt} {DISPLAY_DENOM} (about ${gasOffer.quote.usd?.toFixed(2)}) is swapped
               out of this transfer on the way, through Osmosis.
+            </span>
+            {/*
+              Sizing the slice in dollars is only intuitive while SCRT is worth
+              something like a dollar. At a cent it buys thousands of
+              transactions, which is far more than anyone needs taken out of
+              their transfer — so the count is shown next to the price, where it
+              is impossible to miss and one tap from being changed.
+            */}
+            <span className="mt-1 block text-sm text-text-faint">
+              Roughly {transactionsCovered(BigInt(gasOffer.quote.amountBaseUnits)).toLocaleString()}{' '}
+              transactions.{' '}
+              <button
+                type="button"
+                onClick={() => settings.set('gasSliceUsd', Math.max(0.05, settings.gasSliceUsd / 4))}
+                className="underline underline-offset-4"
+              >
+                Take less
+              </button>
             </span>
             {!canGetGas ? (
               <span className="mt-1 block text-sm text-text-faint">
