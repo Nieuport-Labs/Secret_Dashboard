@@ -17,16 +17,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <Sidebar />
 
       {/* pb clears the mobile bottom bar; from lg the rail takes the left edge. */}
-      <div className="flex min-h-dvh flex-col pb-20 lg:pb-0 lg:pl-[var(--sidebar-width)]">
+      <div className="flex min-h-dvh flex-col pb-16 lg:pb-0 lg:pl-[var(--sidebar-width)]">
         <Header />
 
-        <main id="content" className="flex-1 px-5 pb-8 pt-4 lg:px-12 lg:pb-12">
+        <main id="content" className="flex-1 px-4 pb-10 pt-7 lg:px-8 lg:pb-14">
           {children}
         </main>
 
-        <footer className="flex items-center justify-center gap-2.5 px-5 py-6 opacity-60">
-          <span className="text-base font-semibold">Powered by Secret Network</span>
-          <img src="/img/secret-mark.svg" alt="" className="h-7 w-[27px]" />
+        {/* Chrome, so it is sized like chrome. The attribution has to be there;
+            it does not have to be the loudest thing above the fold. */}
+        <footer className="flex items-center justify-center gap-2 px-5 py-6 text-text-faint">
+          <span className="text-label">Powered by Secret Network</span>
+          <img src="/img/secret-mark.svg" alt="" className="h-4 w-[15px] opacity-70" />
         </footer>
       </div>
 

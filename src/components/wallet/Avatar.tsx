@@ -91,7 +91,7 @@ export default function Avatar({ address, url, size = 100, onPick, onRemove, sav
               onClick={onRemove}
               aria-label="Remove profile picture"
               className={cn(
-                'state-layer absolute -bottom-1 -right-1 rounded-pill bg-surface-3 p-1.5 text-text-muted',
+                'state-layer glass absolute -bottom-1 -right-1 rounded-pill border border-glass-edge p-1.5 text-text-muted',
                 'opacity-0 transition-opacity duration-[var(--duration-short)]',
                 'group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100'
               )}

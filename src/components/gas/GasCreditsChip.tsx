@@ -34,9 +34,9 @@ export default function GasCreditsChip() {
       <button
         type="button"
         onClick={() => setBuyOpen(true)}
-        className="state-layer flex items-center gap-1.5 rounded-control px-2 py-1 text-base text-accent"
+        className="state-layer flex items-center gap-1.5 rounded-pill border border-border px-2.5 py-1.5 text-base font-medium text-accent"
       >
-        <Fuel size={16} aria-hidden />
+        <Fuel size={14} aria-hidden />
         {label}
       </button>
       <BuyCreditsModal open={buyOpen} onClose={() => setBuyOpen(false)} />

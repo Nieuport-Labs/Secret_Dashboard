@@ -68,7 +68,7 @@ export default function Network() {
         aria-busy
       >
         {[0, 1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="h-24 animate-pulse rounded-card bg-surface-1" />
+          <div key={i} className="h-24 animate-pulse card" />
         ))}
       </div>
     )
@@ -80,7 +80,7 @@ export default function Network() {
     <div className="mx-auto flex max-w-[900px] flex-col gap-8">
       <h1 className="text-display">Network</h1>
 
-      <div className="grid divide-y divide-border overflow-hidden rounded-card bg-surface-1 sm:grid-cols-2 sm:divide-x lg:grid-cols-3 [&>*:nth-child(-n+2)]:sm:border-t-0">
+      <div className="grid divide-y divide-border overflow-hidden card sm:grid-cols-2 sm:divide-x lg:grid-cols-3 [&>*:nth-child(-n+2)]:sm:border-t-0">
         <Stat label={`${DISPLAY_DENOM} price`} value={formatFiat(price, currency)} />
         <Stat label="Market cap" value={formatFiat(marketCap, currency)} />
         <Stat

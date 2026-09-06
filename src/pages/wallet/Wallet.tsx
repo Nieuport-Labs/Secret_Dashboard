@@ -50,7 +50,7 @@ export default function Wallet() {
       />
 
       {balances.error ? (
-        <p className="rounded-card bg-surface-1 px-4 py-3 text-base text-text-muted" role="alert">
+        <p className="card px-4 py-3 text-base text-text-muted" role="alert">
           Your {DISPLAY_DENOM} balance could not be read: {balances.error}
         </p>
       ) : null}
@@ -63,7 +63,7 @@ export default function Wallet() {
         be read" for a reason nobody can act on.
       */}
       {permit && staleTokens.length > 0 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-card bg-surface-1 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 card px-4 py-3">
           <p className="text-base text-text-muted">
             {staleTokens.length} {staleTokens.length === 1 ? 'token is' : 'tokens are'} newer than your permit
             and cannot be read yet.
@@ -98,8 +98,8 @@ export default function Wallet() {
         onClose={() => setPanel(null)}
         title={panel ? PANEL_TITLES[panel] : ''}
       >
-        <div className="flex items-start gap-3 rounded-card bg-surface-1 p-4">
-          <Construction size={20} aria-hidden className="mt-0.5 shrink-0 text-text-muted" />
+        <div className="flex items-start gap-3 card p-4">
+          <Construction size={18} aria-hidden className="mt-0.5 shrink-0 text-text-muted" />
           <p className="text-base text-text-muted">
             Built in phase 3b, here in this panel. Its fee is paid by a grant whenever one covers it.
           </p>
@@ -111,9 +111,9 @@ export default function Wallet() {
 
 function PermitPrompt({ signing, error, onSign }: { signing: boolean; error?: string; onSign: () => void }) {
   return (
-    <div className="flex flex-col items-start gap-4 rounded-card bg-surface-2 p-6">
+    <div className="card flex flex-col items-start gap-4 p-5">
       <div className="flex items-start gap-3">
-        <KeyRound size={20} aria-hidden className="mt-0.5 shrink-0 text-accent" />
+        <KeyRound size={18} aria-hidden className="mt-0.5 shrink-0 text-accent" />
         <div>
           <h2 className="text-title">Sign a query permit</h2>
           <p className="mt-1 max-w-[62ch] text-base text-text-muted">

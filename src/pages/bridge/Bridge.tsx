@@ -1,7 +1,9 @@
-import { ArrowDown, ExternalLink, Fuel, Info, ShieldCheck } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ExternalLink, Fuel, Info, ShieldCheck } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
+import EmptyState from '@/components/ui/EmptyState'
 import { DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import { SOURCE_CHAINS, chainImageUrl, type SourceChain } from '@/chains/sources'
 import { depositGasLimit, sendDeposit, type Leg } from '@/lib/bridge'
@@ -37,6 +39,7 @@ type Status =
  * get it gas.
  */
 export default function Bridge() {
+  const navigate = useNavigate()
   const secretAddress = useWallet((state) => state.address)
   const queryClient = useWallet((state) => state.queryClient)
   const settings = useSettings()
@@ -164,7 +167,14 @@ export default function Bridge() {
   }
 
   if (!secretAddress) {
-    return <p className="text-base text-text-muted">Connect a wallet to bridge tokens onto Secret.</p>
+    return (
+      <EmptyState
+        icon={ArrowLeftRight}
+        title="Bridge tokens onto Secret"
+        description="Move assets in from Cosmos Hub, Osmosis, Injective and the rest of IBC — wrapped on arrival if you want them private."
+        action={<Button onClick={() => navigate('/wallet')}>Connect a wallet</Button>}
+      />
+    )
   }
 
   return (
@@ -176,7 +186,7 @@ export default function Bridge() {
         <select
           value={chain?.chainId ?? ''}
           onChange={(event) => setChain(chains.find((c) => c.chainId === event.target.value))}
-          className="rounded-control bg-surface px-4 py-3 text-base outline-none"
+          className="rounded-control border border-border bg-surface px-3 py-2.5 text-base outline-none"
         >
           {chains.map((c) => (
             <option key={c.chainId} value={c.chainId}>
@@ -191,7 +201,7 @@ export default function Bridge() {
         <select
           value={tokenAddress ?? ''}
           onChange={(event) => setTokenAddress(event.target.value)}
-          className="rounded-control bg-surface px-4 py-3 text-base outline-none"
+          className="rounded-control border border-border bg-surface px-3 py-2.5 text-base outline-none"
         >
           {tokens.map((t) => (
             <option key={t.address} value={t.address}>
@@ -215,7 +225,7 @@ export default function Bridge() {
             </button>
           ) : null}
         </span>
-        <div className="flex items-center gap-3 rounded-control bg-surface px-4 py-3">
+        <div className="flex items-center gap-3 rounded-control border border-border bg-surface px-3 py-2.5">
           {token ? <img src={tokenImageUrl(token)} alt="" className="size-6 rounded-pill" /> : null}
           <input
             inputMode="decimal"
@@ -317,7 +327,7 @@ export default function Bridge() {
       ) : null}
 
       {status.kind === 'done' ? (
-        <div className="flex flex-col gap-3 rounded-card bg-surface-1 p-4">
+        <div className="flex flex-col gap-3 card p-4">
           <p className="text-base">Sent. It usually lands within a minute.</p>
           <a
             className="inline-flex items-center gap-1.5 text-base text-accent underline underline-offset-4"
@@ -332,7 +342,7 @@ export default function Bridge() {
       ) : null}
 
       {status.kind === 'failed' ? (
-        <p className="break-address rounded-card bg-surface-1 p-4 text-base text-negative" role="alert">
+        <p className="break-address card p-4 text-base text-negative" role="alert">
           {status.message}
         </p>
       ) : null}

@@ -125,7 +125,7 @@ export default function SettingsDrawer({ open, onClose }: Props) {
         <select
           value={settings.currency}
           onChange={(event) => settings.set('currency', event.target.value)}
-          className="rounded-control bg-surface px-4 py-2.5 text-base outline-none"
+          className="rounded-control border border-border bg-surface px-3 py-2 text-base outline-none"
         >
           {CURRENCIES.map((code) => (
             <option key={code} value={code}>
@@ -245,7 +245,7 @@ function EndpointSection() {
           onChange={(event) => settings.set('lcdOverride', event.target.value)}
           placeholder="Leave empty for the built-in list"
           spellCheck={false}
-          className="rounded-control bg-surface px-3 py-2 font-mono text-sm outline-none placeholder:text-text-faint"
+          className="rounded-control border border-border bg-surface px-3 py-2 font-mono text-sm outline-none placeholder:text-text-faint"
         />
       </label>
 
@@ -256,7 +256,7 @@ function EndpointSection() {
           onChange={(event) => settings.set('rpcOverride', event.target.value)}
           placeholder="Leave empty for the built-in list"
           spellCheck={false}
-          className="rounded-control bg-surface px-3 py-2 font-mono text-sm outline-none placeholder:text-text-faint"
+          className="rounded-control border border-border bg-surface px-3 py-2 font-mono text-sm outline-none placeholder:text-text-faint"
         />
       </label>
 

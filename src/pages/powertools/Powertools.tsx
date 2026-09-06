@@ -65,7 +65,7 @@ export default function Powertools() {
           {endpoints.map((endpoint) => (
             <li
               key={`${endpoint.kind}-${endpoint.url}`}
-              className="flex items-start gap-3 rounded-card bg-surface-1 px-4 py-3"
+              className="flex items-start gap-3 card px-4 py-3"
             >
               {endpoint.ok ? (
                 <CheckCircle2 size={18} aria-hidden className="mt-0.5 shrink-0 text-positive" />
@@ -146,7 +146,7 @@ function ContractQuery({ client }: { client?: ReturnType<typeof useWallet.getSta
           onChange={(event) => setAddress(event.target.value)}
           placeholder="secret1…"
           spellCheck={false}
-          className="rounded-control bg-surface px-4 py-3 font-mono text-sm outline-none placeholder:text-text-faint"
+          className="rounded-control border border-border bg-surface px-3 py-2.5 font-mono text-sm outline-none placeholder:text-text-faint"
         />
       </label>
 
@@ -157,15 +157,16 @@ function ContractQuery({ client }: { client?: ReturnType<typeof useWallet.getSta
           onChange={(event) => setQuery(event.target.value)}
           rows={4}
           spellCheck={false}
-          className="resize-y rounded-control bg-surface px-4 py-3 font-mono text-sm outline-none"
+          className="resize-y rounded-control border border-border bg-surface px-3 py-2.5 font-mono text-sm outline-none"
         />
       </label>
 
       <Button
         variant="primary"
+        className="self-start"
         loading={running}
         disabled={!client || !address.trim()}
-        icon={<Play size={16} aria-hidden />}
+        icon={<Play size={14} aria-hidden />}
         onClick={() => void run()}
       >
         Run
@@ -178,13 +179,13 @@ function ContractQuery({ client }: { client?: ReturnType<typeof useWallet.getSta
       ) : null}
 
       {error ? (
-        <pre className="whitespace-pre-wrap break-words rounded-card bg-surface-1 p-4 font-mono text-sm text-negative">
+        <pre className="whitespace-pre-wrap break-words card p-4 font-mono text-sm text-negative">
           {error}
         </pre>
       ) : null}
 
       {result ? (
-        <pre className="overflow-x-auto rounded-card bg-surface-1 p-4 font-mono text-sm">{result}</pre>
+        <pre className="overflow-x-auto card p-4 font-mono text-sm">{result}</pre>
       ) : null}
     </section>
   )

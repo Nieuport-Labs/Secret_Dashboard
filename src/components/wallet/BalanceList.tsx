@@ -43,7 +43,7 @@ export default function BalanceList({
     return (
       <div className="flex flex-col gap-3" aria-busy>
         {[0, 1, 2].map((i) => (
-          <div key={i} className="flex items-center gap-3 rounded-card bg-surface-1 p-4">
+          <div key={i} className="flex items-center gap-3 card p-4">
             <span className="size-8 animate-pulse rounded-pill bg-surface" />
             <span className="h-4 w-20 animate-pulse rounded-control bg-surface" />
             <span className="ml-auto h-4 w-24 animate-pulse rounded-control bg-surface" />
@@ -72,7 +72,7 @@ export default function BalanceList({
       </div>
 
       {held.length > 0 ? (
-        <ul className="divide-y divide-border overflow-hidden rounded-card bg-surface-1">
+        <ul className="divide-y divide-border overflow-hidden card">
           {held.map((row) => (
             <li key={row.token.address} className="flex items-center gap-3 px-5 py-3.5">
               <img src={tokenImageUrl(row.token)} alt="" className="size-8 shrink-0 rounded-pill" />
@@ -96,7 +96,7 @@ export default function BalanceList({
           ))}
         </ul>
       ) : (
-        <p className="rounded-card bg-surface-1 px-4 py-6 text-base text-text-muted">
+        <p className="card px-4 py-6 text-base text-text-muted">
           {tokens.length === 0
             ? 'Sign the query permit to read your private balances.'
             : `No balance in the ${tokens.length} ${tokens.length === 1 ? 'token' : 'tokens'} checked. Scan all tokens to look through the whole registry.`}
@@ -106,7 +106,7 @@ export default function BalanceList({
       {/* An unreadable token is worth naming. Silently omitting it would let
           someone conclude they hold nothing when the contract simply did not answer. */}
       {unreadable.length > 0 ? (
-        <div className="flex items-start gap-3 rounded-card bg-surface-1 px-4 py-3">
+        <div className="flex items-start gap-3 card px-4 py-3">
           <AlertCircle size={18} aria-hidden className="mt-0.5 shrink-0 text-text-muted" />
           <p className="text-base text-text-muted">
             {unreadable.length} {unreadable.length === 1 ? 'token' : 'tokens'} could not be read

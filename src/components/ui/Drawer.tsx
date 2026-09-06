@@ -25,13 +25,14 @@ export default function Drawer({ open, onClose, title, children }: Props) {
 
   return (
     <div className="fixed inset-0 z-40">
-      {/* Dimming the page is what makes the panel read as a layer above it. */}
+      {/* Dimming and blurring the page is what makes the panel read as a layer
+          above it rather than a second page. */}
       <button
         type="button"
         aria-label="Close"
         tabIndex={-1}
         onClick={onClose}
-        className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-scrim backdrop-blur-sm"
       />
 
       <div
@@ -41,8 +42,11 @@ export default function Drawer({ open, onClose, title, children }: Props) {
         aria-label={title}
         tabIndex={-1}
         className={cn(
-          'absolute inset-y-0 right-0 flex w-full max-w-[380px] flex-col gap-6 overflow-y-auto',
-          'bg-surface-2 p-[30px] outline-none',
+          'absolute inset-y-0 right-0 flex w-full max-w-[380px] flex-col gap-5 overflow-y-auto',
+          // Frosted rather than a solid slab: the page stays faintly readable
+          // through it, so the panel reads as covering the page rather than
+          // replacing it.
+          'glass border-l border-glass-edge shadow-panel p-6 outline-none',
           'motion-safe:animate-[drawer-in_var(--duration-medium)_var(--ease-emphasised)]'
         )}
       >
@@ -52,9 +56,9 @@ export default function Drawer({ open, onClose, title, children }: Props) {
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="state-layer -m-1 rounded-control p-1 text-text-muted"
+            className="state-layer -m-1.5 rounded-pill p-1.5 text-text-muted"
           >
-            <X size={20} aria-hidden />
+            <X size={18} aria-hidden />
           </button>
         </div>
         {children}

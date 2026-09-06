@@ -45,9 +45,9 @@ export default function WalletChip({ onOpenSettings }: Props) {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="state-layer flex items-center gap-2 rounded-control px-2 py-1 text-base font-semibold"
+        className="state-layer flex items-center gap-2 rounded-pill border border-border px-2.5 py-1.5 text-base font-medium"
       >
-        <img src="/img/secret-mark.svg" alt="" className="h-5 w-5 shrink-0" />
+        <img src="/img/secret-mark.svg" alt="" className="h-4 w-4 shrink-0" />
         <span className="whitespace-nowrap">{shortenAddress(address)}</span>
         <ChevronDown size={14} aria-hidden className="text-text-muted" />
       </button>
@@ -55,9 +55,9 @@ export default function WalletChip({ onOpenSettings }: Props) {
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 top-[calc(100%+8px)] z-30 flex min-w-[220px] flex-col gap-1 rounded-card bg-surface-3 p-2 motion-safe:animate-[modal-in_var(--duration-short)_var(--ease-emphasised)]"
+          className="glass absolute right-0 top-[calc(100%+8px)] z-30 flex min-w-[210px] flex-col gap-0.5 rounded-card border border-glass-edge p-1.5 shadow-menu motion-safe:animate-[modal-in_var(--duration-short)_var(--ease-emphasised)]"
         >
-          {accountName ? <p className="px-3 pb-1 pt-2 text-sm text-text-faint">{accountName}</p> : null}
+          {accountName ? <p className="px-3 pb-1 pt-1.5 text-label text-text-faint">{accountName}</p> : null}
           <button
             type="button"
             role="menuitem"

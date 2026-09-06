@@ -47,7 +47,7 @@ export default function Ecosystem() {
       <h1 className="text-display">Ecosystem</h1>
 
       <section className="flex flex-col gap-4">
-        <div className="flex items-center gap-3 rounded-control bg-surface px-4 py-2.5">
+        <div className="flex items-center gap-2.5 rounded-control border border-border bg-surface px-3 py-2">
           <Search size={16} aria-hidden className="shrink-0 text-text-muted" />
           <input
             value={query}
@@ -73,16 +73,16 @@ export default function Ecosystem() {
         {loading ? (
           <div className="grid gap-3 sm:grid-cols-2" aria-busy>
             {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="h-24 animate-pulse rounded-card bg-surface-1" />
+              <div key={i} className="h-24 animate-pulse card" />
             ))}
           </div>
         ) : error ? (
-          <p className="rounded-card bg-surface-1 p-4 text-base text-text-muted" role="alert">
+          <p className="card p-4 text-base text-text-muted" role="alert">
             {error} This is the published registry, not something this dashboard maintains, so it may simply
             be unreachable right now.
           </p>
         ) : visible.length === 0 ? (
-          <p className="rounded-card bg-surface-1 p-4 text-base text-text-muted">
+          <p className="card p-4 text-base text-text-muted">
             Nothing matches. {dapps.length} apps are listed in total.
           </p>
         ) : (
@@ -93,7 +93,7 @@ export default function Ecosystem() {
                   href={dapp.link}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="state-layer flex h-full gap-3 rounded-card bg-surface-1 p-4"
+                  className="state-layer flex h-full gap-3 card p-4"
                 >
                   <DappIcon dapp={dapp} />
                   <span className="min-w-0 flex-1">
@@ -132,7 +132,7 @@ export default function Ecosystem() {
             return (
               <li key={place.name}>
                 {place.internal ? (
-                  <Link to={place.link} className="state-layer block h-full rounded-card bg-surface-1 p-4">
+                  <Link to={place.link} className="state-layer block h-full card p-4">
                     {body}
                   </Link>
                 ) : (
@@ -140,7 +140,7 @@ export default function Ecosystem() {
                     href={place.link}
                     target="_blank"
                     rel="noreferrer noopener"
-                    className="state-layer block h-full rounded-card bg-surface-1 p-4"
+                    className="state-layer block h-full card p-4"
                   >
                     {body}
                   </a>

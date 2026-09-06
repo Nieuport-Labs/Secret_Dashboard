@@ -128,7 +128,7 @@ export default function BuyCreditsModal({ open, onClose }: Props) {
             <label htmlFor="credit-amount" className="text-base font-medium">
               Amount
             </label>
-            <div className="flex items-center gap-2 rounded-control bg-surface px-4 py-3">
+            <div className="flex items-center gap-2 rounded-control border border-border bg-surface px-3 py-2.5">
               <input
                 id="credit-amount"
                 inputMode="decimal"

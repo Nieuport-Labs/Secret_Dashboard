@@ -24,7 +24,7 @@ export default function Modal({ open, onClose, title, description, children }: P
         aria-label="Close"
         tabIndex={-1}
         onClick={onClose}
-        className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-scrim backdrop-blur-sm"
       />
 
       <div
@@ -33,7 +33,7 @@ export default function Modal({ open, onClose, title, description, children }: P
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="relative flex w-full max-w-[440px] flex-col gap-5 rounded-card bg-surface-2 p-6 outline-none motion-safe:animate-[modal-in_var(--duration-medium)_var(--ease-emphasised)]"
+        className="glass-panel relative flex w-full max-w-[420px] flex-col gap-5 rounded-card p-5 outline-none motion-safe:animate-[modal-in_var(--duration-medium)_var(--ease-emphasised)]"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -44,9 +44,9 @@ export default function Modal({ open, onClose, title, description, children }: P
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="state-layer -m-1 shrink-0 rounded-control p-1 text-text-muted"
+            className="state-layer -m-1.5 shrink-0 rounded-pill p-1.5 text-text-muted"
           >
-            <X size={20} aria-hidden />
+            <X size={18} aria-hidden />
           </button>
         </div>
         {children}

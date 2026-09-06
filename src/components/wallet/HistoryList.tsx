@@ -55,7 +55,7 @@ export default function HistoryList({ entries, loading, unreadable, hasPermit }:
           ))}
         </div>
       ) : entries.length > 0 ? (
-        <ul className="divide-y divide-border overflow-hidden rounded-card bg-surface-1">
+        <ul className="divide-y divide-border overflow-hidden card">
           {entries.map((entry, index) => {
             const incoming = entry.direction === 'in'
             const counterparty = incoming ? entry.transfer.sender : entry.transfer.receiver
@@ -70,7 +70,7 @@ export default function HistoryList({ entries, loading, unreadable, hasPermit }:
                   <img src={tokenImageUrl(entry.token)} alt="" className="size-8 rounded-pill" />
                   <span
                     aria-hidden
-                    className="absolute -bottom-1 -right-1 rounded-pill bg-surface-3 p-0.5 text-text-muted"
+                    className="glass absolute -bottom-1 -right-1 rounded-pill border border-glass-edge p-0.5 text-text-muted"
                   >
                     {incoming ? <ArrowDownLeft size={12} /> : <ArrowUpRight size={12} />}
                   </span>
@@ -96,7 +96,7 @@ export default function HistoryList({ entries, loading, unreadable, hasPermit }:
           })}
         </ul>
       ) : (
-        <p className="rounded-card bg-surface-1 px-4 py-6 text-base text-text-muted">
+        <p className="card px-4 py-6 text-base text-text-muted">
           No transfers found in the tokens checked. These are private, so an explorer will not show them
           either.
         </p>

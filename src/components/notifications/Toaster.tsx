@@ -34,10 +34,10 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
   const navigate = useNavigate()
 
   return (
-    <div className="pointer-events-auto w-full max-w-[360px] rounded-card bg-surface-3 p-5 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
+    <div className="glass-panel pointer-events-auto w-full max-w-[340px] rounded-card p-4 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
       {toast.kind === 'error' ? (
         <div className="flex items-start gap-2.5">
-          <AlertCircle size={18} aria-hidden className="mt-0.5 shrink-0 text-negative" />
+          <AlertCircle size={16} aria-hidden className="mt-px shrink-0 text-negative" />
           <p className="text-base">{toast.message}</p>
         </div>
       ) : (

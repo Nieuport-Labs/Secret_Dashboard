@@ -106,7 +106,7 @@ export default function Onboarding() {
                   href={place.link}
                   target={place.internal ? undefined : '_blank'}
                   rel={place.internal ? undefined : 'noreferrer noopener'}
-                  className="state-layer block rounded-card bg-surface-1 p-4"
+                  className="state-layer block card p-4"
                 >
                   <span className="flex items-center gap-1.5 text-base font-medium">
                     {place.name}
@@ -199,7 +199,7 @@ function WalletStep({
       </Prose>
 
       {connected ? (
-        <p className="flex items-center gap-2 rounded-card bg-surface-1 p-4 text-base">
+        <p className="flex items-center gap-2 card p-4 text-base">
           <Check size={18} aria-hidden className="text-positive" />
           Connected. You can carry on.
         </p>
@@ -210,7 +210,7 @@ function WalletStep({
             const installed = isInstalled(id)
 
             return (
-              <li key={id} className="flex flex-wrap items-center gap-3 rounded-card bg-surface-1 px-4 py-3">
+              <li key={id} className="flex flex-wrap items-center gap-3 card px-4 py-3">
                 <img src={wallet.icon} alt="" className="size-8 shrink-0 rounded-pill" />
                 <span className="min-w-0 flex-1">
                   <span className="block text-base font-medium">{wallet.name}</span>
@@ -284,7 +284,7 @@ function DappsStep() {
                 href={dapp.link}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="state-layer block h-full rounded-card bg-surface-1 p-3"
+                className="state-layer block h-full card p-3"
               >
                 <span className="text-base font-medium">{dapp.name}</span>
                 <span className="mt-0.5 block text-sm text-text-muted">{dapp.description}</span>

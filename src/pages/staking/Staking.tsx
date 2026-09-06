@@ -1,7 +1,9 @@
-import { Repeat, Search } from 'lucide-react'
+import { Coins, Repeat, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
+import EmptyState from '@/components/ui/EmptyState'
 import StakeModal from '@/pages/staking/components/StakeModal'
 import ValidatorRow from '@/pages/staking/components/ValidatorRow'
 import { DISPLAY_DENOM } from '@/chains/secret4'
@@ -21,6 +23,7 @@ import { useWallet } from '@/store/wallet'
  * fee no matter how many validators are involved.
  */
 export default function Staking() {
+  const navigate = useNavigate()
   const address = useWallet((state) => state.address)
   const { permit } = usePermit()
   const balances = useBalances(permit)
@@ -66,7 +69,14 @@ export default function Staking() {
   }
 
   if (!address) {
-    return <p className="text-base text-text-muted">Connect a wallet to stake {DISPLAY_DENOM}.</p>
+    return (
+      <EmptyState
+        icon={Coins}
+        title={`Stake ${DISPLAY_DENOM}`}
+        description="Delegate to a validator, earn rewards, and let the chain compound them for you without signing again."
+        action={<Button onClick={() => navigate('/wallet')}>Connect a wallet</Button>}
+      />
+    )
   }
 
   return (
@@ -79,7 +89,7 @@ export default function Staking() {
         decided which figure matters; a divided row says these belong together
         and lets the numbers carry the weight.
       */}
-      <div className="grid divide-y divide-border overflow-hidden rounded-card bg-surface-1 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+      <div className="grid divide-y divide-border overflow-hidden card sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         <Stat label="Staked" value={`${formatDisplayAmount(staking.totalStaked)} ${DISPLAY_DENOM}`} />
         <Stat label="Available" value={`${formatDisplayAmount(balances.native ?? '0')} ${DISPLAY_DENOM}`} />
         <div className="p-5">
@@ -104,7 +114,7 @@ export default function Staking() {
       </div>
 
       {staking.unbondings.length > 0 ? (
-        <section className="rounded-card bg-surface-1 p-4">
+        <section className="card p-4">
           <h2 className="text-base font-medium">Unstaking</h2>
           <ul className="mt-2 flex flex-col gap-1">
             {staking.unbondings.map((u, index) => (
@@ -151,13 +161,13 @@ export default function Staking() {
       ) : null}
 
       {actions.state.kind === 'failed' ? (
-        <p className="break-address rounded-card bg-surface-1 p-4 text-base text-negative" role="alert">
+        <p className="break-address card p-4 text-base text-negative" role="alert">
           {actions.state.message}
         </p>
       ) : null}
 
       <section className="flex flex-col gap-4">
-        <div className="flex items-center gap-3 rounded-control bg-surface px-4 py-2.5">
+        <div className="flex items-center gap-2.5 rounded-control border border-border bg-surface px-3 py-2">
           <Search size={16} aria-hidden className="shrink-0 text-text-muted" />
           <input
             value={query}
@@ -170,11 +180,11 @@ export default function Staking() {
         {staking.loading && validators.length === 0 ? (
           <div className="flex flex-col gap-2" aria-busy>
             {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="h-16 animate-pulse rounded-card bg-surface-1" />
+              <div key={i} className="h-16 animate-pulse card" />
             ))}
           </div>
         ) : (
-          <ul className="divide-y divide-border overflow-hidden rounded-card bg-surface-1">
+          <ul className="divide-y divide-border overflow-hidden card">
             {validators.map((validator) => (
               <ValidatorRow
                 key={validator.address}

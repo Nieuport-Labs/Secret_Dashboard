@@ -17,6 +17,10 @@ export default {
         'surface-2': 'var(--color-surface-2)',
         'surface-3': 'var(--color-surface-3)',
         border: 'var(--color-border)',
+        'border-strong': 'var(--color-border-strong)',
+        glass: 'var(--glass-bg)',
+        'glass-edge': 'var(--glass-edge)',
+        scrim: 'var(--scrim)',
         text: 'var(--color-text)',
         'text-muted': 'var(--color-text-muted)',
         'text-faint': 'var(--color-text-faint)',
@@ -32,6 +36,13 @@ export default {
         card: 'var(--radius-card)',
         control: 'var(--radius-control)',
         pill: 'var(--radius-pill)'
+      },
+      boxShadow: {
+        panel: 'var(--shadow-panel)',
+        menu: 'var(--shadow-menu)'
+      },
+      backdropBlur: {
+        glass: 'var(--glass-blur)'
       },
       fontFamily: {
         sans: 'var(--font-sans)'
@@ -57,7 +68,18 @@ export default {
         label: [
           'var(--text-label)',
           { lineHeight: '1.4', letterSpacing: 'var(--text-label-tracking)', fontWeight: '500' }
-        ]
+        ],
+
+        /*
+         * Tailwind's own sizes, restated one step down so they land on the
+         * scale above instead of beside it. `text-base` is the interface's
+         * body size, not the browser's 16px default — which is the single
+         * change that takes the chrome from "enlarged" to "composed", without
+         * editing the hundred-odd places that ask for it.
+         */
+        base: ['var(--text-body)', { lineHeight: '1.5' }],
+        sm: ['0.8125rem', { lineHeight: '1.45' }],
+        xs: ['0.6875rem', { lineHeight: '1.4', letterSpacing: '0.02em' }]
       }
     }
   },

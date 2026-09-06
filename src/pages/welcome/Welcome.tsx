@@ -25,16 +25,16 @@ export default function Welcome() {
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
-      <div className="flex flex-col items-start gap-[30px] lg:flex-row lg:items-stretch">
-        <div className="flex w-full flex-col gap-5 lg:w-[400px]">
+      <div className="flex flex-col items-start gap-8 lg:flex-row lg:items-stretch lg:gap-10">
+        <div className="flex w-full flex-col gap-5 lg:w-[360px]">
           <div>
             <h1 className="text-display text-accent">Welcome to Secret</h1>
-            <p className="text-base text-text-faint">
-              Dashboard <span className="text-text">1.9</span>
+            <p className="mt-1 text-base text-text-faint">
+              Dashboard <span className="text-text-muted">1.9</span>
             </p>
           </div>
 
-          <div className="flex flex-col gap-[15px]">
+          <div className="flex flex-col gap-2.5">
             {(['keplr', 'starshell'] as WalletId[]).map((id) => (
               <Button
                 key={id}
@@ -44,7 +44,7 @@ export default function Welcome() {
                 loading={connecting && walletId === id}
                 disabled={connecting}
                 onClick={() => void connectWallet(id)}
-                icon={<img src={WALLETS[id].icon} alt="" className="size-[30px] rounded-pill" />}
+                icon={<img src={WALLETS[id].icon} alt="" className="size-6 rounded-pill" />}
               >
                 Continue with {WALLETS[id].name}
               </Button>
@@ -83,14 +83,15 @@ export default function Welcome() {
 
         <span aria-hidden className="hidden w-px self-stretch bg-border lg:block" />
 
-        <p className="max-w-[246px] text-base font-semibold text-text-faint">
-          <span className="text-text">
+        {/* Roughly 40 characters a line. The design sets this column narrow on
+            purpose — it is the one piece of prose on the screen and it reads
+            like a caption rather than a paragraph of terms. */}
+        <div className="max-w-[230px] text-balance">
+          <p className="text-title font-normal">
             Secret Network is a privacy preserving smart contract chain powered by the Cosmos stack.
-          </span>
-          <br />
-          <br />
-          Use and build dapps that value your privacy.
-        </p>
+          </p>
+          <p className="mt-3 text-base text-text-faint">Use and build dapps that value your privacy.</p>
+        </div>
       </div>
     </div>
   )
