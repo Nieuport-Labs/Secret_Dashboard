@@ -51,15 +51,30 @@ export default function Drawer({ open, onClose, title, children }: Props) {
         aria-label={title}
         tabIndex={-1}
         className={cn(
-          'absolute inset-y-0 right-0 flex w-full max-w-[380px] flex-col gap-5 overflow-y-auto',
+          /*
+           * Inset from every edge rather than welded to the right one, so it
+           * reads as a sheet resting on the page instead of a second column
+           * grafted onto it — which is also what lets it be rounded on all four
+           * corners and carry its edge the whole way round.
+           *
+           * `inset-5` sets all four offsets and `left-auto` releases the left,
+           * so the width is the panel's own: the viewport less both insets, up
+           * to 380px.
+           */
+          'absolute inset-5 left-auto flex w-[calc(100%-2.5rem)] max-w-[380px] flex-col',
           // Frosted rather than a solid slab: the page stays faintly readable
           // through it, so the panel reads as covering the page rather than
           // replacing it.
-          'glass border-l border-glass-edge shadow-panel p-6 outline-none',
+          'glass overflow-hidden rounded-card border border-glass-edge shadow-panel outline-none',
           'motion-safe:animate-[drawer-in_var(--duration-medium)_var(--ease-emphasised)]'
         )}
       >
-        <div className="flex items-start justify-between gap-4">
+        {/*
+          The title stays; only the body scrolls. The panel used to scroll as a
+          whole, which sent the heading and the close button off the top on a
+          long panel and ran the scrollbar straight through the rounded corners.
+        */}
+        <div className="flex shrink-0 items-start justify-between gap-4 px-6 pb-4 pt-6">
           <h2 className="text-headline">{title}</h2>
           <button
             type="button"
@@ -70,7 +85,8 @@ export default function Drawer({ open, onClose, title, children }: Props) {
             <X size={18} aria-hidden />
           </button>
         </div>
-        {children}
+
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-6 pb-6">{children}</div>
       </div>
     </div>,
     document.body
