@@ -33,6 +33,7 @@ Opens on port 3000.
 | `npm run lint`         | ESLint                                                         |
 | `npm run typecheck`    | `tsc --noEmit`                                                 |
 | `npm run verify:chain` | Check every chain assumption the app rests on, against mainnet |
+| `npm run test:bridge`  | Gas-slice sizing and IBC memo shapes                           |
 
 `verify:chain` is read-only and needs no wallet. Run it when something behaves oddly before
 suspecting the app — it will tell you whether an endpoint is lying about which chain it serves,
