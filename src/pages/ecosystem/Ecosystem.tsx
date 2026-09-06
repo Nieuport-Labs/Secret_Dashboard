@@ -43,10 +43,10 @@ export default function Ecosystem() {
   }, [dapps, query, tag])
 
   return (
-    <div className="mx-auto flex max-w-[900px] flex-col gap-8">
+    <div className="mx-auto flex max-w-[900px] flex-col gap-10">
       <h1 className="text-display">Ecosystem</h1>
 
-      <section className="flex flex-col gap-4">
+      <section className="flex flex-col gap-5">
         <div className="flex items-center gap-2.5 rounded-control border border-border bg-surface px-3 py-2">
           <Search size={16} aria-hidden className="shrink-0 text-text-muted" />
           <input
@@ -113,7 +113,7 @@ export default function Ecosystem() {
         )}
       </section>
 
-      <section className="flex flex-col gap-4">
+      <section className="flex flex-col gap-5">
         <h2 className="text-title">Where to get {DISPLAY_DENOM}</h2>
         <ul className="grid gap-3 sm:grid-cols-3">
           {WHERE_TO_BUY.map((place) => {

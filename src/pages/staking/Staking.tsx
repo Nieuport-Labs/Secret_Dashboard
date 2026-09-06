@@ -80,7 +80,7 @@ export default function Staking() {
   }
 
   return (
-    <div className="mx-auto flex max-w-[860px] flex-col gap-8">
+    <div className="mx-auto flex max-w-[860px] flex-col gap-10">
       <h1 className="text-display">Staking</h1>
 
       {/*
@@ -92,7 +92,7 @@ export default function Staking() {
       <div className="grid divide-y divide-border overflow-hidden card sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         <Stat label="Staked" value={`${formatDisplayAmount(staking.totalStaked)} ${DISPLAY_DENOM}`} />
         <Stat label="Available" value={`${formatDisplayAmount(balances.native ?? '0')} ${DISPLAY_DENOM}`} />
-        <div className="p-5">
+        <div className="p-6">
           <p className="text-label text-text-muted">Rewards</p>
           <p className="mt-1.5 text-headline tabular-nums text-positive">
             {formatDisplayAmount(staking.totalRewards)}{' '}
@@ -166,7 +166,7 @@ export default function Staking() {
         </p>
       ) : null}
 
-      <section className="flex flex-col gap-4">
+      <section className="flex flex-col gap-5">
         <div className="flex items-center gap-2.5 rounded-control border border-border bg-surface px-3 py-2">
           <Search size={16} aria-hidden className="shrink-0 text-text-muted" />
           <input
@@ -232,7 +232,7 @@ export default function Staking() {
 function Stat({ label, value }: { label: string; value: string }) {
   const [amount, denom] = value.split(' ')
   return (
-    <div className="p-5">
+    <div className="p-6">
       <p className="text-label text-text-muted">{label}</p>
       <p className="mt-1.5 text-headline tabular-nums">
         {amount} <span className="text-title text-text-muted">{denom}</span>

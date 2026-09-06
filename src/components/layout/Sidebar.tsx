@@ -17,12 +17,14 @@ export default function Sidebar() {
     <nav
       aria-label="Main"
       className={cn(
-        'glass',
+        'glass-chrome',
+        // No rule down the edge. The blur is already the boundary, and a line
+        // on top of it draws a second one for the eye to stop at.
         // Bottom bar on small screens.
-        'fixed inset-x-0 bottom-0 z-30 flex items-center justify-around border-t border-border px-2 py-1.5',
+        'fixed inset-x-0 bottom-0 z-30 flex items-center justify-around px-2 py-1.5',
         // Left rail from lg up.
         'lg:inset-y-0 lg:right-auto lg:w-[var(--sidebar-width)] lg:flex-col lg:items-stretch lg:justify-start',
-        'lg:gap-9 lg:border-r lg:border-t-0 lg:px-4 lg:py-7'
+        'lg:gap-10 lg:px-4 lg:py-8'
       )}
     >
       <NavLink

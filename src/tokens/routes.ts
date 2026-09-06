@@ -2313,3 +2313,19 @@ export function tokensFromChain(chainId: string): string[] {
 export function chainsWithDeposits(): string[] {
   return [...new Set(DEPOSIT_ROUTES.filter((r) => !r.needsSkip).map((r) => r.chainId))]
 }
+
+export function withdrawRoute(token: string, chainId: string): Route | undefined {
+  return withdrawRoutes(token).find((route) => route.chainId === chainId)
+}
+
+/** Every token that can be bridged out to this chain. */
+export function tokensToChain(chainId: string): string[] {
+  return [
+    ...new Set(WITHDRAW_ROUTES.filter((r) => r.chainId === chainId && !r.needsSkip).map((r) => r.token))
+  ]
+}
+
+/** Every chain any token can be bridged out to. */
+export function chainsWithWithdrawals(): string[] {
+  return [...new Set(WITHDRAW_ROUTES.filter((r) => !r.needsSkip).map((r) => r.chainId))]
+}

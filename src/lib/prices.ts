@@ -44,3 +44,45 @@ export async function fetchPrices(ids: string[], currency = 'usd'): Promise<Map<
   cache = { at: Date.now(), currency, prices }
   return prices
 }
+
+export interface SeriesPoint {
+  /** Unix milliseconds. */
+  t: number
+  v: number
+}
+
+/**
+ * Daily price history for one coin.
+ *
+ * CoinGecko chooses the granularity from the range — hourly under 90 days,
+ * daily above — so the point count is not something to rely on. Like a spot
+ * price this is decoration: it fails to an empty series and the panel says the
+ * history is unavailable rather than drawing a flat line at zero.
+ */
+export async function fetchPriceHistory(
+  id: string,
+  days = 30,
+  currency = 'usd'
+): Promise<{ prices: SeriesPoint[]; volumes: SeriesPoint[] }> {
+  const url =
+    `${COINGECKO}/coins/${encodeURIComponent(id)}/market_chart` +
+    `?vs_currency=${encodeURIComponent(currency)}&days=${days}`
+
+  const response = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(12_000)
+  })
+  if (!response.ok) throw new Error(`Price history failed: HTTP ${response.status}`)
+
+  const body = (await response.json()) as {
+    prices?: Array<[number, number]>
+    total_volumes?: Array<[number, number]>
+  }
+
+  const toSeries = (rows: Array<[number, number]> | undefined): SeriesPoint[] =>
+    (rows ?? [])
+      .filter((row) => Array.isArray(row) && Number.isFinite(row[0]) && Number.isFinite(row[1]))
+      .map(([t, v]) => ({ t, v }))
+
+  return { prices: toSeries(body.prices), volumes: toSeries(body.total_volumes) }
+}

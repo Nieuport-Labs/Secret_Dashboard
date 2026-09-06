@@ -45,7 +45,7 @@ export default function ValidatorRow({
       figures and the buttons squeezes it to two letters, and a validator you
       cannot read is one you cannot choose between.
     */
-    <li className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4">
+    <li className="flex flex-col gap-3 px-5 py-[18px] sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4">
       <span className="min-w-0 sm:flex-1">
         <span className="flex items-center gap-2">
           <span className="truncate text-body font-medium">{validator.moniker}</span>

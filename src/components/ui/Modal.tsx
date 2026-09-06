@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 
@@ -11,13 +12,19 @@ interface Props {
   children: ReactNode
 }
 
-/** Centred dialog, for a decision the user has to finish before moving on. */
+/**
+ * Centred dialog, for a decision the user has to finish before moving on.
+ *
+ * Portalled into <body> for the same reason the drawer is: a frosted ancestor
+ * becomes the containing block for `position: fixed`, and a dialog opened from
+ * the header would otherwise be laid out inside the header.
+ */
 export default function Modal({ open, onClose, title, description, children }: Props) {
   const panel = useFocusTrap(open, onClose)
 
   if (!open) return null
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
       <button
         type="button"
@@ -51,6 +58,7 @@ export default function Modal({ open, onClose, title, description, children }: P
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

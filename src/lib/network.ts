@@ -95,3 +95,25 @@ export async function fetchTvl(): Promise<number | undefined> {
     return undefined
   }
 }
+
+/**
+ * Value locked over time, from DefiLlama.
+ *
+ * Their series is one point a day at midnight UTC, in seconds rather than
+ * milliseconds — the conversion is not optional, and getting it wrong puts
+ * every point in 1970.
+ */
+export async function fetchTvlHistory(): Promise<Array<{ t: number; v: number }>> {
+  try {
+    const rows = (await getJson<Array<{ date?: number; tvl?: number }>>(
+      'https://api.llama.fi',
+      '/v2/historicalChainTvl/Secret'
+    )) as Array<{ date?: number; tvl?: number }>
+
+    return rows
+      .filter((row) => Number.isFinite(row.date) && Number.isFinite(row.tvl))
+      .map((row) => ({ t: row.date! * 1000, v: row.tvl! }))
+  } catch {
+    return []
+  }
+}

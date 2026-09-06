@@ -1,24 +1,35 @@
-import { ArrowDown, ArrowLeftRight, ExternalLink, Fuel, Info, ShieldCheck } from 'lucide-react'
+import { ArrowDown, ArrowLeftRight, ExternalLink, Fuel, ShieldCheck, SlidersHorizontal } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
-import { DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
+import Picker from '@/pages/bridge/components/Picker'
+import { DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import { SOURCE_CHAINS, chainImageUrl, type SourceChain } from '@/chains/sources'
-import { depositGasLimit, sendDeposit, type Leg } from '@/lib/bridge'
+import { depositGasLimit, sendDeposit, sendWithdraw, type Leg } from '@/lib/bridge'
+import { queryAllBalances } from '@/lib/bank'
 import { codeHashFor } from '@/lib/codeHash'
 import { buildGasLeg, quoteGasSlice, shouldOfferGas } from '@/lib/getGas'
 import { formatAmount, fromBaseUnits, toBaseUnits } from '@/lib/format'
 import { plainTransfer, wrapDepositMemo } from '@/lib/ibcMemo'
+import { MSG_TRANSFER } from '@/lib/msgTypes'
 import { fetchPrices } from '@/lib/prices'
 import { cn } from '@/lib/cn'
 import { useBalances } from '@/hooks/useBalances'
 import { usePermit } from '@/hooks/usePermit'
 import { useSourceWallet } from '@/hooks/useSourceWallet'
-import { chainsWithDeposits, depositRoute, tokensFromChain } from '@/tokens/routes'
+import {
+  chainsWithDeposits,
+  chainsWithWithdrawals,
+  depositRoute,
+  tokensFromChain,
+  tokensToChain,
+  withdrawRoute
+} from '@/tokens/routes'
 import { tokenByAddress, tokenImageUrl } from '@/tokens/registry'
-import { transactionsCovered } from '@/store/feePayer'
+import { transactionsCovered, useFeePayer } from '@/store/feePayer'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 
@@ -28,51 +39,62 @@ type Status =
   | { kind: 'done'; hash: string }
   | { kind: 'failed'; message: string }
 
+type Direction = 'deposit' | 'withdraw'
+
 /**
- * Bringing tokens onto Secret.
+ * Moving tokens between Secret and the rest of IBC, both ways.
  *
- * Two things happen here that do not happen on other bridges, and both are
- * about the state someone arrives in. Tokens are wrapped into their private
- * SNIP-20 as they land, rather than sitting on the chain in public. And if the
- * wallet has no SCRT, a slice of the transfer is swapped into some on the way,
- * because an account with no gas cannot even sign the transaction that would
- * get it gas.
+ * The two directions share a form and are genuinely different transactions. A
+ * deposit is signed on the *source* chain — a second wallet connection, the
+ * same key under a different prefix — and can carry hooks, so the token arrives
+ * already wrapped and a slice of it can become gas on the way. A withdrawal is
+ * signed here on Secret, costs SCRT, and can therefore go through the app's fee
+ * payer; it carries nothing, because there is no hook to run on the far side.
  */
 export default function Bridge() {
   const navigate = useNavigate()
   const secretAddress = useWallet((state) => state.address)
   const queryClient = useWallet((state) => state.queryClient)
+  const signingClient = useWallet((state) => state.client)
+  const granterFor = useFeePayer((state) => state.granterFor)
   const settings = useSettings()
   const { permit } = usePermit()
   const balances = useBalances(permit)
 
-  const chains = useMemo(() => {
-    const ids = new Set(chainsWithDeposits())
-    return SOURCE_CHAINS.filter((chain) => ids.has(chain.chainId))
-  }, [])
-
-  const [chain, setChain] = useState<SourceChain | undefined>(chains[0])
+  const [direction, setDirection] = useState<Direction>('deposit')
+  const [chainId, setChainId] = useState<string | undefined>()
   const [tokenAddress, setTokenAddress] = useState<string | undefined>()
   const [amount, setAmount] = useState('')
   const [wrap, setWrap] = useState(settings.autoWrapDeposits)
   const [getGas, setGetGas] = useState(false)
+  const [optionsOpen, setOptionsOpen] = useState(false)
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
   const [prices, setPrices] = useState<Map<string, number>>(new Map())
+  const [secretBank, setSecretBank] = useState<Map<string, string>>(new Map())
+
+  const depositing = direction === 'deposit'
+
+  const chains = useMemo(() => {
+    const ids = new Set(depositing ? chainsWithDeposits() : chainsWithWithdrawals())
+    return SOURCE_CHAINS.filter((c) => ids.has(c.chainId))
+  }, [depositing])
+
+  const chain: SourceChain | undefined = chains.find((c) => c.chainId === chainId) ?? chains[0]
 
   const source = useSourceWallet(chain)
 
   const tokens = useMemo(
     () =>
       chain
-        ? tokensFromChain(chain.chainId)
+        ? (depositing ? tokensFromChain(chain.chainId) : tokensToChain(chain.chainId))
             .map(tokenByAddress)
             .filter((t) => !!t)
         : [],
-    [chain]
+    [chain, depositing]
   )
 
-  // Selecting a chain that does not carry the current token has to reset it,
-  // or the form silently describes a route that does not exist.
+  // Switching direction or chain can leave a token selected that this leg does
+  // not carry, and the form would then describe a route that does not exist.
   useEffect(() => {
     if (!tokenAddress || !tokens.some((t) => t.address === tokenAddress)) {
       setTokenAddress(tokens[0]?.address)
@@ -80,7 +102,12 @@ export default function Bridge() {
   }, [tokens, tokenAddress])
 
   const token = tokenAddress ? tokenByAddress(tokenAddress) : undefined
-  const route = chain && tokenAddress ? depositRoute(tokenAddress, chain.chainId) : undefined
+  const route =
+    chain && tokenAddress
+      ? depositing
+        ? depositRoute(tokenAddress, chain.chainId)
+        : withdrawRoute(tokenAddress, chain.chainId)
+      : undefined
 
   useEffect(() => {
     const ids = ['secret', token?.coingeckoId].filter((id): id is string => !!id)
@@ -89,78 +116,144 @@ export default function Bridge() {
       .catch(() => setPrices(new Map()))
   }, [token?.coingeckoId])
 
+  /*
+   * A withdrawal spends a *bank* denomination on Secret — `uscrt`, or the
+   * `ibc/…` voucher the token arrived as. That is a different balance from the
+   * SNIP-20 one on the wallet screen, and the difference is the whole reason a
+   * wrapped token has to be unwrapped before it can leave.
+   */
+  useEffect(() => {
+    if (depositing || !queryClient || !secretAddress) return
+    let cancelled = false
+    void queryAllBalances(queryClient, secretAddress)
+      .then((held) => {
+        if (!cancelled) setSecretBank(held)
+      })
+      .catch(() => {
+        if (!cancelled) setSecretBank(new Map())
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [depositing, queryClient, secretAddress, status.kind])
+
+  const decimals = token?.decimals ?? 6
+  const available = depositing ? source.balance : route ? (secretBank.get(route.denom) ?? '0') : undefined
+
   let amountBaseUnits = '0'
   let amountError: string | undefined
   try {
-    amountBaseUnits = amount ? toBaseUnits(amount, token?.decimals ?? 6) : '0'
+    amountBaseUnits = amount ? toBaseUnits(amount, decimals) : '0'
   } catch (error) {
     amountError = error instanceof Error ? error.message : 'Not a number.'
+  }
+  if (!amountError && available !== undefined && BigInt(amountBaseUnits) > BigInt(available)) {
+    amountError = 'More than you hold.'
   }
 
   const quote = quoteGasSlice({
     targetUsd: settings.gasSliceUsd,
     scrtPrice: prices.get('secret'),
     tokenPrice: token?.coingeckoId ? prices.get(token.coingeckoId) : undefined,
-    tokenDecimals: token?.decimals ?? 6,
+    tokenDecimals: decimals,
     bridgeAmountBaseUnits: amountBaseUnits
   })
 
-  const gasOffer = shouldOfferGas(balances.native, quote, amountBaseUnits)
+  const gasOffer = depositing
+    ? shouldOfferGas(balances.native, quote, amountBaseUnits)
+    : ({ offer: false } as const)
   const gasUrgent = gasOffer.offer && gasOffer.urgent
-
-  // An empty wallet is not a suggestion, so the box starts ticked there.
-  useEffect(() => {
-    if (gasUrgent) setGetGas(true)
-  }, [gasUrgent])
-
   const canGetGas = gasOffer.offer && Boolean(source.osmosisAddress)
 
+  // An empty wallet is not a suggestion. The box starts ticked and the panel it
+  // lives in starts open — hiding a precondition behind a disclosure is how
+  // someone ends up bridged in and unable to sign anything.
+  useEffect(() => {
+    if (gasUrgent) {
+      setGetGas(true)
+      setOptionsOpen(true)
+    }
+  }, [gasUrgent])
+
+  const setPercent = (share: number) => {
+    if (available === undefined) return
+    const value = (BigInt(available) * BigInt(share)) / 100n
+    setAmount(fromBaseUnits(value.toString(), decimals))
+  }
+
+  const percent =
+    available !== undefined && BigInt(available) > 0n && !amountError
+      ? Number((BigInt(amountBaseUnits) * 100n) / BigInt(available))
+      : 0
+
+  const reset = () => {
+    setAmount('')
+    setStatus({ kind: 'idle' })
+  }
+
   const send = async () => {
-    if (!chain || !route || !token || !secretAddress || !source.address || !queryClient) return
-
+    if (!chain || !route || !token || !secretAddress) return
     setStatus({ kind: 'sending' })
+
     try {
-      const useGas = getGas && canGetGas && gasOffer.offer
-      const mainAmount = useGas
-        ? (BigInt(amountBaseUnits) - BigInt(gasOffer.quote.costBaseUnits)).toString()
-        : amountBaseUnits
+      if (depositing) {
+        if (!source.address || !queryClient) return
 
-      const legs: Leg[] = []
+        const useGas = getGas && canGetGas && gasOffer.offer
+        const mainAmount = useGas
+          ? (BigInt(amountBaseUnits) - BigInt(gasOffer.quote.costBaseUnits)).toString()
+          : amountBaseUnits
 
-      // The main transfer, wrapped on arrival when asked. The code hash is read
-      // from the chain: a stale one makes the hook fail and the tokens land
-      // public instead, which is the opposite of what was asked for.
-      legs.push({
-        denom: route.denom,
-        amount: mainAmount,
-        channel: route.channel,
-        transfer: wrap
-          ? wrapDepositMemo(token.address, await codeHashFor(queryClient, token.address), secretAddress)
-          : plainTransfer(secretAddress)
-      })
+        const legs: Leg[] = []
 
-      if (useGas && source.osmosisAddress) {
+        // The main transfer, wrapped on arrival when asked. The code hash is
+        // read from the chain: a stale one makes the hook fail and the tokens
+        // land public instead, the opposite of what was asked for.
         legs.push({
           denom: route.denom,
-          amount: gasOffer.quote.costBaseUnits,
-          // Through Osmosis, not straight to Secret: that is where the swap is.
-          channel: chain.chainId === 'osmosis-1' ? route.channel : undefined,
-          transfer: buildGasLeg({
-            secretAddress,
-            osmosisAddress: source.osmosisAddress,
-            delivery: settings.gasDelivery
-          })
+          amount: mainAmount,
+          channel: route.channel,
+          transfer: wrap
+            ? wrapDepositMemo(token.address, await codeHashFor(queryClient, token.address), secretAddress)
+            : plainTransfer(secretAddress)
         })
+
+        if (useGas && source.osmosisAddress) {
+          legs.push({
+            denom: route.denom,
+            amount: gasOffer.quote.costBaseUnits,
+            // Through Osmosis, not straight to Secret: that is where the swap is.
+            channel: chain.chainId === 'osmosis-1' ? route.channel : undefined,
+            transfer: buildGasLeg({
+              secretAddress,
+              osmosisAddress: source.osmosisAddress,
+              delivery: settings.gasDelivery
+            })
+          })
+        }
+
+        const result = await sendDeposit({
+          chain,
+          sender: source.address,
+          legs,
+          gasLimit: depositGasLimit(chain, route, legs.length, wrap)
+        })
+        setStatus({ kind: 'done', hash: result.hash })
+      } else {
+        if (!signingClient || !source.address) return
+
+        const result = await sendWithdraw({
+          client: signingClient,
+          chain,
+          sender: secretAddress,
+          receiver: source.address,
+          denom: route.denom,
+          amount: amountBaseUnits,
+          channel: route.channel,
+          feeGranter: granterFor(chain.withdrawGas, [MSG_TRANSFER])
+        })
+        setStatus({ kind: 'done', hash: result.hash })
       }
-
-      const result = await sendDeposit({
-        chain,
-        sender: source.address,
-        legs,
-        gasLimit: depositGasLimit(chain, route, legs.length, wrap)
-      })
-
-      setStatus({ kind: 'done', hash: result.hash })
     } catch (error) {
       setStatus({ kind: 'failed', message: error instanceof Error ? error.message : String(error) })
     }
@@ -177,204 +270,401 @@ export default function Bridge() {
     )
   }
 
+  const secretSide = { label: 'Secret Network', image: '/img/secret-mark.svg' }
+  const farSide = { label: chain?.name ?? '—', image: chain ? chainImageUrl(chain) : undefined }
+  const from = depositing ? farSide : secretSide
+  const to = depositing ? secretSide : farSide
+
+  const needsAddress = !source.address
+
   return (
-    <div className="mx-auto flex max-w-[560px] flex-col gap-6">
+    <div className="mx-auto flex max-w-[520px] flex-col gap-10">
       <h1 className="text-display">Bridge</h1>
 
-      <label className="flex flex-col gap-2">
-        <span className="text-base font-medium">From</span>
-        <select
-          value={chain?.chainId ?? ''}
-          onChange={(event) => setChain(chains.find((c) => c.chainId === event.target.value))}
-          className="rounded-control border border-border bg-surface px-3 py-2.5 text-base outline-none"
-        >
-          {chains.map((c) => (
-            <option key={c.chainId} value={c.chainId}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      {/* One panel, not a column of loose fields: everything inside decides a
+          single transaction, and the shape should say so. */}
+      <div className="card flex flex-col gap-6 p-5 sm:p-6">
+        <Segmented
+          value={direction}
+          onChange={(next) => {
+            setDirection(next)
+            reset()
+          }}
+        />
 
-      <label className="flex flex-col gap-2">
-        <span className="text-base font-medium">Token</span>
-        <select
-          value={tokenAddress ?? ''}
-          onChange={(event) => setTokenAddress(event.target.value)}
-          className="rounded-control border border-border bg-surface px-3 py-2.5 text-base outline-none"
-        >
-          {tokens.map((t) => (
-            <option key={t.address} value={t.address}>
-              {t.symbol}
-              {t.description ? ` — ${t.description}` : ''}
-            </option>
-          ))}
-        </select>
-      </label>
+        <section className="flex flex-col gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label={depositing ? 'From' : 'To'}>
+              <Picker
+                label="Network"
+                options={chains.map((c) => ({
+                  id: c.chainId,
+                  label: c.name,
+                  detail: c.chainId,
+                  image: chainImageUrl(c)
+                }))}
+                value={chain?.chainId}
+                onChange={(id) => {
+                  setChainId(id)
+                  reset()
+                }}
+              />
+            </Field>
 
-      <label className="flex flex-col gap-2">
-        <span className="flex items-center justify-between text-base font-medium">
-          Amount
-          {source.balance !== undefined ? (
+            <Field label="Token">
+              <Picker
+                label="Token"
+                options={tokens.map((t) => ({
+                  id: t.address,
+                  label: t.symbol,
+                  detail: t.description,
+                  image: tokenImageUrl(t)
+                }))}
+                value={tokenAddress}
+                onChange={(id) => {
+                  setTokenAddress(id)
+                  setAmount('')
+                }}
+              />
+            </Field>
+          </div>
+
+          <p className="flex flex-wrap items-center justify-center gap-2 text-label text-text-faint">
+            {from.image ? <img src={from.image} alt="" className="size-4 rounded-pill" /> : null}
+            {from.label}
+            <ArrowDown size={13} aria-hidden className="-rotate-90" />
+            {to.image ? <img src={to.image} alt="" className="size-4 rounded-pill" /> : null}
+            {to.label}
+          </p>
+        </section>
+
+        <AmountField
+          amount={amount}
+          onAmount={setAmount}
+          symbol={token?.symbol}
+          image={token ? tokenImageUrl(token) : undefined}
+          available={available}
+          decimals={decimals}
+          percent={percent}
+          onPercent={setPercent}
+          error={amountError}
+        />
+
+        {/*
+          Options, not decisions. Both have a right default — wrap what arrives,
+          and take a slice for gas only when there is no gas — so they are
+          folded away rather than asked. The panel opens itself when the gas
+          offer is urgent, because at zero SCRT it stops being an option.
+        */}
+        {depositing ? (
+          <div className="rounded-control border border-border">
             <button
               type="button"
-              onClick={() => setAmount(fromBaseUnits(source.balance!, token?.decimals ?? 6))}
-              className="state-layer rounded-control px-2 py-0.5 text-sm text-text-muted"
+              onClick={() => setOptionsOpen((open) => !open)}
+              aria-expanded={optionsOpen}
+              className="state-layer flex w-full items-center gap-2 rounded-control px-3 py-2.5 text-left text-base font-medium"
             >
-              Balance {formatAmount(source.balance, { decimals: token?.decimals ?? 6 })}
+              <SlidersHorizontal size={16} aria-hidden className="text-text-muted" />
+              <span className="flex-1">Options</span>
+              <span className="text-label font-normal text-text-faint">
+                {[wrap ? 'wrap on arrival' : undefined, getGas && canGetGas ? 'get gas' : undefined]
+                  .filter(Boolean)
+                  .join(' · ') || 'none'}
+              </span>
             </button>
-          ) : null}
-        </span>
-        <div className="flex items-center gap-3 rounded-control border border-border bg-surface px-3 py-2.5">
-          {token ? <img src={tokenImageUrl(token)} alt="" className="size-6 rounded-pill" /> : null}
-          <input
-            inputMode="decimal"
-            value={amount}
-            onChange={(event) => setAmount(event.target.value)}
-            placeholder="0.0"
-            className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-text-faint"
-          />
-          <span className="shrink-0 text-base text-text-muted">{token?.symbol}</span>
-        </div>
-        {amountError ? (
-          <span className="text-base text-negative" role="alert">
-            {amountError}
-          </span>
+
+            {optionsOpen ? (
+              <div className="flex flex-col gap-1 border-t border-border p-2">
+                <Option
+                  checked={wrap}
+                  onChange={setWrap}
+                  icon={<ShieldCheck size={16} aria-hidden className="text-accent" />}
+                  title="Wrap on arrival"
+                >
+                  Arrives as a private SNIP-20 instead of sitting on Secret in public. Costs a little more gas
+                  on the source chain.
+                </Option>
+
+                <Option
+                  checked={getGas && canGetGas}
+                  disabled={!canGetGas}
+                  onChange={setGetGas}
+                  highlight={gasUrgent}
+                  icon={<Fuel size={16} aria-hidden className={gasUrgent ? 'text-accent' : undefined} />}
+                  title={gasUrgent ? 'Get gas (recommended)' : 'Get gas'}
+                >
+                  {gasOffer.offer ? (
+                    <>
+                      {gasUrgent
+                        ? `You hold no ${DISPLAY_DENOM}, so you could not sign anything on Secret — not even to buy gas. `
+                        : ''}
+                      {gasOffer.quote.amountScrt} {DISPLAY_DENOM} (about ${gasOffer.quote.usd?.toFixed(2)}) is
+                      swapped out of this transfer on the way, through Osmosis — roughly{' '}
+                      {transactionsCovered(BigInt(gasOffer.quote.amountBaseUnits)).toLocaleString()}{' '}
+                      transactions.{' '}
+                      <button
+                        type="button"
+                        onClick={() => settings.set('gasSliceUsd', Math.max(0.05, settings.gasSliceUsd / 4))}
+                        className="underline underline-offset-4"
+                      >
+                        Take less
+                      </button>
+                      {!canGetGas ? (
+                        <span className="mt-1 block text-text-faint">
+                          Needs an Osmosis account in your wallet, for recovering the swap if it fails.
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      Swaps about a dollar of this transfer into {DISPLAY_DENOM} on the way, so you can pay
+                      for transactions once it lands. Offered when you are short of gas — you are not.
+                    </>
+                  )}
+                </Option>
+              </div>
+            ) : null}
+          </div>
         ) : null}
-      </label>
 
-      <div className="flex items-center justify-center gap-2 text-text-faint">
-        <ArrowDown size={18} aria-hidden />
-        {chain ? <img src={chainImageUrl(chain)} alt="" className="size-4 rounded-pill opacity-60" /> : null}
-        <span className="text-sm">Secret Network</span>
+        {status.kind === 'done' ? (
+          <div className="flex flex-col gap-2 rounded-control border border-border bg-surface p-3">
+            <p className="text-base">Sent. It usually lands within a minute.</p>
+            <a
+              className="inline-flex items-center gap-1.5 text-base text-accent underline underline-offset-4"
+              href={explorerTxUrl(status.hash)}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              View transaction
+              <ExternalLink size={14} aria-hidden />
+            </a>
+          </div>
+        ) : null}
+
+        {status.kind === 'failed' ? (
+          <p
+            className="break-address rounded-control border border-border p-3 text-base text-negative"
+            role="alert"
+          >
+            {status.message}
+          </p>
+        ) : null}
+
+        {needsAddress ? (
+          <Button variant="primary" block loading={source.connecting} onClick={() => void source.connect()}>
+            {depositing
+              ? `Connect on ${chain?.name ?? 'the source chain'}`
+              : `Choose your ${chain?.name ?? 'destination'} address`}
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            block
+            loading={status.kind === 'sending'}
+            disabled={!route || !amount || Boolean(amountError) || BigInt(amountBaseUnits) === 0n}
+            onClick={() => void send()}
+          >
+            {depositing ? 'Bridge to Secret' : `Send to ${chain?.name ?? 'destination'}`}
+          </Button>
+        )}
+
+        {source.error ? (
+          <p className="text-base text-negative" role="alert">
+            {source.error}
+          </p>
+        ) : null}
+
+        {/*
+          A withdrawal spends the bank denomination, so a token held wrapped is
+          invisible to it. Saying so where the zero appears beats leaving
+          someone to conclude their balance has gone.
+        */}
+        {!depositing && available === '0' && token ? (
+          <p className="text-label text-text-faint">
+            This sends the public balance on Secret
+            {route && route.denom !== DENOM ? ', which is the voucher it arrived as' : ''}. If you hold{' '}
+            {token.symbol} wrapped,{' '}
+            <button
+              type="button"
+              onClick={() => navigate('/wallet?panel=wrap')}
+              className="text-accent underline underline-offset-4"
+            >
+              unwrap it first
+            </button>
+            .
+          </p>
+        ) : null}
       </div>
+    </div>
+  )
+}
 
-      <label className="state-layer flex cursor-pointer items-start gap-3 rounded-control bg-surface p-3">
-        <input
-          type="checkbox"
-          checked={wrap}
-          onChange={(event) => setWrap(event.target.checked)}
-          className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
-        />
-        <span>
-          <span className="flex items-center gap-2 text-base font-medium">
-            <ShieldCheck size={16} aria-hidden className="text-accent" />
-            Wrap on arrival
-          </span>
-          <span className="block text-sm text-text-muted">
-            Arrives as a private SNIP-20 instead of sitting on Secret in public. Costs a little more gas on
-            the source chain.
-          </span>
-        </span>
-      </label>
-
-      {gasOffer.offer ? (
-        <label
+function Segmented({ value, onChange }: { value: Direction; onChange: (next: Direction) => void }) {
+  return (
+    <div role="tablist" className="flex gap-1 rounded-pill border border-border p-1">
+      {(['deposit', 'withdraw'] as Direction[]).map((option) => (
+        <button
+          key={option}
+          role="tab"
+          type="button"
+          aria-selected={value === option}
+          onClick={() => onChange(option)}
           className={cn(
-            'state-layer flex cursor-pointer items-start gap-3 rounded-control p-3',
-            gasOffer.urgent ? 'bg-accent-container' : 'bg-surface'
+            'state-layer flex-1 rounded-pill px-4 py-1.5 text-base font-medium capitalize',
+            'transition-colors duration-[var(--duration-short)] ease-[var(--ease-standard)]',
+            value === option ? 'bg-accent-container text-accent' : 'text-text-muted'
           )}
         >
-          <input
-            type="checkbox"
-            checked={getGas && canGetGas}
-            disabled={!canGetGas}
-            onChange={(event) => setGetGas(event.target.checked)}
-            className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
-          />
-          <span>
-            <span
+          {option}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-label text-text-muted">{label}</span>
+      {children}
+    </div>
+  )
+}
+
+const PERCENTS = [25, 50, 100] as const
+
+function AmountField({
+  amount,
+  onAmount,
+  symbol,
+  image,
+  available,
+  decimals,
+  percent,
+  onPercent,
+  error
+}: {
+  amount: string
+  onAmount: (value: string) => void
+  symbol?: string
+  image?: string
+  available?: string
+  decimals: number
+  percent: number
+  onPercent: (share: number) => void
+  error?: string
+}) {
+  const has = available !== undefined && BigInt(available) > 0n
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-label text-text-muted">Amount</span>
+        {available !== undefined ? (
+          <span className="text-label tabular-nums text-text-faint">
+            Balance {formatAmount(available, { decimals })} {symbol}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="flex items-center gap-3 rounded-control border border-border bg-surface px-3 py-3">
+        {image ? <img src={image} alt="" className="size-7 shrink-0 rounded-pill" /> : null}
+        <input
+          inputMode="decimal"
+          value={amount}
+          onChange={(event) => onAmount(event.target.value)}
+          placeholder="0.0"
+          aria-label="Amount"
+          className="min-w-0 flex-1 bg-transparent text-headline tabular-nums outline-none placeholder:text-text-faint"
+        />
+        <span className="shrink-0 text-title text-text-muted">{symbol}</span>
+      </div>
+
+      {/*
+        The slider and the buttons drive the same number and both earn their
+        place: the buttons are exact and one tap, the slider is for the case
+        where the fraction is a judgement rather than a round figure.
+      */}
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={Math.min(100, Math.max(0, percent))}
+          disabled={!has}
+          onChange={(event) => onPercent(Number(event.target.value))}
+          aria-label="Fraction of balance"
+          className="slider min-w-0 flex-1"
+        />
+        <div className="flex shrink-0 gap-1">
+          {PERCENTS.map((value) => (
+            <button
+              key={value}
+              type="button"
+              disabled={!has}
+              onClick={() => onPercent(value)}
               className={cn(
-                'flex items-center gap-2 text-base font-medium',
-                gasOffer.urgent && 'text-accent'
+                'state-layer rounded-pill border border-border px-2.5 py-1 text-label font-medium',
+                'disabled:cursor-not-allowed disabled:opacity-40',
+                percent === value ? 'bg-accent-container text-accent' : 'text-text-muted'
               )}
             >
-              <Fuel size={16} aria-hidden />
-              Get gas {gasOffer.urgent ? '(recommended)' : ''}
-            </span>
-            <span className="block text-sm text-text-muted">
-              {gasOffer.urgent
-                ? `You hold no ${DISPLAY_DENOM}, so you could not sign anything on Secret — not even to buy gas. `
-                : ''}
-              {gasOffer.quote.amountScrt} {DISPLAY_DENOM} (about ${gasOffer.quote.usd?.toFixed(2)}) is swapped
-              out of this transfer on the way, through Osmosis.
-            </span>
-            {/*
-              Sizing the slice in dollars is only intuitive while SCRT is worth
-              something like a dollar. At a cent it buys thousands of
-              transactions, which is far more than anyone needs taken out of
-              their transfer — so the count is shown next to the price, where it
-              is impossible to miss and one tap from being changed.
-            */}
-            <span className="mt-1 block text-sm text-text-faint">
-              Roughly {transactionsCovered(BigInt(gasOffer.quote.amountBaseUnits)).toLocaleString()}{' '}
-              transactions.{' '}
-              <button
-                type="button"
-                onClick={() => settings.set('gasSliceUsd', Math.max(0.05, settings.gasSliceUsd / 4))}
-                className="underline underline-offset-4"
-              >
-                Take less
-              </button>
-            </span>
-            {!canGetGas ? (
-              <span className="mt-1 block text-sm text-text-faint">
-                Needs an Osmosis account in your wallet, for recovering the swap if it fails.
-              </span>
-            ) : null}
-          </span>
-        </label>
-      ) : null}
-
-      {status.kind === 'done' ? (
-        <div className="flex flex-col gap-3 card p-4">
-          <p className="text-base">Sent. It usually lands within a minute.</p>
-          <a
-            className="inline-flex items-center gap-1.5 text-base text-accent underline underline-offset-4"
-            href={explorerTxUrl(status.hash)}
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            View transaction
-            <ExternalLink size={14} aria-hidden />
-          </a>
+              {value === 100 ? 'Max' : `${value}%`}
+            </button>
+          ))}
         </div>
-      ) : null}
+      </div>
 
-      {status.kind === 'failed' ? (
-        <p className="break-address card p-4 text-base text-negative" role="alert">
-          {status.message}
-        </p>
+      {error ? (
+        <span className="text-base text-negative" role="alert">
+          {error}
+        </span>
       ) : null}
+    </section>
+  )
+}
 
-      {!source.address ? (
-        <Button variant="primary" block loading={source.connecting} onClick={() => void source.connect()}>
-          Connect on {chain?.name ?? 'the source chain'}
-        </Button>
-      ) : (
-        <Button
-          variant="primary"
-          block
-          loading={status.kind === 'sending'}
-          disabled={!route || !amount || Boolean(amountError) || BigInt(amountBaseUnits) === 0n}
-          onClick={() => void send()}
-        >
-          Bridge to Secret
-        </Button>
+function Option({
+  checked,
+  onChange,
+  disabled,
+  highlight,
+  icon,
+  title,
+  children
+}: {
+  checked: boolean
+  onChange: (next: boolean) => void
+  disabled?: boolean
+  highlight?: boolean
+  icon: ReactNode
+  title: string
+  children: ReactNode
+}) {
+  return (
+    <label
+      className={cn(
+        'state-layer flex cursor-pointer items-start gap-3 rounded-control p-3',
+        highlight && 'bg-accent-container',
+        disabled && 'cursor-not-allowed opacity-60'
       )}
-
-      {source.error ? (
-        <p className="text-base text-negative" role="alert">
-          {source.error}
-        </p>
-      ) : null}
-
-      <p className="flex items-start gap-2 text-sm text-text-faint">
-        <Info size={14} aria-hidden className="mt-0.5 shrink-0" />
-        Assets that Axelar bridges in from Ethereum and other EVM chains are not offered: those routes were
-        disabled after the June 2026 exploit. Axelar&rsquo;s own chain is a different thing, is listed above,
-        and its IBC channel to Secret is open.
-      </p>
-    </div>
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]"
+      />
+      <span className="min-w-0">
+        <span className={cn('flex items-center gap-2 text-base font-medium', highlight && 'text-accent')}>
+          {icon}
+          {title}
+        </span>
+        <span className="mt-0.5 block text-label leading-relaxed text-text-muted">{children}</span>
+      </span>
+    </label>
   )
 }

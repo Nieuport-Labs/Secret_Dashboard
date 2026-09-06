@@ -54,7 +54,7 @@ export default function BalanceList({
   }
 
   return (
-    <section className="flex flex-col gap-4">
+    <section className="flex flex-col gap-5">
       <div className="flex items-center justify-between gap-4">
         <span className="flex items-center gap-2.5">
           <h2 className="text-title">Private tokens</h2>
@@ -74,7 +74,7 @@ export default function BalanceList({
       {held.length > 0 ? (
         <ul className="divide-y divide-border overflow-hidden card">
           {held.map((row) => (
-            <li key={row.token.address} className="flex items-center gap-3 px-5 py-3.5">
+            <li key={row.token.address} className="flex items-center gap-3.5 px-5 py-4">
               <img src={tokenImageUrl(row.token)} alt="" className="size-8 shrink-0 rounded-pill" />
               <span className="min-w-0">
                 <span className="block truncate text-body font-medium">{row.token.symbol}</span>

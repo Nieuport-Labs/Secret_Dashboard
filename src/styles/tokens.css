@@ -77,11 +77,19 @@
    * as depth rather than noise, a touch of saturation because blur washes
    * colour out, and a light top edge where the material catches the light.
    */
-  --glass-bg: rgb(10 10 10 / 0.72);
-  --glass-blur: 24px;
-  --glass-saturate: 150%;
-  --glass-edge: rgb(255 255 255 / 0.08);
-  --scrim: rgb(0 0 0 / 0.6);
+  --glass-bg: rgb(8 8 8 / 0.8);
+  --glass-blur: 40px;
+  --glass-saturate: 160%;
+  --glass-edge: rgb(255 255 255 / 0.09);
+  --scrim: rgb(0 0 0 / 0.55);
+  /*
+   * Chrome — the rail and the top strip — carries no fill at all. It is the
+   * page seen through frosted material and nothing else, so the content
+   * scrolling beneath stays visible as movement and colour. That only works
+   * with a heavy blur: at anything less the text underneath stays readable
+   * enough to compete with the labels sitting on top of it.
+   */
+  --chrome-blur: 28px;
 
   /* Depth for the layers that float. Invisible on flat near-black, essential
      under a translucent panel — it is what stops the panel dissolving. */
@@ -195,7 +203,7 @@
   --color-border: rgb(4 4 4 / 0.1);
   --color-border-strong: rgb(4 4 4 / 0.18);
 
-  --glass-bg: rgb(252 251 250 / 0.75);
+  --glass-bg: rgb(252 251 250 / 0.82);
   --glass-edge: rgb(255 255 255 / 0.7);
   --scrim: rgb(28 22 18 / 0.3);
 

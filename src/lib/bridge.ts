@@ -1,3 +1,6 @@
+import type { SecretNetworkClient } from 'secretjs'
+
+import { DENOM, GAS_PRICE_USCRT } from '@/chains/secret4'
 import type { SourceChain } from '@/chains/sources'
 import type { Route } from '@/tokens/routes'
 import { MSG_TRANSFER } from '@/lib/msgTypes'
@@ -111,4 +114,74 @@ export async function sendDeposit({ chain, sender, legs, gasLimit }: SendOptions
 export function depositGasLimit(chain: SourceChain, route: Route, legs: number, hooked: boolean): number {
   const base = route.gas ?? chain.depositGas
   return Math.ceil(base * legs * (hooked ? 1.5 : 1))
+}
+
+export interface WithdrawOptions {
+  client: SecretNetworkClient
+  chain: SourceChain
+  /** The Secret account sending. */
+  sender: string
+  /** Where it lands, in the destination chain's bech32 prefix. */
+  receiver: string
+  /** Denomination as *Secret* knows it — `uscrt`, or an `ibc/…` voucher. */
+  denom: string
+  /** Base units. */
+  amount: string
+  /** Overrides the chain default when the route names its own channel. */
+  channel?: string
+  /** Fee grant to spend, if one covers this. */
+  feeGranter?: string
+}
+
+/**
+ * Sending an IBC transfer out of Secret.
+ *
+ * The mirror of a deposit, and signed on Secret rather than on the far side —
+ * which means it costs SCRT for gas, and can therefore use the app's fee payer.
+ *
+ * The denomination is the one Secret knows: `uscrt` for SCRT itself, an `ibc/…`
+ * voucher for anything that arrived over IBC. A SNIP-20 balance cannot be sent
+ * this way at all; it has to be unwrapped into its bank denomination first,
+ * which is a separate transaction and the caller's job to arrange.
+ */
+export async function sendWithdraw({
+  client,
+  chain,
+  sender,
+  receiver,
+  denom,
+  amount,
+  channel,
+  feeGranter
+}: WithdrawOptions): Promise<SendResult> {
+  const { MsgTransfer } = await import('secretjs')
+
+  const gasLimit = chain.withdrawGas
+  const tx = await client.tx.broadcast(
+    [
+      new MsgTransfer({
+        sender,
+        receiver,
+        source_port: 'transfer',
+        source_channel: channel ?? chain.withdrawChannel,
+        token: { denom, amount },
+        // Seconds here, unlike the source-chain path above: secretjs takes
+        // seconds and converts, cosmjs takes nanoseconds raw.
+        timeout_timestamp: String(Math.floor(Date.now() / 1000) + TIMEOUT_SECONDS),
+        memo: ''
+      })
+    ],
+    {
+      gasLimit,
+      gasPriceInFeeDenom: GAS_PRICE_USCRT,
+      feeDenom: DENOM,
+      feeGranter
+    }
+  )
+
+  if (tx.code !== 0) {
+    throw new Error(tx.rawLog || `Secret rejected it (code ${tx.code}).`)
+  }
+
+  return { hash: tx.transactionHash, height: tx.height }
 }

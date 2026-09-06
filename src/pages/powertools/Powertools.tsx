@@ -1,11 +1,8 @@
-import { CheckCircle2, Info, Play, XCircle } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { Play } from 'lucide-react'
+import { useState } from 'react'
 
 import Button from '@/components/ui/Button'
-import { DEFAULT_LCD_URLS, DEFAULT_RPC_URLS } from '@/chains/secret4'
 import { codeHashFor } from '@/lib/codeHash'
-import { parseEndpointList, probeLcd, probeRpc, type ProbeResult } from '@/lib/endpoint'
-import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 
 /**
@@ -15,81 +12,18 @@ import { useWallet } from '@/store/wallet'
  * genuinely useful thing to have, and also the fastest way to lose funds to a
  * typo in a JSON field nobody reviewed. `secretcli` already does it, with a
  * terminal's friction around it. What is here instead is the part that is safe
- * and still answers most questions: which endpoints work, and what a contract
- * actually says.
+ * and still answers most questions: what a contract actually says.
+ *
+ * Endpoint health used to live here as well. It has moved out: the endpoints
+ * are *set* in Settings, and a reading that is one screen away from the control
+ * it describes is a reading nobody acts on.
  */
 export default function Powertools() {
   const client = useWallet((state) => state.queryClient)
-  const settings = useSettings()
-
-  const [endpoints, setEndpoints] = useState<Array<ProbeResult & { kind: 'LCD' | 'RPC' }>>([])
-  const [probing, setProbing] = useState(false)
-
-  const probeAll = useCallback(async () => {
-    setProbing(true)
-    const lcds = parseEndpointList(settings.lcdOverride)
-    const rpcs = parseEndpointList(settings.rpcOverride)
-
-    const results = await Promise.all([
-      ...(lcds.length > 0 ? lcds : DEFAULT_LCD_URLS).map(async (url) => ({
-        ...(await probeLcd(url)),
-        kind: 'LCD' as const
-      })),
-      ...(rpcs.length > 0 ? rpcs : DEFAULT_RPC_URLS).map(async (url) => ({
-        ...(await probeRpc(url)),
-        kind: 'RPC' as const
-      }))
-    ])
-
-    setEndpoints(results)
-    setProbing(false)
-  }, [settings.lcdOverride, settings.rpcOverride])
-
-  useEffect(() => {
-    void probeAll()
-  }, [probeAll])
 
   return (
-    <div className="mx-auto flex max-w-[760px] flex-col gap-8">
+    <div className="mx-auto flex max-w-[760px] flex-col gap-10">
       <h1 className="text-display">Powertools</h1>
-
-      <section className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-title">Endpoints</h2>
-          <Button variant="ghost" size="sm" loading={probing} onClick={() => void probeAll()}>
-            Re-check
-          </Button>
-        </div>
-
-        <ul className="flex flex-col gap-2">
-          {endpoints.map((endpoint) => (
-            <li
-              key={`${endpoint.kind}-${endpoint.url}`}
-              className="flex items-start gap-3 card px-4 py-3"
-            >
-              {endpoint.ok ? (
-                <CheckCircle2 size={18} aria-hidden className="mt-0.5 shrink-0 text-positive" />
-              ) : (
-                <XCircle size={18} aria-hidden className="mt-0.5 shrink-0 text-text-faint" />
-              )}
-              <span className="min-w-0">
-                <span className="break-address block text-base">{endpoint.url}</span>
-                <span className="block text-sm text-text-faint">
-                  {endpoint.kind}
-                  {endpoint.ok ? '' : ` · ${endpoint.reason}`}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-
-        <p className="flex items-start gap-2 text-sm text-text-faint">
-          <Info size={14} aria-hidden className="mt-0.5 shrink-0" />
-          An endpoint counts as working only if it answers with JSON <em>and</em> reports secret-4. One listed
-          in the cosmos chain-registry under Secret serves a different chain entirely.
-        </p>
-      </section>
-
       <ContractQuery client={client} />
     </div>
   )
@@ -136,7 +70,7 @@ function ContractQuery({ client }: { client?: ReturnType<typeof useWallet.getSta
   }
 
   return (
-    <section className="flex flex-col gap-4">
+    <section className="flex flex-col gap-5">
       <h2 className="text-title">Query a contract</h2>
 
       <label className="flex flex-col gap-2">
@@ -184,9 +118,7 @@ function ContractQuery({ client }: { client?: ReturnType<typeof useWallet.getSta
         </pre>
       ) : null}
 
-      {result ? (
-        <pre className="overflow-x-auto card p-4 font-mono text-sm">{result}</pre>
-      ) : null}
+      {result ? <pre className="overflow-x-auto card p-4 font-mono text-sm">{result}</pre> : null}
     </section>
   )
 }

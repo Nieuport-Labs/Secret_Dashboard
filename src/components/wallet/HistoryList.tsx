@@ -41,7 +41,7 @@ export default function HistoryList({ entries, loading, unreadable, hasPermit }:
   if (!hasPermit) return null
 
   return (
-    <section className="flex flex-col gap-4">
+    <section className="flex flex-col gap-5">
       <h2 className="text-title">Private transfers</h2>
 
       {loading && entries.length === 0 ? (

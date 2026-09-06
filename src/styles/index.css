@@ -102,6 +102,72 @@
    * depth instead of noise. The saturation boost puts back the colour the blur
    * washes out — skip it and glass reads grey and cheap.
    */
+  /*
+   * Range input, restyled because the native one carries the platform's own
+   * colour and chrome and would be the only control on the page that does.
+   * `appearance: none` drops the whole native widget, so the track and the
+   * thumb both have to be drawn — and per vendor, since the two pseudo-elements
+   * cannot be selected together.
+   */
+  .slider {
+    appearance: none;
+    -webkit-appearance: none;
+    height: 20px;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .slider:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+
+  .slider::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--color-surface);
+  }
+
+  .slider::-moz-range-track {
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--color-surface);
+  }
+
+  .slider::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    margin-top: -5px;
+    border-radius: var(--radius-pill);
+    background: var(--color-accent);
+    transition: transform var(--duration-short) var(--ease-standard);
+  }
+
+  .slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--color-accent);
+  }
+
+  .slider:active::-webkit-slider-thumb {
+    transform: scale(1.15);
+  }
+
+  /*
+   * Chrome: no fill whatsoever, only the blur. Used by the rail and the top
+   * strip, which are meant to read as glass over the page rather than as two
+   * more panels sitting on it.
+   */
+  .glass-chrome {
+    background: transparent;
+    backdrop-filter: blur(var(--chrome-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--chrome-blur)) saturate(var(--glass-saturate));
+  }
+
   .glass {
     background: var(--glass-bg);
     backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
@@ -125,7 +191,8 @@
    */
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .glass,
-    .glass-panel {
+    .glass-panel,
+    .glass-chrome {
       background: var(--color-bg);
     }
   }

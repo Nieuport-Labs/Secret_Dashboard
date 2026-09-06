@@ -19,7 +19,7 @@ export default function Header() {
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   return (
-    <div className="glass sticky top-0 z-20 flex flex-wrap items-center justify-end gap-x-2 gap-y-2 border-b border-border px-4 py-2.5 lg:px-8">
+    <div className="glass-chrome sticky top-0 z-20 flex flex-wrap items-center justify-end gap-x-2 gap-y-2 px-4 py-3 lg:px-8">
       {connected ? (
         <>
           <GasCreditsChip />

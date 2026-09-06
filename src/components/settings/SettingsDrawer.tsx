@@ -3,7 +3,7 @@ import { useState } from 'react'
 
 import Button from '@/components/ui/Button'
 import Drawer from '@/components/ui/Drawer'
-import { DISPLAY_DENOM } from '@/chains/secret4'
+import { DEFAULT_LCD_URLS, DEFAULT_RPC_URLS, DISPLAY_DENOM } from '@/chains/secret4'
 import {
   forgetResolvedEndpoints,
   parseEndpointList,
@@ -228,9 +228,16 @@ function EndpointSection() {
 
   const check = async () => {
     setChecking(true)
+    // Falls back to the built-in list rather than checking nothing. Endpoint
+    // health used to have its own panel in Powertools; it belongs next to the
+    // fields that set them, and "check" has to mean something when they are
+    // empty, since empty is the normal case.
     const lcds = parseEndpointList(settings.lcdOverride)
     const rpcs = parseEndpointList(settings.rpcOverride)
-    setResults([...(await Promise.all(lcds.map(probeLcd))), ...(await Promise.all(rpcs.map(probeRpc)))])
+    setResults([
+      ...(await Promise.all((lcds.length > 0 ? lcds : DEFAULT_LCD_URLS).map(probeLcd))),
+      ...(await Promise.all((rpcs.length > 0 ? rpcs : DEFAULT_RPC_URLS).map(probeRpc)))
+    ])
     setChecking(false)
   }
 
@@ -261,14 +268,7 @@ function EndpointSection() {
       </label>
 
       <div className="flex items-center gap-2">
-        <Button
-          variant="soft"
-          shape="control"
-          size="sm"
-          loading={checking}
-          disabled={!settings.lcdOverride && !settings.rpcOverride}
-          onClick={() => void check()}
-        >
+        <Button variant="soft" shape="control" size="sm" loading={checking} onClick={() => void check()}>
           Check
         </Button>
         {/*
