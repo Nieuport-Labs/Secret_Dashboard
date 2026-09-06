@@ -46,7 +46,9 @@ export const GAS = {
   setAutoRestake: 60_000,
   ibcTransfer: 150_000,
   /** Vault execute plus the grant it issues (and a revoke when topping up). */
-  buyGasCredit: 400_000
+  buyGasCredit: 400_000,
+  grantAllowance: 100_000,
+  revokeAllowance: 80_000
 } as const
 
 /**
@@ -94,3 +96,7 @@ export function explorerTxUrl(hash: string): string {
 export function explorerAccountUrl(address: string): string {
   return EXPLORER_ACCOUNT_TEMPLATE.replace('{address}', address)
 }
+
+/** Named separately because the copied fee-grant modules expect these spellings. */
+export const GAS_GRANT = GAS.grantAllowance
+export const GAS_REVOKE = GAS.revokeAllowance

@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
-import { useEffect, useRef, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { cn } from '@/lib/cn'
 
 interface Props {
@@ -18,47 +19,7 @@ interface Props {
  * returns to where it came from on close, and Tab cycles within.
  */
 export default function Drawer({ open, onClose, title, children }: Props) {
-  const panel = useRef<HTMLDivElement>(null)
-  const returnFocusTo = useRef<HTMLElement | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-
-    returnFocusTo.current = document.activeElement as HTMLElement | null
-    // Move focus into the panel rather than leaving it on the trigger behind
-    // the overlay, where a keyboard user would be tabbing through hidden content.
-    panel.current?.focus()
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose()
-        return
-      }
-      if (event.key !== 'Tab' || !panel.current) return
-
-      const focusable = panel.current.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), input, textarea, select, [tabindex]:not([tabindex="-1"])'
-      )
-      if (focusable.length === 0) return
-
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      returnFocusTo.current?.focus()
-    }
-  }, [open, onClose])
+  const panel = useFocusTrap(open, onClose)
 
   if (!open) return null
 
