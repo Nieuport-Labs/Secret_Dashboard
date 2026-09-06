@@ -13,14 +13,15 @@ import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
-import Picker, { PickerDialog, type PickerOption } from '@/pages/bridge/components/Picker'
+import AmountField from '@/components/ui/AmountField'
+import Picker from '@/components/ui/Picker'
 import { DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import { SOURCE_CHAINS, chainImageUrl, type SourceChain } from '@/chains/sources'
 import { depositGasLimit, sendDeposit, sendWithdraw, type Leg } from '@/lib/bridge'
 import { queryAllBalances } from '@/lib/bank'
 import { codeHashFor } from '@/lib/codeHash'
 import { buildGasLeg, quoteGasSlice, shouldOfferGas } from '@/lib/getGas'
-import { formatAmount, fromBaseUnits, toBaseUnits } from '@/lib/format'
+import { toBaseUnits } from '@/lib/format'
 import { plainTransfer, wrapDepositMemo } from '@/lib/ibcMemo'
 import { MSG_TRANSFER } from '@/lib/msgTypes'
 import { fetchPrices } from '@/lib/prices'
@@ -36,7 +37,7 @@ import {
   tokensToChain,
   withdrawRoute
 } from '@/tokens/routes'
-import { tokenByAddress, tokenImageUrl, type TokenInfo } from '@/tokens/registry'
+import { tokenByAddress, tokenImageUrl } from '@/tokens/registry'
 import { transactionsCovered, useFeePayer } from '@/store/feePayer'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
@@ -183,17 +184,6 @@ export default function Bridge() {
     }
   }, [gasUrgent])
 
-  const setPercent = (share: number) => {
-    if (available === undefined) return
-    const value = (BigInt(available) * BigInt(share)) / 100n
-    setAmount(fromBaseUnits(value.toString(), decimals))
-  }
-
-  const percent =
-    available !== undefined && BigInt(available) > 0n && !amountError
-      ? Number((BigInt(amountBaseUnits) * 100n) / BigInt(available))
-      : 0
-
   const reset = () => {
     setAmount('')
     setStatus({ kind: 'idle' })
@@ -335,22 +325,22 @@ export default function Bridge() {
         <AmountField
           amount={amount}
           onAmount={setAmount}
-          token={token}
-          tokenOptions={tokens.map((t) => ({
+          symbol={token?.symbol}
+          image={token ? tokenImageUrl(token) : undefined}
+          available={available}
+          decimals={decimals}
+          error={amountError}
+          options={tokens.map((t) => ({
             id: t.address,
             label: t.symbol,
             detail: t.description,
             image: tokenImageUrl(t)
           }))}
-          onToken={(id) => {
+          value={tokenAddress}
+          onSelect={(id) => {
             setTokenAddress(id)
             setAmount('')
           }}
-          available={available}
-          decimals={decimals}
-          percent={percent}
-          onPercent={setPercent}
-          error={amountError}
         />
 
         {/*
@@ -547,130 +537,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       <span className="text-label text-text-muted">{label}</span>
       {children}
     </div>
-  )
-}
-
-const PERCENTS = [25, 50, 100] as const
-
-function AmountField({
-  amount,
-  onAmount,
-  token,
-  tokenOptions,
-  onToken,
-  available,
-  decimals,
-  percent,
-  onPercent,
-  error
-}: {
-  amount: string
-  onAmount: (value: string) => void
-  token?: TokenInfo
-  tokenOptions: PickerOption[]
-  onToken: (id: string) => void
-  available?: string
-  decimals: number
-  percent: number
-  onPercent: (share: number) => void
-  error?: string
-}) {
-  const [picking, setPicking] = useState(false)
-  const has = available !== undefined && BigInt(available) > 0n
-
-  return (
-    <section className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-label text-text-muted">Amount</span>
-        {available !== undefined ? (
-          <span className="text-label tabular-nums text-text-faint">
-            Balance {formatAmount(available, { decimals })} {token?.symbol}
-          </span>
-        ) : null}
-      </div>
-
-      <div className="flex items-center gap-2 rounded-control border border-border bg-surface p-2 pl-3">
-        <input
-          inputMode="decimal"
-          value={amount}
-          onChange={(event) => onAmount(event.target.value)}
-          placeholder="0.0"
-          aria-label="Amount"
-          className="min-w-0 flex-1 bg-transparent text-headline tabular-nums outline-none placeholder:text-text-faint"
-        />
-
-        {/*
-          The token is chosen by clicking the token. It sits where the symbol
-          already had to be printed, so the choice costs no extra row — which
-          is what frees the chain field above to take the full width.
-        */}
-        <button
-          type="button"
-          disabled={tokenOptions.length === 0}
-          onClick={() => setPicking(true)}
-          aria-haspopup="dialog"
-          className={cn(
-            'state-layer flex shrink-0 items-center gap-2 rounded-pill border border-border py-1.5 pl-1.5 pr-2.5',
-            'disabled:cursor-not-allowed disabled:opacity-50'
-          )}
-        >
-          {token ? <img src={tokenImageUrl(token)} alt="" className="size-6 shrink-0 rounded-pill" /> : null}
-          <span className="text-base font-medium">{token?.symbol ?? 'Token'}</span>
-          <ChevronDown size={14} aria-hidden className="text-text-muted" />
-        </button>
-      </div>
-
-      <PickerDialog
-        open={picking}
-        onClose={() => setPicking(false)}
-        label="Token"
-        options={tokenOptions}
-        value={token?.address}
-        onChange={onToken}
-      />
-
-      {/*
-        The slider and the buttons drive the same number and both earn their
-        place: the buttons are exact and one tap, the slider is for the case
-        where the fraction is a judgement rather than a round figure.
-      */}
-      <div className="flex items-center gap-3">
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={Math.min(100, Math.max(0, percent))}
-          disabled={!has}
-          onChange={(event) => onPercent(Number(event.target.value))}
-          aria-label="Fraction of balance"
-          className="slider min-w-0 flex-1"
-        />
-        <div className="flex shrink-0 gap-1">
-          {PERCENTS.map((value) => (
-            <button
-              key={value}
-              type="button"
-              disabled={!has}
-              onClick={() => onPercent(value)}
-              className={cn(
-                'state-layer rounded-pill border border-border px-2.5 py-1 text-label font-medium',
-                'disabled:cursor-not-allowed disabled:opacity-40',
-                percent === value ? 'bg-accent-container text-accent' : 'text-text-muted'
-              )}
-            >
-              {value === 100 ? 'Max' : `${value}%`}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {error ? (
-        <span className="text-base text-negative" role="alert">
-          {error}
-        </span>
-      ) : null}
-    </section>
   )
 }
 

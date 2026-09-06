@@ -2329,3 +2329,23 @@ export function tokensToChain(chainId: string): string[] {
 export function chainsWithWithdrawals(): string[] {
   return [...new Set(WITHDRAW_ROUTES.filter((r) => !r.needsSkip).map((r) => r.chainId))]
 }
+
+/**
+ * The denomination a SNIP-20's underlying asset wears on Secret's bank module —
+ * `uscrt` for sSCRT, an `ibc/…` voucher for anything bridged in.
+ *
+ * This is what a wrap spends and an unwrap returns, and it is read out of the
+ * withdraw table rather than stored twice: that table already has to name it,
+ * and a second copy is a second thing to get wrong.
+ *
+ * `undefined` when the token has no single-hop route, or when the routes it
+ * does have disagree: a token that arrived over two channels wears two
+ * different vouchers, and those are two different assets. Guessing between them
+ * would wrap the wrong one. As the table stands every registry token with a
+ * route resolves to one denomination, but that is a fact about today's table
+ * and not something to rely on.
+ */
+export function bankDenomFor(token: string): string | undefined {
+  const denoms = new Set(withdrawRoutes(token).map((route) => route.denom))
+  return denoms.size === 1 ? [...denoms][0] : undefined
+}

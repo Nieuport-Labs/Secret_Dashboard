@@ -1,4 +1,4 @@
-import { Construction, KeyRound } from 'lucide-react'
+import { KeyRound } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -7,8 +7,9 @@ import BalanceList from '@/components/wallet/BalanceList'
 import HistoryList from '@/components/wallet/HistoryList'
 import ProfileHeader from '@/components/wallet/ProfileHeader'
 import ReceiveDrawer from '@/components/wallet/ReceiveDrawer'
-import Drawer from '@/components/ui/Drawer'
-import { PANEL_TITLES, type WalletPanel } from '@/components/wallet/panels'
+import SendPanel from '@/components/wallet/SendPanel'
+import WrapPanel from '@/components/wallet/WrapPanel'
+import { type WalletPanel } from '@/components/wallet/panels'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { useBalances } from '@/hooks/useBalances'
 import { usePermit } from '@/hooks/usePermit'
@@ -24,6 +25,8 @@ export default function Wallet() {
   const history = useTransferHistory(permit)
   const push = useArrivals(permit, { onArrival: balances.refresh })
   const [panel, setPanel] = useState<WalletPanel | null>(null)
+  /** Which token the wrap panel should open on, when a toast asked for one. */
+  const [wrapToken, setWrapToken] = useState<string | undefined>()
   const [search, setSearch] = useSearchParams()
 
   // A notification can ask for a panel by link, which is how the "do you want
@@ -32,7 +35,9 @@ export default function Wallet() {
     const requested = search.get('panel')
     if (requested === 'send' || requested === 'receive' || requested === 'wrap') {
       setPanel(requested)
+      setWrapToken(search.get('token') ?? undefined)
       search.delete('panel')
+      search.delete('token')
       setSearch(search, { replace: true })
     }
   }, [search, setSearch])
@@ -93,18 +98,14 @@ export default function Wallet() {
       <ReceiveDrawer open={panel === 'receive'} onClose={() => setPanel(null)} address={address} />
 
       {/* Send and Wrap share Receive's panel rather than being pages of their own. */}
-      <Drawer
-        open={panel === 'send' || panel === 'wrap'}
+      <SendPanel open={panel === 'send'} onClose={() => setPanel(null)} balances={balances} />
+
+      <WrapPanel
+        open={panel === 'wrap'}
         onClose={() => setPanel(null)}
-        title={panel ? PANEL_TITLES[panel] : ''}
-      >
-        <div className="flex items-start gap-3 card p-4">
-          <Construction size={18} aria-hidden className="mt-0.5 shrink-0 text-text-muted" />
-          <p className="text-base text-text-muted">
-            Built in phase 3b, here in this panel. Its fee is paid by a grant whenever one covers it.
-          </p>
-        </div>
-      </Drawer>
+        balances={balances}
+        token={wrapToken}
+      />
     </div>
   )
 }

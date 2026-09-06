@@ -87,17 +87,37 @@ export default function Button({
         'state-layer',
         VARIANTS[variant],
         SIZES[size],
-        // The welcome screen's buttons space icon, label and trailing slot apart
-        // rather than clustering them; that only reads right at full width.
-        block ? 'w-full justify-between' : 'justify-center',
+        block ? 'w-full justify-center' : 'justify-center',
         className
       )}
       {...rest}
     >
-      {loading ? <Spinner /> : icon}
-      <span className={cn(block && 'flex-1 text-center')}>{children}</span>
-      {/* Keeps the label optically centred when only one side carries an icon. */}
-      {trailing ?? (block ? <span aria-hidden className="size-6" /> : null)}
+      {block ? (
+        /*
+         * Two side cells of equal width, so the label is centred on the button
+         * whatever either side holds — or holds nothing.
+         *
+         * This used to be `justify-between` with a fixed 24px spacer opposite
+         * the icon. That miscentres twice over: a button with no icon at all
+         * still got the spacer, pulling the label 12px left, and a button whose
+         * icon was not 24px wide was off by the difference. `flex-1` gives both
+         * cells a basis of zero and the same share of what is left, which is
+         * exact by construction rather than by matching a number.
+         */
+        <>
+          <span className="flex min-w-0 flex-1 items-center justify-start">
+            {loading ? <Spinner /> : icon}
+          </span>
+          <span className="shrink-0">{children}</span>
+          <span className="flex min-w-0 flex-1 items-center justify-end">{trailing}</span>
+        </>
+      ) : (
+        <>
+          {loading ? <Spinner /> : icon}
+          <span>{children}</span>
+          {trailing}
+        </>
+      )}
     </button>
   )
 }

@@ -7,9 +7,3 @@
  * because choosing a chain and a route is a multi-step flow of its own.
  */
 export type WalletPanel = 'send' | 'receive' | 'wrap'
-
-export const PANEL_TITLES: Record<WalletPanel, string> = {
-  send: 'Send',
-  receive: 'Receive',
-  wrap: 'Wrap'
-}
