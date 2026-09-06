@@ -3,7 +3,7 @@ import { AlertCircle, RadioTower, RefreshCw, Search, Timer } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import type { TokenBalance } from '@/hooks/useBalances'
 import type { PushStatus } from '@/hooks/useArrivals'
-import { formatAmount, formatFiat } from '@/lib/format'
+import { formatDisplayAmount, formatFiat } from '@/lib/format'
 import { tokenImageUrl } from '@/tokens/registry'
 import { useSettings } from '@/store/settings'
 
@@ -57,7 +57,7 @@ export default function BalanceList({
     <section className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
         <span className="flex items-center gap-2.5">
-          <h2 className="text-lg font-semibold">Private tokens</h2>
+          <h2 className="text-title">Private tokens</h2>
           <PushIndicator status={pushStatus} />
         </span>
         <Button
@@ -72,27 +72,24 @@ export default function BalanceList({
       </div>
 
       {held.length > 0 ? (
-        <ul className="flex flex-col gap-2">
+        <ul className="divide-y divide-border overflow-hidden rounded-card bg-surface-1">
           {held.map((row) => (
-            <li
-              key={row.token.address}
-              className="flex items-center gap-3 rounded-card bg-surface-1 px-4 py-3"
-            >
+            <li key={row.token.address} className="flex items-center gap-3 px-5 py-3.5">
               <img src={tokenImageUrl(row.token)} alt="" className="size-8 shrink-0 rounded-pill" />
               <span className="min-w-0">
-                <span className="block truncate text-base font-medium">{row.token.symbol}</span>
+                <span className="block truncate text-body font-medium">{row.token.symbol}</span>
                 {row.token.description ? (
                   <span className="block truncate text-sm text-text-faint">{row.token.description}</span>
                 ) : null}
               </span>
               <span className="ml-auto text-right">
-                <span className="block text-base font-medium">
+                <span className="block text-body font-medium tabular-nums">
                   {row.outcome.status === 'ok'
-                    ? formatAmount(row.outcome.amount, { decimals: row.token.decimals })
+                    ? formatDisplayAmount(row.outcome.amount, row.token.decimals)
                     : null}
                 </span>
                 {row.fiat !== undefined ? (
-                  <span className="block text-sm text-text-faint">{formatFiat(row.fiat, currency)}</span>
+                  <span className="block text-label text-text-faint">{formatFiat(row.fiat, currency)}</span>
                 ) : null}
               </span>
             </li>

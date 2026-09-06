@@ -35,6 +35,29 @@ export default {
       },
       fontFamily: {
         sans: 'var(--font-sans)'
+      },
+      /*
+       * Material's type scale. Named by role rather than size, so a component
+       * says what a piece of text *is* and the scale decides how big that looks.
+       */
+      fontSize: {
+        display: [
+          'var(--text-display)',
+          { lineHeight: '1.15', letterSpacing: 'var(--text-display-tracking)', fontWeight: '600' }
+        ],
+        headline: [
+          'var(--text-headline)',
+          { lineHeight: '1.25', letterSpacing: 'var(--text-headline-tracking)', fontWeight: '600' }
+        ],
+        title: [
+          'var(--text-title)',
+          { lineHeight: '1.35', letterSpacing: 'var(--text-title-tracking)', fontWeight: '500' }
+        ],
+        body: ['var(--text-body)', { lineHeight: '1.5', letterSpacing: 'var(--text-body-tracking)' }],
+        label: [
+          'var(--text-label)',
+          { lineHeight: '1.4', letterSpacing: 'var(--text-label-tracking)', fontWeight: '500' }
+        ]
       }
     }
   },

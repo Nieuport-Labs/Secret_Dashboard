@@ -9,7 +9,7 @@ import { useBalances } from '@/hooks/useBalances'
 import { usePermit } from '@/hooks/usePermit'
 import { useStaking } from '@/hooks/useStaking'
 import { useStakingActions } from '@/hooks/useStakingActions'
-import { formatAmount } from '@/lib/format'
+import { formatDisplayAmount } from '@/lib/format'
 import type { Validator } from '@/lib/staking'
 import { useWallet } from '@/store/wallet'
 
@@ -71,22 +71,29 @@ export default function Staking() {
 
   return (
     <div className="mx-auto flex max-w-[860px] flex-col gap-8">
-      <h1 className="text-4xl font-semibold text-accent">Staking</h1>
+      <h1 className="text-display">Staking</h1>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Stat label="Staked" value={`${formatAmount(staking.totalStaked)} ${DISPLAY_DENOM}`} />
-        <Stat label="Available" value={`${formatAmount(balances.native ?? '0')} ${DISPLAY_DENOM}`} />
-        <div className="rounded-card bg-surface-1 p-4">
-          <p className="text-sm text-text-muted">Rewards</p>
-          <p className="mt-1 text-lg font-medium text-positive">
-            {formatAmount(staking.totalRewards)} {DISPLAY_DENOM}
+      {/*
+        One surface with hairlines, not three floating cards. Three identical
+        rounded boxes side by side is the shape a layout takes when nothing has
+        decided which figure matters; a divided row says these belong together
+        and lets the numbers carry the weight.
+      */}
+      <div className="grid divide-y divide-border overflow-hidden rounded-card bg-surface-1 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+        <Stat label="Staked" value={`${formatDisplayAmount(staking.totalStaked)} ${DISPLAY_DENOM}`} />
+        <Stat label="Available" value={`${formatDisplayAmount(balances.native ?? '0')} ${DISPLAY_DENOM}`} />
+        <div className="p-5">
+          <p className="text-label text-text-muted">Rewards</p>
+          <p className="mt-1.5 text-headline tabular-nums text-positive">
+            {formatDisplayAmount(staking.totalRewards)}{' '}
+            <span className="text-title text-text-muted">{DISPLAY_DENOM}</span>
           </p>
           {rewardValidators.length > 0 ? (
             <Button
               variant="soft"
               shape="control"
               size="sm"
-              className="mt-2"
+              className="mt-3"
               loading={actions.state.kind === 'sending'}
               onClick={() => void actions.claimRewards(rewardValidators)}
             >
@@ -107,7 +114,8 @@ export default function Staking() {
                     u.validatorAddress}
                 </span>
                 <span>
-                  {formatAmount(u.amount)} {DISPLAY_DENOM} · available {u.completesAt.toLocaleDateString()}
+                  {formatDisplayAmount(u.amount)} {DISPLAY_DENOM} · available{' '}
+                  {u.completesAt.toLocaleDateString()}
                 </span>
               </li>
             ))}
@@ -166,7 +174,7 @@ export default function Staking() {
             ))}
           </div>
         ) : (
-          <ul className="flex flex-col gap-2">
+          <ul className="divide-y divide-border overflow-hidden rounded-card bg-surface-1">
             {validators.map((validator) => (
               <ValidatorRow
                 key={validator.address}
@@ -212,10 +220,13 @@ export default function Staking() {
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
+  const [amount, denom] = value.split(' ')
   return (
-    <div className="rounded-card bg-surface-1 p-4">
-      <p className="text-sm text-text-muted">{label}</p>
-      <p className="mt-1 text-lg font-medium">{value}</p>
+    <div className="p-5">
+      <p className="text-label text-text-muted">{label}</p>
+      <p className="mt-1.5 text-headline tabular-nums">
+        {amount} <span className="text-title text-text-muted">{denom}</span>
+      </p>
     </div>
   )
 }

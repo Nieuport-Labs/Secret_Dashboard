@@ -7,7 +7,7 @@ import type { WalletPanel } from '@/components/wallet/panels'
 import Button from '@/components/ui/Button'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { useProfileImage } from '@/hooks/useProfileImage'
-import { formatAmount, formatFiat, shortenAddress } from '@/lib/format'
+import { formatDisplayAmount, formatFiat, shortenAddress } from '@/lib/format'
 import { useSettings } from '@/store/settings'
 
 interface Props {
@@ -56,7 +56,7 @@ export default function ProfileHeader({ address, native, nativeFiat, loading, on
 
         <div className="flex flex-col justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold">Hello 👋</h1>
+            <h1 className="text-headline">Hello 👋</h1>
             <button
               type="button"
               onClick={() => void copy()}
@@ -127,16 +127,29 @@ export default function ProfileHeader({ address, native, nativeFiat, loading, on
       ) : null}
 
       <div className="flex w-full items-center justify-between gap-4 lg:w-[400px]">
+        {/*
+          The design writes this "Total $SCRT Available" and colours the figure
+          orange. Both are dropped: a ticker does not take a dollar sign outside
+          a trading forum, and colour on a number means something changed — a
+          balance that is permanently orange has spent that signal on nothing.
+        */}
         <div>
-          <p className="text-base font-semibold">Total ${DISPLAY_DENOM} Available</p>
+          <p className="text-label text-text-muted">Available</p>
           {loading && native === undefined ? (
-            <span className="mt-1 block h-7 w-32 animate-pulse rounded-control bg-surface" />
+            <span className="mt-1.5 block h-8 w-32 animate-pulse rounded-control bg-surface" />
           ) : (
-            <p className="text-2xl font-bold text-accent">
-              {native === undefined ? 'Unavailable' : `${formatAmount(native)} ${DISPLAY_DENOM}`}
+            <p className="mt-1.5 text-headline tabular-nums">
+              {native === undefined ? (
+                'Unavailable'
+              ) : (
+                <>
+                  {formatDisplayAmount(native)}{' '}
+                  <span className="text-title text-text-muted">{DISPLAY_DENOM}</span>
+                </>
+              )}
             </p>
           )}
-          <p className="text-xs font-semibold text-text-faint">{formatFiat(nativeFiat, currency)}</p>
+          <p className="mt-0.5 text-label text-text-faint">{formatFiat(nativeFiat, currency)}</p>
         </div>
 
         <Button variant="soft" shape="control" onClick={() => navigate('/staking')}>

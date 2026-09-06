@@ -43,9 +43,9 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
       ) : (
         <>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-lg font-semibold text-accent">{headline(toast)}</span>
+            <span className="text-title text-accent">{headline(toast)}</span>
             <span className="flex items-center gap-1.5 whitespace-nowrap">
-              <span className="text-lg font-semibold">{toast.amount}</span>
+              <span className="text-title">{toast.amount}</span>
               <span className="text-sm text-text-muted">{toast.symbol}</span>
               {toast.image ? <img src={toast.image} alt="" className="size-4 rounded-pill" /> : null}
             </span>

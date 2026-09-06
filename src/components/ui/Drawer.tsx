@@ -47,7 +47,7 @@ export default function Drawer({ open, onClose, title, children }: Props) {
         )}
       >
         <div className="flex items-start justify-between gap-4">
-          <h2 className="text-2xl font-semibold text-accent">{title}</h2>
+          <h2 className="text-headline">{title}</h2>
           <button
             type="button"
             onClick={onClose}

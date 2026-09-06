@@ -115,7 +115,7 @@ function PermitPrompt({ signing, error, onSign }: { signing: boolean; error?: st
       <div className="flex items-start gap-3">
         <KeyRound size={20} aria-hidden className="mt-0.5 shrink-0 text-accent" />
         <div>
-          <h2 className="text-lg font-medium">Sign a query permit</h2>
+          <h2 className="text-title">Sign a query permit</h2>
           <p className="mt-1 max-w-[62ch] text-base text-text-muted">
             Reading your own private balances needs your signature, not a transaction. Nothing is written to
             the chain and there is no fee. Older dashboards made you pay for a viewing key first.

@@ -143,7 +143,7 @@ export default function Onboarding() {
         <p className="text-sm text-text-faint">
           Step {step + 1} of {steps.length}
         </p>
-        <h1 className="mt-1 text-3xl font-semibold text-accent">{current.title}</h1>
+        <h1 className="mt-1 text-display">{current.title}</h1>
       </div>
 
       {current.body}

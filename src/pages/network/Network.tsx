@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { resolveLcdUrl } from '@/lib/endpoint'
-import { formatAmount, formatFiat } from '@/lib/format'
+import { formatDisplayAmount, formatFiat } from '@/lib/format'
 import { fetchChainStats, fetchTvl, type ChainStats } from '@/lib/network'
 import { fetchPrices } from '@/lib/prices'
 import { useSettings } from '@/store/settings'
@@ -63,7 +63,10 @@ export default function Network() {
 
   if (!stats) {
     return (
-      <div className="mx-auto grid max-w-[900px] gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy>
+      <div
+        className="mx-auto grid max-w-[900px] gap-px overflow-hidden rounded-card bg-border sm:grid-cols-2 lg:grid-cols-3"
+        aria-busy
+      >
         {[0, 1, 2, 3, 4, 5].map((i) => (
           <div key={i} className="h-24 animate-pulse rounded-card bg-surface-1" />
         ))}
@@ -75,9 +78,9 @@ export default function Network() {
 
   return (
     <div className="mx-auto flex max-w-[900px] flex-col gap-8">
-      <h1 className="text-4xl font-semibold text-accent">Network</h1>
+      <h1 className="text-display">Network</h1>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid divide-y divide-border overflow-hidden rounded-card bg-surface-1 sm:grid-cols-2 sm:divide-x lg:grid-cols-3 [&>*:nth-child(-n+2)]:sm:border-t-0">
         <Stat label={`${DISPLAY_DENOM} price`} value={formatFiat(price, currency)} />
         <Stat label="Market cap" value={formatFiat(marketCap, currency)} />
         <Stat
@@ -89,7 +92,7 @@ export default function Network() {
         <Stat
           label="Staked"
           value={`${(stats.bondedRatio * 100).toFixed(1)}%`}
-          note={`${formatAmount(stats.bonded, { maxFractionDigits: 0 })} of ${formatAmount(stats.totalSupply, { maxFractionDigits: 0 })} ${DISPLAY_DENOM}`}
+          note={`${formatDisplayAmount(stats.bonded)} of ${formatDisplayAmount(stats.totalSupply)} ${DISPLAY_DENOM}`}
         />
         <Stat
           label="Inflation"
@@ -108,7 +111,7 @@ export default function Network() {
           value={
             stats.communityPool === undefined
               ? 'Unavailable'
-              : `${formatAmount(stats.communityPool, { maxFractionDigits: 0 })} ${DISPLAY_DENOM}`
+              : `${formatDisplayAmount(stats.communityPool)} ${DISPLAY_DENOM}`
           }
         />
       </div>
@@ -124,10 +127,10 @@ export default function Network() {
 
 function Stat({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
-    <div className="rounded-card bg-surface-1 p-4">
-      <p className="text-sm text-text-muted">{label}</p>
-      <p className="mt-1 text-xl font-medium">{value}</p>
-      {note ? <p className="mt-1 text-sm text-text-faint">{note}</p> : null}
+    <div className="p-5">
+      <p className="text-label text-text-muted">{label}</p>
+      <p className="mt-1.5 text-headline tabular-nums">{value}</p>
+      {note ? <p className="mt-1 text-label text-text-faint">{note}</p> : null}
     </div>
   )
 }

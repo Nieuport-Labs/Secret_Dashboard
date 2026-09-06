@@ -28,7 +28,7 @@ export default function Welcome() {
       <div className="flex flex-col items-start gap-[30px] lg:flex-row lg:items-stretch">
         <div className="flex w-full flex-col gap-5 lg:w-[400px]">
           <div>
-            <h1 className="text-4xl font-semibold text-accent">Welcome to Secret</h1>
+            <h1 className="text-display text-accent">Welcome to Secret</h1>
             <p className="text-base text-text-faint">
               Dashboard <span className="text-text">1.9</span>
             </p>

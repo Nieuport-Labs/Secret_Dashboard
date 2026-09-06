@@ -169,7 +169,7 @@ export default function Bridge() {
 
   return (
     <div className="mx-auto flex max-w-[560px] flex-col gap-6">
-      <h1 className="text-4xl font-semibold text-accent">Bridge</h1>
+      <h1 className="text-display">Bridge</h1>
 
       <label className="flex flex-col gap-2">
         <span className="text-base font-medium">From</span>

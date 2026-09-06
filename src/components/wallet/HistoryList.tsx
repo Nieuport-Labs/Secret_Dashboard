@@ -1,7 +1,7 @@
 import { ArrowDownLeft, ArrowUpRight, RefreshCw } from 'lucide-react'
 
 import type { HistoryEntry } from '@/hooks/useTransferHistory'
-import { formatAmount, shortenAddress } from '@/lib/format'
+import { formatDisplayAmount, shortenAddress } from '@/lib/format'
 import { tokenImageUrl } from '@/tokens/registry'
 
 interface Props {
@@ -42,12 +42,12 @@ export default function HistoryList({ entries, loading, unreadable, hasPermit }:
 
   return (
     <section className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Private transfers</h2>
+      <h2 className="text-title">Private transfers</h2>
 
       {loading && entries.length === 0 ? (
         <div className="flex flex-col gap-2" aria-busy>
           {[0, 1, 2].map((i) => (
-            <div key={i} className="flex items-center gap-3 rounded-card bg-surface-1 px-4 py-3">
+            <div key={i} className="flex items-center gap-3 px-5 py-3.5">
               <span className="size-8 animate-pulse rounded-pill bg-surface" />
               <span className="h-4 w-32 animate-pulse rounded-control bg-surface" />
               <span className="ml-auto h-4 w-20 animate-pulse rounded-control bg-surface" />
@@ -55,7 +55,7 @@ export default function HistoryList({ entries, loading, unreadable, hasPermit }:
           ))}
         </div>
       ) : entries.length > 0 ? (
-        <ul className="flex flex-col gap-2">
+        <ul className="divide-y divide-border overflow-hidden rounded-card bg-surface-1">
           {entries.map((entry, index) => {
             const incoming = entry.direction === 'in'
             const counterparty = incoming ? entry.transfer.sender : entry.transfer.receiver
@@ -64,7 +64,7 @@ export default function HistoryList({ entries, loading, unreadable, hasPermit }:
             return (
               <li
                 key={`${entry.token.address}-${entry.transfer.id ?? index}`}
-                className="flex items-center gap-3 rounded-card bg-surface-1 px-4 py-3"
+                className="flex items-center gap-3 px-5 py-3.5"
               >
                 <span className="relative shrink-0">
                   <img src={tokenImageUrl(entry.token)} alt="" className="size-8 rounded-pill" />
@@ -77,7 +77,7 @@ export default function HistoryList({ entries, loading, unreadable, hasPermit }:
                 </span>
 
                 <span className="min-w-0">
-                  <span className="block truncate text-base font-medium">
+                  <span className="block truncate text-body font-medium">
                     {incoming ? 'Received' : entry.direction === 'self' ? 'Sent to self' : 'Sent'}{' '}
                     {entry.token.symbol}
                   </span>
@@ -87,9 +87,9 @@ export default function HistoryList({ entries, loading, unreadable, hasPermit }:
                   </span>
                 </span>
 
-                <span className="ml-auto whitespace-nowrap text-base font-medium">
+                <span className="ml-auto whitespace-nowrap text-body font-medium tabular-nums">
                   {incoming ? '+' : '-'}
-                  {formatAmount(entry.transfer.coins.amount, { decimals: entry.token.decimals })}
+                  {formatDisplayAmount(entry.transfer.coins.amount, entry.token.decimals)}
                 </span>
               </li>
             )

@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
 import { cn } from '@/lib/cn'
 
-export type ButtonVariant = 'primary' | 'secondary' | 'soft' | 'ghost'
+export type ButtonVariant = 'primary' | 'secondary' | 'soft' | 'text' | 'ghost'
 export type ButtonSize = 'sm' | 'md' | 'lg'
 /**
  * The design uses two shapes with a rule, not at random: fully rounded for the
@@ -37,6 +37,12 @@ const VARIANTS: Record<ButtonVariant, string> = {
   secondary: 'bg-surface text-text',
   // The wallet screen's Send / Receive / Wrap / Bridge row, and Stake.
   soft: 'bg-accent-container text-accent',
+  /*
+   * Material's text button. For an action repeated down a list, where a filled
+   * one per row turns the page into a column of buttons and stops any of them
+   * meaning anything.
+   */
+  text: 'bg-transparent text-accent',
   ghost: 'bg-transparent text-text-muted hover:text-text'
 }
 

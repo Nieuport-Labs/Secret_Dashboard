@@ -44,7 +44,7 @@ export default function Ecosystem() {
 
   return (
     <div className="mx-auto flex max-w-[900px] flex-col gap-8">
-      <h1 className="text-4xl font-semibold text-accent">Ecosystem</h1>
+      <h1 className="text-display">Ecosystem</h1>
 
       <section className="flex flex-col gap-4">
         <div className="flex items-center gap-3 rounded-control bg-surface px-4 py-2.5">
@@ -114,7 +114,7 @@ export default function Ecosystem() {
       </section>
 
       <section className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold">Where to get {DISPLAY_DENOM}</h2>
+        <h2 className="text-title">Where to get {DISPLAY_DENOM}</h2>
         <ul className="grid gap-3 sm:grid-cols-3">
           {WHERE_TO_BUY.map((place) => {
             const body = (

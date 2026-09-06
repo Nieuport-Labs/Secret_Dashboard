@@ -114,3 +114,26 @@ export function formatFiat(amount: number | undefined, currency = 'USD'): string
     maximumFractionDigits: amount < 1 ? 4 : 2
   }).format(amount)
 }
+
+/**
+ * An amount sized for reading rather than for exactness.
+ *
+ * `formatAmount` shows every place it has, which is right in a form where the
+ * figure is about to be sent and wrong everywhere else: `543.656931 SCRT` in a
+ * summary is six digits of precision nobody asked for, and it makes a balance
+ * look like a serial number.
+ *
+ * Precision follows magnitude, the way a person would read it aloud. Small
+ * amounts keep their detail, because for a token worth a fraction of a cent the
+ * detail is the whole figure.
+ */
+export function formatDisplayAmount(value: string | bigint, decimals = DECIMALS): string {
+  const exact = Number(fromBaseUnits(value, decimals))
+
+  if (exact === 0) return '0'
+  if (exact >= 1_000_000) return formatAmount(value, { decimals, maxFractionDigits: 0 })
+  if (exact >= 1000) return formatAmount(value, { decimals, maxFractionDigits: 1 })
+  if (exact >= 1) return formatAmount(value, { decimals, maxFractionDigits: 2 })
+  if (exact >= 0.01) return formatAmount(value, { decimals, maxFractionDigits: 4 })
+  return formatAmount(value, { decimals, maxFractionDigits: 6 })
+}

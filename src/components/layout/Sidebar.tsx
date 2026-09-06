@@ -27,7 +27,7 @@ export default function Sidebar() {
       >
         <img src="/img/logo-mark.svg" alt="" className="h-[50px] w-[48px] shrink-0" />
         <span className="flex flex-col whitespace-nowrap">
-          <span className="text-2xl font-semibold text-accent">Secret Dashboard</span>
+          <span className="text-headline">Secret Dashboard</span>
           <span className="text-base text-text-faint">
             version <span className="text-text">1.9</span>
           </span>

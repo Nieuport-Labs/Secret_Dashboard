@@ -51,11 +51,11 @@ export default function Powertools() {
 
   return (
     <div className="mx-auto flex max-w-[760px] flex-col gap-8">
-      <h1 className="text-4xl font-semibold text-accent">Powertools</h1>
+      <h1 className="text-display">Powertools</h1>
 
       <section className="flex flex-col gap-4">
         <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold">Endpoints</h2>
+          <h2 className="text-title">Endpoints</h2>
           <Button variant="ghost" size="sm" loading={probing} onClick={() => void probeAll()}>
             Re-check
           </Button>
@@ -137,7 +137,7 @@ function ContractQuery({ client }: { client?: ReturnType<typeof useWallet.getSta
 
   return (
     <section className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Query a contract</h2>
+      <h2 className="text-title">Query a contract</h2>
 
       <label className="flex flex-col gap-2">
         <span className="text-base font-medium">Contract address</span>
