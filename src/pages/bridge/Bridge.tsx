@@ -1,11 +1,19 @@
-import { ArrowDown, ArrowLeftRight, ExternalLink, Fuel, ShieldCheck, SlidersHorizontal } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowLeftRight,
+  ChevronDown,
+  ExternalLink,
+  Fuel,
+  ShieldCheck,
+  SlidersHorizontal
+} from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
-import Picker from '@/pages/bridge/components/Picker'
+import Picker, { PickerDialog, type PickerOption } from '@/pages/bridge/components/Picker'
 import { DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import { SOURCE_CHAINS, chainImageUrl, type SourceChain } from '@/chains/sources'
 import { depositGasLimit, sendDeposit, sendWithdraw, type Leg } from '@/lib/bridge'
@@ -28,7 +36,7 @@ import {
   tokensToChain,
   withdrawRoute
 } from '@/tokens/routes'
-import { tokenByAddress, tokenImageUrl } from '@/tokens/registry'
+import { tokenByAddress, tokenImageUrl, type TokenInfo } from '@/tokens/registry'
 import { transactionsCovered, useFeePayer } from '@/store/feePayer'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
@@ -292,42 +300,28 @@ export default function Bridge() {
           }}
         />
 
+        {/*
+          The chain gets the full width. It used to share the row with a token
+          field, which halved both and repeated the token — the amount row
+          already shows which token this is, so that is where it is chosen.
+        */}
         <section className="flex flex-col gap-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label={depositing ? 'From' : 'To'}>
-              <Picker
-                label="Network"
-                options={chains.map((c) => ({
-                  id: c.chainId,
-                  label: c.name,
-                  detail: c.chainId,
-                  image: chainImageUrl(c)
-                }))}
-                value={chain?.chainId}
-                onChange={(id) => {
-                  setChainId(id)
-                  reset()
-                }}
-              />
-            </Field>
-
-            <Field label="Token">
-              <Picker
-                label="Token"
-                options={tokens.map((t) => ({
-                  id: t.address,
-                  label: t.symbol,
-                  detail: t.description,
-                  image: tokenImageUrl(t)
-                }))}
-                value={tokenAddress}
-                onChange={(id) => {
-                  setTokenAddress(id)
-                  setAmount('')
-                }}
-              />
-            </Field>
-          </div>
+          <Field label={depositing ? 'From' : 'To'}>
+            <Picker
+              label="Network"
+              options={chains.map((c) => ({
+                id: c.chainId,
+                label: c.name,
+                detail: c.chainId,
+                image: chainImageUrl(c)
+              }))}
+              value={chain?.chainId}
+              onChange={(id) => {
+                setChainId(id)
+                reset()
+              }}
+            />
+          </Field>
 
           <p className="flex flex-wrap items-center justify-center gap-2 text-label text-text-faint">
             {from.image ? <img src={from.image} alt="" className="size-4 rounded-pill" /> : null}
@@ -341,8 +335,17 @@ export default function Bridge() {
         <AmountField
           amount={amount}
           onAmount={setAmount}
-          symbol={token?.symbol}
-          image={token ? tokenImageUrl(token) : undefined}
+          token={token}
+          tokenOptions={tokens.map((t) => ({
+            id: t.address,
+            label: t.symbol,
+            detail: t.description,
+            image: tokenImageUrl(t)
+          }))}
+          onToken={(id) => {
+            setTokenAddress(id)
+            setAmount('')
+          }}
           available={available}
           decimals={decimals}
           percent={percent}
@@ -537,8 +540,9 @@ const PERCENTS = [25, 50, 100] as const
 function AmountField({
   amount,
   onAmount,
-  symbol,
-  image,
+  token,
+  tokenOptions,
+  onToken,
   available,
   decimals,
   percent,
@@ -547,14 +551,16 @@ function AmountField({
 }: {
   amount: string
   onAmount: (value: string) => void
-  symbol?: string
-  image?: string
+  token?: TokenInfo
+  tokenOptions: PickerOption[]
+  onToken: (id: string) => void
   available?: string
   decimals: number
   percent: number
   onPercent: (share: number) => void
   error?: string
 }) {
+  const [picking, setPicking] = useState(false)
   const has = available !== undefined && BigInt(available) > 0n
 
   return (
@@ -563,13 +569,12 @@ function AmountField({
         <span className="text-label text-text-muted">Amount</span>
         {available !== undefined ? (
           <span className="text-label tabular-nums text-text-faint">
-            Balance {formatAmount(available, { decimals })} {symbol}
+            Balance {formatAmount(available, { decimals })} {token?.symbol}
           </span>
         ) : null}
       </div>
 
-      <div className="flex items-center gap-3 rounded-control border border-border bg-surface px-3 py-3">
-        {image ? <img src={image} alt="" className="size-7 shrink-0 rounded-pill" /> : null}
+      <div className="flex items-center gap-2 rounded-control border border-border bg-surface p-2 pl-3">
         <input
           inputMode="decimal"
           value={amount}
@@ -578,8 +583,36 @@ function AmountField({
           aria-label="Amount"
           className="min-w-0 flex-1 bg-transparent text-headline tabular-nums outline-none placeholder:text-text-faint"
         />
-        <span className="shrink-0 text-title text-text-muted">{symbol}</span>
+
+        {/*
+          The token is chosen by clicking the token. It sits where the symbol
+          already had to be printed, so the choice costs no extra row — which
+          is what frees the chain field above to take the full width.
+        */}
+        <button
+          type="button"
+          disabled={tokenOptions.length === 0}
+          onClick={() => setPicking(true)}
+          aria-haspopup="dialog"
+          className={cn(
+            'state-layer flex shrink-0 items-center gap-2 rounded-pill border border-border py-1.5 pl-1.5 pr-2.5',
+            'disabled:cursor-not-allowed disabled:opacity-50'
+          )}
+        >
+          {token ? <img src={tokenImageUrl(token)} alt="" className="size-6 shrink-0 rounded-pill" /> : null}
+          <span className="text-base font-medium">{token?.symbol ?? 'Token'}</span>
+          <ChevronDown size={14} aria-hidden className="text-text-muted" />
+        </button>
       </div>
+
+      <PickerDialog
+        open={picking}
+        onClose={() => setPicking(false)}
+        label="Token"
+        options={tokenOptions}
+        value={token?.address}
+        onChange={onToken}
+      />
 
       {/*
         The slider and the buttons drive the same number and both earn their
