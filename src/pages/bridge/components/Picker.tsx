@@ -52,7 +52,7 @@ export function PickerDialog({ open, onClose, label, options, value, onChange }:
       <div className="flex items-center gap-2.5 rounded-control border border-border bg-surface px-3 py-2">
         <Search size={16} aria-hidden className="shrink-0 text-text-muted" />
         <input
-          autoFocus
+          data-autofocus
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={`Search ${label.toLowerCase()}`}
