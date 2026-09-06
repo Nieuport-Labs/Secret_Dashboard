@@ -1,5 +1,5 @@
 import { DECIMALS, DISPLAY_DENOM } from '@/chains/secret4'
-import { GAS_SLICE_MIN_RATIO, LOW_BALANCE_THRESHOLD_SCRT } from '@/chains/osmosis'
+import { GAS_SLICE_MIN_RATIO } from '@/chains/osmosis'
 import { fromBaseUnits, toBaseUnits } from '@/lib/format'
 import { gasCreditMemo, osmosisSwapToSecretMemo, type HookedTransfer } from '@/lib/ibcMemo'
 
@@ -100,7 +100,7 @@ export function quoteGasSlice({
 }
 
 export type GasOffer =
-  | { offer: false; reason: 'has-enough' | 'no-price' | 'amount-too-small' }
+  | { offer: false; reason: 'no-price' | 'amount-too-small' }
   | {
       offer: true
       /** Pre-checked, and worth emphasising: with no SCRT nothing else works. */
@@ -111,28 +111,31 @@ export type GasOffer =
 /**
  * Whether to offer the gas slice, and how loudly.
  *
- * Below one SCRT it is a suggestion. At exactly zero it is the difference
- * between a wallet that works and one that only looks at things, so it is
- * pre-checked and said plainly.
+ * Offered whenever a slice can be sized and isn't an unreasonable bite out of
+ * the transfer — a comfortable balance is not a reason to withhold the option,
+ * only a reason not to reach for it unasked. That distinction lives entirely
+ * in `urgent`: at exactly zero SCRT this is the difference between a wallet
+ * that works and one that only looks at things, so it is pre-checked and said
+ * plainly. Above zero it is offered unchecked, same as any other option on the
+ * form — someone topping up before a bigger transaction has as much reason to
+ * use it as someone arriving with nothing.
  */
 export function shouldOfferGas(
   nativeBalanceBaseUnits: string | undefined,
   quote: GasSliceQuote | undefined,
   bridgeAmountBaseUnits: string
 ): GasOffer {
-  const balance = BigInt(nativeBalanceBaseUnits ?? '0')
-  const threshold = BigInt(toBaseUnits(String(LOW_BALANCE_THRESHOLD_SCRT), DECIMALS))
-
-  if (balance >= threshold) return { offer: false, reason: 'has-enough' }
   if (!quote) return { offer: false, reason: 'no-price' }
 
-  // Taking a dollar out of three bridged dollars is not a service.
+  // Taking a dollar out of three bridged dollars is not a service, however
+  // much SCRT is already sitting in the wallet.
   const bridged = BigInt(bridgeAmountBaseUnits)
   const cost = BigInt(quote.costBaseUnits)
   if (bridged < cost * BigInt(GAS_SLICE_MIN_RATIO)) {
     return { offer: false, reason: 'amount-too-small' }
   }
 
+  const balance = BigInt(nativeBalanceBaseUnits ?? '0')
   return { offer: true, urgent: balance === 0n, quote }
 }
 

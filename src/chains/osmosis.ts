@@ -46,9 +46,6 @@ export const GAS_SLICE_USD = 1
  */
 export const GAS_SLICE_MIN_RATIO = 5
 
-/** Native SCRT below which the dashboard offers to get the user some gas. */
-export const LOW_BALANCE_THRESHOLD_SCRT = 1
-
 /**
  * The channel a deposit's gas leg should travel over to reach Osmosis, or
  * `undefined` when this chain has no verified one.

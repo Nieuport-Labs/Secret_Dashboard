@@ -169,9 +169,12 @@ export default function Bridge() {
     bridgeAmountBaseUnits: amountBaseUnits
   })
 
+  // Get gas is a deposit-only concept; a withdrawal has nothing to size a
+  // slice against. The reason is inert either way, since the Option below only
+  // renders while depositing.
   const gasOffer = depositing
     ? shouldOfferGas(balances.native, quote, amountBaseUnits)
-    : ({ offer: false, reason: 'has-enough' } as const)
+    : ({ offer: false, reason: 'no-price' } as const)
   /*
    * "Urgent" used to live entirely inside `gasOffer.urgent`, which is only set
    * when an offer is actually made. That made a wallet holding exactly zero
@@ -492,17 +495,14 @@ export default function Bridge() {
                         Take less
                       </button>
                     </>
-                  ) : gasOffer.reason === 'no-price' ? (
+                  ) : (
+                    // The only remaining reason `shouldOfferGas` can give — a
+                    // comfortable balance no longer blocks the offer at all, it
+                    // only keeps the box unchecked (see `gasUrgent` above).
                     <>
                       {walletEmpty ? `You hold no ${DISPLAY_DENOM}. ` : ''}
                       Pricing for this token or for SCRT is unavailable right now, so the slice can&rsquo;t be
                       sized safely.
-                    </>
-                  ) : (
-                    <>
-                      Swaps about ${settings.gasSliceUsd.toFixed(2)} of this transfer into {DISPLAY_DENOM} on
-                      the way, so you can pay for transactions once it lands. Offered when you are short of
-                      gas — you are not.
                     </>
                   )}
                 </Option>

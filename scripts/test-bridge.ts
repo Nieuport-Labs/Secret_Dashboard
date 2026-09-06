@@ -103,8 +103,13 @@ check(
 /* Whether to offer                                                            */
 /* -------------------------------------------------------------------------- */
 
+// A comfortable balance no longer blocks the offer — only "urgent" (and so the
+// checkbox's default) responds to it. Someone topping up before a bigger
+// transaction can still reach for this; it just isn't reached for on their
+// behalf.
 const plenty = shouldOfferGas('5000000', quote, '100000000') // 5 SCRT held
-check('not offered when the wallet has enough', plenty.offer === false && plenty.reason === 'has-enough')
+check('still offered when the wallet already has plenty', plenty.offer === true)
+check('but not urgent with a comfortable balance', plenty.offer === true && plenty.urgent === false)
 
 const someButLow = shouldOfferGas('500000', quote, '100000000') // 0.5 SCRT
 check('offered below one SCRT', someButLow.offer === true)
