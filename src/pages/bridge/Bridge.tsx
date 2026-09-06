@@ -360,16 +360,31 @@ export default function Bridge() {
           offer is urgent, because at zero SCRT it stops being an option.
         */}
         {depositing ? (
-          <div className="rounded-control border border-border">
+          <div className="flex flex-col gap-1">
+            {/*
+              No box around it. Everything on this form already belongs to one
+              transaction and sits in one panel; drawing a second frame inside
+              that panel says these two settings are a separate thing, which is
+              the opposite of what they are. The chevron carries the affordance
+              instead — with no border, it has to.
+            */}
             <button
               type="button"
               onClick={() => setOptionsOpen((open) => !open)}
               aria-expanded={optionsOpen}
-              className="state-layer flex w-full items-center gap-2 rounded-control px-3 py-2.5 text-left text-base font-medium"
+              className="state-layer -mx-2 flex items-center gap-2 rounded-control px-2 py-1.5 text-left text-base font-medium"
             >
               <SlidersHorizontal size={16} aria-hidden className="text-text-muted" />
-              <span className="flex-1">Options</span>
-              <span className="text-label font-normal text-text-faint">
+              <span>Options</span>
+              <ChevronDown
+                size={14}
+                aria-hidden
+                className={cn(
+                  'text-text-muted transition-transform duration-[var(--duration-short)] ease-[var(--ease-standard)]',
+                  optionsOpen && 'rotate-180'
+                )}
+              />
+              <span className="ml-auto text-label font-normal text-text-faint">
                 {[wrap ? 'wrap on arrival' : undefined, getGas && canGetGas ? 'get gas' : undefined]
                   .filter(Boolean)
                   .join(' · ') || 'none'}
@@ -377,7 +392,7 @@ export default function Bridge() {
             </button>
 
             {optionsOpen ? (
-              <div className="flex flex-col gap-1 border-t border-border p-2">
+              <div className="-mx-2 flex flex-col gap-0.5">
                 <Option
                   checked={wrap}
                   onChange={setWrap}
