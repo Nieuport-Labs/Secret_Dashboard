@@ -1,4 +1,5 @@
 import { AlertCircle } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import { useNotifications, type Toast } from '@/store/notifications'
@@ -30,6 +31,8 @@ export default function Toaster() {
 }
 
 function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
+  const navigate = useNavigate()
+
   return (
     <div className="pointer-events-auto w-full max-w-[360px] rounded-card bg-surface-3 p-5 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
       {toast.kind === 'error' ? (
@@ -57,7 +60,16 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
             <>
               <p className="mt-2 text-base">Do you want to wrap it?</p>
               <div className="mt-3 flex gap-2.5">
-                <Button variant="primary" shape="control" className="flex-1" onClick={onDismiss}>
+                <Button
+                  variant="primary"
+                  shape="control"
+                  className="flex-1"
+                  onClick={() => {
+                    onDismiss()
+                    const token = toast.wrapContract ? `&token=${toast.wrapContract}` : ''
+                    navigate(`/wallet?panel=wrap${token}`)
+                  }}
+                >
                   Wrap
                 </Button>
                 <Button variant="secondary" shape="control" onClick={onDismiss}>

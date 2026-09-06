@@ -11,9 +11,11 @@
     "lint": "eslint .",
     "typecheck": "tsc -b",
     "format": "prettier --write --ignore-unknown .",
-    "verify:chain": "node --experimental-strip-types --no-warnings scripts/verify-chain.ts"
+    "verify:chain": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/verify-chain.ts",
+    "test:bridge": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-bridge.ts"
   },
   "dependencies": {
+    "@cosmjs/stargate": "^0.39.0",
     "@solar-republic/neutrino": "^1.9.0",
     "lucide-react": "^0.460.0",
     "qrcode.react": "^4.2.0",

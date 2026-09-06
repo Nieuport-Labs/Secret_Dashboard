@@ -364,6 +364,50 @@ async function main(): Promise<void> {
     ]
   })
 
+  /* 7b — Every bridge channel, on Secret's side. Two things have to hold and
+     both rot silently: the channel must still be OPEN, and it must still lead
+     to the chain the route table claims. A transfer into a closed channel does
+     not bounce back on its own. */
+  await check('Bridge channels', async () => {
+    const { SOURCE_CHAINS } = await import('../src/chains/sources.ts')
+
+    const results = await Promise.all(
+      SOURCE_CHAINS.map(async (chain) => {
+        try {
+          const [state, client] = await Promise.all([
+            fetch(`${lcd}/ibc/core/channel/v1/channels/${chain.withdrawChannel}/ports/transfer`, {
+              headers: { Accept: 'application/json' },
+              signal: AbortSignal.timeout(12_000)
+            })
+              .then((r) => r.json())
+              .then((b: { channel?: { state?: string } }) => b.channel?.state),
+            fetch(
+              `${lcd}/ibc/core/channel/v1/channels/${chain.withdrawChannel}/ports/transfer/client_state`,
+              { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(12_000) }
+            )
+              .then((r) => r.json())
+              .then(
+                (b: { identified_client_state?: { client_state?: { chain_id?: string } } }) =>
+                  b.identified_client_state?.client_state?.chain_id
+              )
+          ])
+
+          if (state !== 'STATE_OPEN') return `${chain.name}: ${state ?? 'unreadable'}`
+          if (client !== chain.chainId) return `${chain.name}: leads to ${client ?? 'nowhere'}`
+          return undefined
+        } catch (error) {
+          return `${chain.name}: ${error instanceof Error ? error.message.slice(0, 40) : 'failed'}`
+        }
+      })
+    )
+
+    const problems = results.filter((r): r is string => r !== undefined)
+    if (problems.length > 0) {
+      return ['fail', `${problems.length} of ${SOURCE_CHAINS.length} unusable:\n  ${problems.join('\n  ')}`]
+    }
+    return ['pass', `all ${SOURCE_CHAINS.length} open and pointing at the expected chain`]
+  })
+
   /* 8 — Gas price actually enforced, since a fee estimated too low makes a
      grant look able to cover a transaction it then fails. */
   await check('Minimum gas price', async () => {

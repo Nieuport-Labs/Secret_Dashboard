@@ -1,5 +1,6 @@
 import { Construction, KeyRound } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import BalanceList from '@/components/wallet/BalanceList'
@@ -23,6 +24,18 @@ export default function Wallet() {
   const history = useTransferHistory(permit)
   const push = useArrivals(permit, { onArrival: balances.refresh })
   const [panel, setPanel] = useState<WalletPanel | null>(null)
+  const [search, setSearch] = useSearchParams()
+
+  // A notification can ask for a panel by link, which is how the "do you want
+  // to wrap it?" toast leads somewhere rather than just closing.
+  useEffect(() => {
+    const requested = search.get('panel')
+    if (requested === 'send' || requested === 'receive' || requested === 'wrap') {
+      setPanel(requested)
+      search.delete('panel')
+      setSearch(search, { replace: true })
+    }
+  }, [search, setSearch])
 
   if (!address) return null
 

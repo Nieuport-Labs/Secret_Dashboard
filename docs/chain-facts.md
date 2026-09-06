@@ -4,7 +4,7 @@ What `scripts/verify-chain.ts` and manual source reading established against **s
 before any UI was written. Everything here is a fact the build depends on, so re-run
 `npm run verify:chain` when something behaves unexpectedly rather than assuming this is current.
 
-Verified **2026-09-06**. Result: 11 pass, 1 warn (deliberate), 0 fail.
+Verified **2026-09-06**. Result: 12 pass, 1 warn (deliberate), 0 fail.
 
 ---
 
@@ -199,10 +199,46 @@ The address widely quoted online for XCS
 mainnet** — the LCD returns `no such contract`. Resolve deployed addresses by querying, never
 from prose.
 
-Open for Phase 6: the label says `v1.2`, and the XCS README distinguishes v1 from v2 by whether
-the contract keeps its own channel/denom registry. Which lineage this is decides whether
-`next_memo` and automatic unwinding are available, so read its schema before building on it.
-Route planning goes through `@skip-go/client` regardless; XCS direct is the fallback.
+**Settled in phase 6.** Despite the `v1.2` label, this deployment matches the current source. A
+malformed query returns `Error parsing into type crosschain_swaps::msg::QueryMsg: unknown variant
+..., expected 'recoverable'` — and `Recoverable { addr }` is the only variant in today's `msg.rs`.
+So `ExecuteMsg::OsmosisSwap` carries `next_memo`, `final_memo`, `on_failed_delivery` and `route`.
+
+Two things that decide whether the gas leg works at all, both read out of the source rather than
+guessed:
+
+1. **`next_memo` is the slot that reaches Secret, not `final_memo`.** The contract calls
+   `registry.unwrap_coin_into(..., first_transfer_memo, last_transfer_memo, ...)` with `next_memo`
+   as the _first_. SCRT on Osmosis is `transfer/channel-88/uscrt`, so returning it to Secret is a
+   one-hop unwind: there is only one transfer, and its memo is the first one. Putting the hook in
+   `final_memo` would attach it to a packet that is never sent.
+2. **The receiver is prefix-checked.** `unwrap_coin_into` rejects a receiver whose bech32 prefix
+   does not match the destination chain, so the field must hold a real `secret1…` address — which
+   suits the vault, since Secret's own hook requires receiver and hooked contract to be equal.
+
+**Still unverified, and the reason gas credits are opt-in:** the contract merges its own
+`ibc_callback` key into that same memo so it can track the send. How Secret's `x/ibc-hooks` treats
+a memo carrying both `ibc_callback` and `wasm` cannot be settled without sending a real packet.
+Landing native SCRT avoids the question entirely — no `wasm` key, no hook, nothing to misparse —
+so that is the default.
+
+## Bridge channels
+
+All **37** of Secret's outgoing transfer channels are `STATE_OPEN` and their light clients report
+the chain the route table expects. Checked by `verify:chain`, because both halves rot silently and
+a transfer into a closed channel does not bounce back on its own.
+
+The route table itself keeps **215 deposit** and **214 withdraw** routes, and drops **156** that
+went through Axelar's gateway.
+
+## Axelar: two different things
+
+Worth separating, because conflating them either blocks working routes or offers dead ones.
+
+- **Axelar's chain** (`axelar-dojo-1`) is an ordinary Cosmos chain reachable over `channel-20`,
+  which is **open** and points at Axelar. Bridging to and from it works, and it is offered.
+- **Axelar's gateway service**, which wrapped Ethereum and other EVM assets into saUSDC, saWETH
+  and the rest, is what was disabled after the exploit below. Those routes are not offered.
 
 ## Axelar bridge — still down
 

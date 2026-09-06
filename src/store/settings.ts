@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 import { GAS_SLICE_USD } from '@/chains/osmosis'
+import type { GasDelivery } from '@/lib/getGas'
 
 /**
  * User preferences, persisted locally.
@@ -39,6 +40,13 @@ interface SettingsState {
   autoWrapDeposits: boolean
   /** Size of the gas slice taken at bridge time, in USD. */
   gasSliceUsd: number
+  /**
+   * What the gas slice turns into on arrival. 'native' lands spendable SCRT and
+   * depends on nothing but the swap; 'credits' lands a vault fee allowance and
+   * additionally depends on an IBC hook whose interaction with Osmosis's own
+   * callback key has not been settled by a live packet. Hence the default.
+   */
+  gasDelivery: GasDelivery
 
   set: <K extends keyof SettingsValues>(key: K, value: SettingsValues[K]) => void
   reset: () => void
@@ -55,7 +63,8 @@ const DEFAULTS: SettingsValues = {
   rpcOverride: '',
   notificationsEnabled: true,
   autoWrapDeposits: false,
-  gasSliceUsd: GAS_SLICE_USD
+  gasSliceUsd: GAS_SLICE_USD,
+  gasDelivery: 'native'
 }
 
 export const useSettings = create<SettingsState>()(
