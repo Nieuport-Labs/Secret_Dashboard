@@ -1,7 +1,17 @@
-import { CheckCircle2, Info } from 'lucide-react'
+import { CheckCircle2, Info, XCircle } from 'lucide-react'
+import { useState } from 'react'
 
+import Button from '@/components/ui/Button'
 import Drawer from '@/components/ui/Drawer'
 import { DISPLAY_DENOM } from '@/chains/secret4'
+import {
+  forgetResolvedEndpoints,
+  parseEndpointList,
+  probeLcd,
+  probeRpc,
+  type ProbeResult
+} from '@/lib/endpoint'
+import { usePermit } from '@/hooks/usePermit'
 import { availableFee, type FeeGrant } from '@/lib/feegrant-sdk'
 import { formatAmount, shortenAddress } from '@/lib/format'
 import { cn } from '@/lib/cn'
@@ -111,6 +121,26 @@ export default function SettingsDrawer({ open, onClose }: Props) {
       </section>
 
       <section className="flex flex-col gap-3">
+        <h3 className="text-base font-semibold">Currency</h3>
+        <select
+          value={settings.currency}
+          onChange={(event) => settings.set('currency', event.target.value)}
+          className="rounded-control bg-surface px-4 py-2.5 text-base outline-none"
+        >
+          {CURRENCIES.map((code) => (
+            <option key={code} value={code}>
+              {code}
+            </option>
+          ))}
+        </select>
+        <p className="text-sm text-text-faint">Prices only. Balances are always the real token amounts.</p>
+      </section>
+
+      <EndpointSection />
+
+      <PermitSection />
+
+      <section className="flex flex-col gap-3">
         <h3 className="text-base font-semibold">Notifications</h3>
         <label className="state-layer flex cursor-pointer items-start gap-3 rounded-control bg-surface p-3">
           <input
@@ -177,5 +207,151 @@ function GranterPicker({ grants }: { grants: FeeGrant[] }) {
         )
       })}
     </div>
+  )
+}
+
+const CURRENCIES = ['USD', 'EUR', 'GBP', 'CHF', 'CZK', 'JPY', 'AUD', 'CAD']
+
+/**
+ * Endpoint overrides.
+ *
+ * Worth having in reach rather than buried: Secret has two working public
+ * providers, so "the app is broken" and "both nodes are having a bad morning"
+ * look the same from here. Each field takes a comma-separated list and the app
+ * uses the first entry that answers with JSON and reports secret-4 — pasting a
+ * dead one costs nothing.
+ */
+function EndpointSection() {
+  const settings = useSettings()
+  const [checking, setChecking] = useState(false)
+  const [results, setResults] = useState<ProbeResult[]>([])
+
+  const check = async () => {
+    setChecking(true)
+    const lcds = parseEndpointList(settings.lcdOverride)
+    const rpcs = parseEndpointList(settings.rpcOverride)
+    setResults([...(await Promise.all(lcds.map(probeLcd))), ...(await Promise.all(rpcs.map(probeRpc)))])
+    setChecking(false)
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <h3 className="text-base font-semibold">Endpoints</h3>
+
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm text-text-muted">LCD</span>
+        <input
+          value={settings.lcdOverride}
+          onChange={(event) => settings.set('lcdOverride', event.target.value)}
+          placeholder="Leave empty for the built-in list"
+          spellCheck={false}
+          className="rounded-control bg-surface px-3 py-2 font-mono text-sm outline-none placeholder:text-text-faint"
+        />
+      </label>
+
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm text-text-muted">RPC</span>
+        <input
+          value={settings.rpcOverride}
+          onChange={(event) => settings.set('rpcOverride', event.target.value)}
+          placeholder="Leave empty for the built-in list"
+          spellCheck={false}
+          className="rounded-control bg-surface px-3 py-2 font-mono text-sm outline-none placeholder:text-text-faint"
+        />
+      </label>
+
+      <div className="flex items-center gap-2">
+        <Button
+          variant="soft"
+          shape="control"
+          size="sm"
+          loading={checking}
+          disabled={!settings.lcdOverride && !settings.rpcOverride}
+          onClick={() => void check()}
+        >
+          Check
+        </Button>
+        {/*
+          Resolved endpoints are cached for the page load, so a change does not
+          take effect until that cache is dropped. Saying so beats leaving
+          someone to wonder why their new node is not being used.
+        */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            forgetResolvedEndpoints()
+            window.location.reload()
+          }}
+        >
+          Apply and reload
+        </Button>
+      </div>
+
+      {results.length > 0 ? (
+        <ul className="flex flex-col gap-1">
+          {results.map((result) => (
+            <li key={result.url} className="flex items-start gap-2 text-sm">
+              {result.ok ? (
+                <CheckCircle2 size={14} aria-hidden className="mt-0.5 shrink-0 text-positive" />
+              ) : (
+                <XCircle size={14} aria-hidden className="mt-0.5 shrink-0 text-text-faint" />
+              )}
+              <span className="break-address min-w-0">
+                {result.url}
+                {result.ok ? '' : ` — ${result.reason}`}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  )
+}
+
+/**
+ * The query permit.
+ *
+ * Forgetting it locally is not the same as revoking it on chain, and the
+ * difference matters: a revoked permit is dead everywhere, a forgotten one is
+ * just gone from this browser. Revoking costs a transaction and revokes by
+ * name, so a new permit under the same name would still be refused — which is
+ * why only the local half is offered here.
+ */
+function PermitSection() {
+  const { permit, staleTokens, signing, sign, forget } = usePermit()
+
+  return (
+    <section className="flex flex-col gap-3">
+      <h3 className="text-base font-semibold">Query permit</h3>
+
+      {permit ? (
+        <>
+          <p className="text-sm text-text-muted">
+            Signed, covering {permit.params.allowed_tokens.length} tokens
+            {staleTokens.length > 0 ? `, ${staleTokens.length} newer than it` : ''}.
+          </p>
+          <div className="flex gap-2">
+            <Button variant="soft" shape="control" size="sm" loading={signing} onClick={() => void sign()}>
+              Re-sign
+            </Button>
+            <Button variant="ghost" size="sm" onClick={forget}>
+              Forget on this device
+            </Button>
+          </div>
+          <p className="text-sm text-text-faint">
+            Forgetting removes the local copy only. It stays valid on chain until revoked, which is a
+            transaction and cannot be undone under the same permit name.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-text-muted">Not signed. Private balances cannot be read without it.</p>
+          <Button variant="soft" shape="control" size="sm" loading={signing} onClick={() => void sign()}>
+            Sign permit
+          </Button>
+        </>
+      )}
+    </section>
   )
 }

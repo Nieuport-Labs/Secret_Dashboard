@@ -3,7 +3,6 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 
 import AppShell from '@/components/layout/AppShell'
 import { onAccountChange } from '@/lib/wallet'
-import Placeholder from '@/pages/Placeholder'
 import Wallet from '@/pages/wallet/Wallet'
 import Welcome from '@/pages/welcome/Welcome'
 import { applyTheme, useSettings } from '@/store/settings'
@@ -17,6 +16,10 @@ import { handleAccountChange, lastUsedWallet, useWallet } from '@/store/wallet'
  */
 const Bridge = lazy(() => import('@/pages/bridge/Bridge'))
 const Staking = lazy(() => import('@/pages/staking/Staking'))
+const Ecosystem = lazy(() => import('@/pages/ecosystem/Ecosystem'))
+const Network = lazy(() => import('@/pages/network/Network'))
+const Powertools = lazy(() => import('@/pages/powertools/Powertools'))
+const Onboarding = lazy(() => import('@/pages/onboarding/Onboarding'))
 
 export default function App() {
   const theme = useSettings((state) => state.theme)
@@ -71,41 +74,33 @@ export default function App() {
         <Route
           path="/ecosystem"
           element={
-            <Placeholder
-              title="Ecosystem"
-              phase="phase 8"
-              summary="Secret dApps from the DappRegistry, and where to buy SCRT."
-            />
+            <Suspense fallback={<p className="text-base text-text-muted">Loading…</p>}>
+              <Ecosystem />
+            </Suspense>
           }
         />
         <Route
           path="/network"
           element={
-            <Placeholder
-              title="Network"
-              phase="phase 8"
-              summary="Price, TVL, chain statistics and node health."
-            />
+            <Suspense fallback={<p className="text-base text-text-muted">Loading…</p>}>
+              <Network />
+            </Suspense>
           }
         />
         <Route
           path="/powertools"
           element={
-            <Placeholder
-              title="Powertools"
-              phase="phase 8"
-              summary="Compose and broadcast raw messages, and check endpoint health."
-            />
+            <Suspense fallback={<p className="text-base text-text-muted">Loading…</p>}>
+              <Powertools />
+            </Suspense>
           }
         />
         <Route
           path="/onboarding"
           element={
-            <Placeholder
-              title="Onboarding"
-              phase="phase 8"
-              summary="Choosing a wallet, what SCRT is, what SNIP-20 tokens are, what Secret dApps are, and how to bridge in."
-            />
+            <Suspense fallback={<p className="text-base text-text-muted">Loading…</p>}>
+              <Onboarding />
+            </Suspense>
           }
         />
         <Route path="*" element={<Navigate to="/wallet" replace />} />

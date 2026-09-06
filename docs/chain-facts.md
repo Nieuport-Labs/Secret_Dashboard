@@ -280,3 +280,34 @@ connections and the routes remain off.
 The reference dashboard still ships `@axelar-network/axelarjs-sdk` and Axelar deposit-address
 logic. **Do not carry it over.** saUSDT, saUSDC, saDAI, saWETH, saWBTC, saWBNB and sawstETH are
 not offered as bridgeable until the route is restored.
+
+## Off-chain data sources
+
+Probed the same way as the endpoints, and with the same result: one of them is gone.
+
+| Source                                 | State                           | Used for     |
+| -------------------------------------- | ------------------------------- | ------------ |
+| `SecretFoundation/DappRegistry`        | ok, 25 apps                     | Ecosystem    |
+| DefiLlama `/chains`                    | ok                              | value locked |
+| CoinGecko `simple/price`               | ok                              | prices       |
+| `dashboardstats.secretsaturn.net`      | **dead — DNS does not resolve** | —            |
+| Lavender.Five `networks/secretnetwork` | ok, needs the trailing slash    | —            |
+
+The reference dashboard draws five separate panels from `dashboardstats.secretsaturn.net`:
+wallets, validator bonding, daily network stats, relayer stats and weekly contract usage. That
+host no longer resolves, so all five are gone. Its `lcd.mainnet.secretsaturn.net` fails the same
+way, which is what first suggested checking.
+
+Nothing was rebuilt against another indexer. The Network page reads Secret's own modules instead:
+
+| Figure                               | Source                                         |
+| ------------------------------------ | ---------------------------------------------- |
+| Bonded / total supply / staked ratio | `staking/pool` + `bank/supply/by_denom`        |
+| Inflation                            | `mint/v1beta1/inflation`                       |
+| Block height and time                | `base/tendermint/blocks/latest`                |
+| Community pool                       | `distribution/community_pool`                  |
+| Active validators                    | `staking/validators?status=BOND_STATUS_BONDED` |
+
+Sampled 2026-09-06: 360,181,634 of 1,446,381,398 SCRT bonded (24.90%), inflation 5.00%, height
+27,026,411, 26 active validators. Only price and value locked still come from outside, and both
+show as unavailable rather than as zero when they cannot be fetched.
