@@ -16,6 +16,7 @@ import { handleAccountChange, lastUsedWallet, useWallet } from '@/store/wallet'
  * actually goes to bridge.
  */
 const Bridge = lazy(() => import('@/pages/bridge/Bridge'))
+const Staking = lazy(() => import('@/pages/staking/Staking'))
 
 export default function App() {
   const theme = useSettings((state) => state.theme)
@@ -62,11 +63,9 @@ export default function App() {
         <Route
           path="/staking"
           element={
-            <Placeholder
-              title="Staking"
-              phase="phase 7"
-              summary="Delegate, redelegate, claim, and auto-restake through MsgSetAutoRestake, which the chain only honours above 10 SCRT per validator."
-            />
+            <Suspense fallback={<p className="text-base text-text-muted">Loading staking…</p>}>
+              <Staking />
+            </Suspense>
           }
         />
         <Route

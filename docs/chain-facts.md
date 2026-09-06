@@ -141,6 +141,30 @@ Read from `/cosmos/distribution/v1beta1/params`, not hardcoded. Below 10 SCRT de
 validator, `MsgSetAutoRestake` is pointless for that validator and the UI must say so instead of
 offering a toggle that silently does nothing.
 
+secretjs exposes both figures directly — `distribution.restakeThreshold({})` returns
+`{"threshold":"10000000.000000000000000000"}` and `distribution.restakingEntries({ delegator })`
+returns the validator addresses a delegator has it switched on for. Both are Secret's own
+additions to `x/distribution`; neither exists on a stock Cosmos chain.
+
+## Staking shape
+
+|                                |                        |
+| ------------------------------ | ---------------------- |
+| Bonded (active) validators     | **26**                 |
+| Validators across all statuses | 236                    |
+| `max_validators`               | 80                     |
+| Unbonding period               | 1814400s = **21 days** |
+
+The active set is far smaller than the cap, so a validator list built from
+`BOND_STATUS_BONDED` shows 26 of 236. That is right for choosing who to stake with, and wrong for
+showing what you already have: **a delegation outlives its validator's place in the active set**.
+A stake with one that gets jailed or unbonded would vanish from a bonded-only list while still
+existing on chain — and it is exactly the delegation someone most needs to find and move. So any
+validator the account delegates to is fetched individually and added to the list.
+
+Rewards and the restake threshold both arrive as 18-place decimal strings (`123.456…` uscrt) and
+are truncated, never rounded. Rounding a reward up shows a figure that cannot be claimed.
+
 ## IBC hooks
 
 The auto-wrap proxy the reference dashboard targets is alive and unmigrated:
