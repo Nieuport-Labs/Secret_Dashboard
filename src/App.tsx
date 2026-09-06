@@ -54,26 +54,6 @@ export default function App() {
           }
         />
         <Route
-          path="/send"
-          element={
-            <Placeholder
-              title="Send"
-              phase="phase 3b"
-              summary="Send SCRT or any private token, with the fee paid by a grant when one covers it."
-            />
-          }
-        />
-        <Route
-          path="/wrap"
-          element={
-            <Placeholder
-              title="Wrap"
-              phase="phase 3b"
-              summary="Turn public SCRT into private sSCRT and back."
-            />
-          }
-        />
-        <Route
           path="/staking"
           element={
             <Placeholder

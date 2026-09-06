@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import Avatar from '@/components/wallet/Avatar'
+import type { WalletPanel } from '@/components/wallet/panels'
 import Button from '@/components/ui/Button'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { useProfileImage } from '@/hooks/useProfileImage'
@@ -15,7 +16,7 @@ interface Props {
   native?: string
   nativeFiat?: number
   loading: boolean
-  onReceive: () => void
+  onOpenPanel: (panel: WalletPanel) => void
 }
 
 /**
@@ -26,7 +27,7 @@ interface Props {
  * of everything held — it is the figure that decides whether you can pay for a
  * transaction, which is why it earns the largest type on the screen.
  */
-export default function ProfileHeader({ address, native, nativeFiat, loading, onReceive }: Props) {
+export default function ProfileHeader({ address, native, nativeFiat, loading, onOpenPanel }: Props) {
   const navigate = useNavigate()
   const currency = useSettings((state) => state.currency)
   const { url, upload, remove, saving, error } = useProfileImage()
@@ -84,11 +85,17 @@ export default function ProfileHeader({ address, native, nativeFiat, loading, on
               shape="control"
               size="lg"
               className="flex-1"
-              onClick={() => navigate('/send')}
+              onClick={() => onOpenPanel('send')}
             >
               Send
             </Button>
-            <Button variant="soft" shape="control" size="lg" className="flex-1" onClick={onReceive}>
+            <Button
+              variant="soft"
+              shape="control"
+              size="lg"
+              className="flex-1"
+              onClick={() => onOpenPanel('receive')}
+            >
               Receive
             </Button>
             <Button
@@ -96,7 +103,7 @@ export default function ProfileHeader({ address, native, nativeFiat, loading, on
               shape="control"
               size="lg"
               className="flex-1"
-              onClick={() => navigate('/wrap')}
+              onClick={() => onOpenPanel('wrap')}
             >
               Wrap
             </Button>

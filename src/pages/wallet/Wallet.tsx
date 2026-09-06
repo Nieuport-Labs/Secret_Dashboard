@@ -1,4 +1,4 @@
-import { KeyRound } from 'lucide-react'
+import { Construction, KeyRound } from 'lucide-react'
 import { useState } from 'react'
 
 import Button from '@/components/ui/Button'
@@ -6,6 +6,8 @@ import BalanceList from '@/components/wallet/BalanceList'
 import HistoryList from '@/components/wallet/HistoryList'
 import ProfileHeader from '@/components/wallet/ProfileHeader'
 import ReceiveDrawer from '@/components/wallet/ReceiveDrawer'
+import Drawer from '@/components/ui/Drawer'
+import { PANEL_TITLES, type WalletPanel } from '@/components/wallet/panels'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { useBalances } from '@/hooks/useBalances'
 import { usePermit } from '@/hooks/usePermit'
@@ -18,7 +20,7 @@ export default function Wallet() {
   const { permit, staleTokens, signing, error, sign } = usePermit()
   const balances = useBalances(permit)
   const history = useTransferHistory(permit)
-  const [receiveOpen, setReceiveOpen] = useState(false)
+  const [panel, setPanel] = useState<WalletPanel | null>(null)
 
   if (!address) return null
 
@@ -29,7 +31,7 @@ export default function Wallet() {
         native={balances.native}
         nativeFiat={balances.nativeFiat}
         loading={balances.loading}
-        onReceive={() => setReceiveOpen(true)}
+        onOpenPanel={setPanel}
       />
 
       {balances.error ? (
@@ -72,7 +74,21 @@ export default function Wallet() {
         hasPermit={Boolean(permit)}
       />
 
-      <ReceiveDrawer open={receiveOpen} onClose={() => setReceiveOpen(false)} address={address} />
+      <ReceiveDrawer open={panel === 'receive'} onClose={() => setPanel(null)} address={address} />
+
+      {/* Send and Wrap share Receive's panel rather than being pages of their own. */}
+      <Drawer
+        open={panel === 'send' || panel === 'wrap'}
+        onClose={() => setPanel(null)}
+        title={panel ? PANEL_TITLES[panel] : ''}
+      >
+        <div className="flex items-start gap-3 rounded-card bg-surface-1 p-4">
+          <Construction size={20} aria-hidden className="mt-0.5 shrink-0 text-text-muted" />
+          <p className="text-base text-text-muted">
+            Built in phase 3b, here in this panel. Its fee is paid by a grant whenever one covers it.
+          </p>
+        </div>
+      </Drawer>
     </div>
   )
 }
