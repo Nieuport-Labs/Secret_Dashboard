@@ -1,7 +1,6 @@
 import { DECIMALS, DISPLAY_DENOM } from '@/chains/secret4'
 import { GAS_SLICE_MIN_RATIO } from '@/chains/osmosis'
 import { fromBaseUnits, toBaseUnits } from '@/lib/format'
-import { gasCreditMemo, osmosisSwapToSecretMemo, type HookedTransfer } from '@/lib/ibcMemo'
 
 /**
  * "Get gas" — turning a slice of what you bridge into the ability to transact.
@@ -17,25 +16,14 @@ import { gasCreditMemo, osmosisSwapToSecretMemo, type HookedTransfer } from '@/l
  * not as a split of one packet: Osmosis cannot swap part of a transfer, and
  * keeping them separate means a failure on the gas leg cannot take the main
  * amount with it.
+ *
+ * What this file owns is *sizing* the slice — how much of the bridged token to
+ * take, and whether that is a reasonable thing to do at all. The swap itself,
+ * and the message that carries it, come from Skip's routing API; see
+ * `lib/skipGo.ts` for why a hand-composed memo against Osmosis's own
+ * `crosschain-swaps` contract turned out not to work for almost anything that
+ * isn't OSMO itself.
  */
-
-/** What lands on Secret at the end of the gas leg. */
-export type GasDelivery =
-  /**
-   * Native SCRT in the user's own wallet. Depends on nothing but the swap, and
-   * the user can spend it on anything, including gas. The default.
-   */
-  | 'native'
-  /**
-   * A fee allowance issued by the gas vault, via an IBC hook.
-   *
-   * Verified as far as it can be without sending a real packet: the vault
-   * ignores `info.sender`, which the hook nulls, and `next_memo` is the slot
-   * that reaches Secret. What is *not* verified is how Secret's hook treats the
-   * `ibc_callback` key Osmosis adds to that same memo. Until a live packet
-   * settles that, this is opt-in.
-   */
-  | 'credits'
 
 export interface GasSliceQuote {
   /** SCRT to buy, in base units. */
@@ -176,46 +164,6 @@ export function fittingGasSliceUsd(
   // worth taking. Return the floor itself; the caller still shows "too small"
   // afterward; the button just stops help offering a number that cannot work.
   return 0.02
-}
-
-export interface GasLegOptions {
-  /** The user's Secret address. */
-  secretAddress: string
-  /** The user's own Osmosis address, derived from the same key. */
-  osmosisAddress: string
-  delivery: GasDelivery
-  slippagePercent?: number
-}
-
-/**
- * The receiver and memo for the gas leg's `MsgTransfer`, sent to Osmosis.
- *
- * For `native` the swap output goes straight to the user and no hook runs on
- * Secret at all. For `credits` the output is addressed to the vault, with the
- * user's address inside the message — because Secret's hook requires the
- * receiver and the hooked contract to be the same address.
- */
-export function buildGasLeg({
-  secretAddress,
-  osmosisAddress,
-  delivery,
-  slippagePercent
-}: GasLegOptions): HookedTransfer {
-  if (delivery === 'native') {
-    return osmosisSwapToSecretMemo({
-      secretReceiver: secretAddress,
-      recoveryAddress: osmosisAddress,
-      slippagePercent
-    })
-  }
-
-  const hook = gasCreditMemo(secretAddress)
-  return osmosisSwapToSecretMemo({
-    secretReceiver: hook.receiver,
-    recoveryAddress: osmosisAddress,
-    secretMemo: hook.memo,
-    slippagePercent
-  })
 }
 
 /** Plain-language summary of what the slice buys, for the confirmation line. */

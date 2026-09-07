@@ -1,5 +1,4 @@
-import { GAS_VAULT_ADDRESS, IBC_HOOKS_WRAPPER } from '@/chains/secret4'
-import { CROSSCHAIN_SWAPS_CONTRACT, OSMOSIS_TO_SECRET_CHANNEL, SCRT_ON_OSMOSIS } from '@/chains/osmosis'
+import { IBC_HOOKS_WRAPPER } from '@/chains/secret4'
 
 /**
  * ICS-20 memos, and the constraints that make them work.
@@ -55,27 +54,6 @@ export function wrapDepositMemo(snip20Address: string, codeHash: string, recipie
 }
 
 /**
- * Make the gas vault issue `grantee` a fee allowance from the SCRT in this
- * packet.
- *
- * This is what lets someone arriving with nothing become able to transact
- * without ever signing anything on Secret. It works because the vault's `grant`
- * handler reads only `info.funds`, `env.contract.address` and the grantee from
- * the message — never `info.sender`, which the hook nulls out.
- */
-export function gasCreditMemo(grantee: string): HookedTransfer {
-  return {
-    receiver: GAS_VAULT_ADDRESS,
-    memo: JSON.stringify({
-      wasm: {
-        contract: GAS_VAULT_ADDRESS,
-        msg: { grant: { grantee } }
-      }
-    })
-  }
-}
-
-/**
  * A transfer with no hook.
  *
  * The reference dashboard sends a single space rather than an empty string here,
@@ -89,84 +67,13 @@ export function plainTransfer(receiver: string): HookedTransfer {
   return { receiver, memo: '' }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Osmosis crosschain swaps                                                    */
-/* -------------------------------------------------------------------------- */
-
-export type Slippage = { twap: { slippage_percentage: string; window_seconds: number } }
-
-export interface SwapToSecretOptions {
-  /** Where the swapped SCRT should land on Secret. */
-  secretReceiver: string
-  /** The user's own osmo1 address, so a failed delivery is recoverable. */
-  recoveryAddress: string
-  /** Attached to the packet that reaches Secret. */
-  secretMemo?: string
-  slippagePercent?: number
-}
-
-/**
- * Memo that makes Osmosis swap an arriving token into SCRT and forward it to
- * Secret.
- *
- * `next_memo` is the slot that reaches Secret, not `final_memo`. SCRT on Osmosis
- * is `transfer/channel-88/uscrt`, so sending it back to Secret is a one-hop
- * unwind and the contract's `first_transfer_memo` is the only memo there is.
- * Read out of the contract source rather than guessed; see docs/chain-facts.md.
- *
- * `on_failed_delivery` is always a recovery address, never `do_nothing`. With
- * `do_nothing` the contract does not track the packet at all, and a failed
- * delivery leaves the funds unreachable.
- *
- * The receiver is `ibc:channel-88/secret1…`, not a bare `secret1…` address —
- * this is the one field this whole feature turned out to hinge on. The
- * deployed contract (v0.1.0, predating Osmosis's registry-contract migration
- * of March 2023) resolves a bare address by looking its bech32 prefix up in
- * its own on-chain `CHANNEL_MAP`, populated only for the handful of chains
- * whose governance proposal added them — `akash`, `axelar`, `cosmos`,
- * `evmos`, `juno`, `stars`, `stride`, read directly from the contract's state
- * at `osmo1uwk8x…qxwvxs`. `secret` was never one of them, and nothing this
- * app does can add it — that map is governor-only. A live packet failed with
- * `invalid receiver: secret1…` for exactly this reason: the swap succeeded,
- * the forward never had anywhere to go, and the whole transfer bounced back
- * to the sender by ordinary IBC ack-failure semantics.
- *
- * The contract's *other* receiver format sidesteps the map entirely:
- * `ibc:channel-<n>/<addr>` is taken as an explicit instruction and used as
- * given, with no lookup and no prefix check. Read out of the same source this
- * deployed version runs, not the current `main` branch, which had already
- * replaced this whole mechanism with the registry contract by the time it was
- * first read for this project — the two do not agree, and only the deployed
- * one's behaviour is real. See docs/chain-facts.md.
+/*
+ * The gas leg's swap-and-forward memo used to live here, addressed to
+ * Osmosis's `crosschain-swaps` contract. It is gone: that contract resolves a
+ * bare Secret receiver through a hand-maintained, governor-only pool list that
+ * was never given an entry for anything but `OSMO → SCRT`, so a live packet
+ * bridging USDC failed with "No route found" — see docs/chain-facts.md. The
+ * gas leg is now planned through Skip's routing API instead; see
+ * `lib/skipGo.ts`. `wrapDepositMemo` above is unaffected — it hits a different
+ * contract entirely, one this app owns the deployment relationship with.
  */
-export function osmosisSwapToSecretMemo({
-  secretReceiver,
-  recoveryAddress,
-  secretMemo,
-  slippagePercent = 5
-}: SwapToSecretOptions): HookedTransfer {
-  return {
-    // Rule 1 again, one chain earlier: the packet arriving on Osmosis is
-    // addressed to the swap contract, and where it ends up is in the message.
-    receiver: CROSSCHAIN_SWAPS_CONTRACT,
-    memo: JSON.stringify({
-      wasm: {
-        contract: CROSSCHAIN_SWAPS_CONTRACT,
-        msg: {
-          osmosis_swap: {
-            output_denom: SCRT_ON_OSMOSIS,
-            receiver: `ibc:${OSMOSIS_TO_SECRET_CHANNEL}/${secretReceiver}`,
-            slippage: {
-              twap: { slippage_percentage: String(slippagePercent), window_seconds: 10 }
-            } satisfies Slippage,
-            on_failed_delivery: { local_recovery_addr: recoveryAddress },
-            next_memo: secretMemo ? (JSON.parse(secretMemo) as unknown) : null
-          }
-        }
-      }
-    })
-  }
-}
-
-/** The channel Osmosis forwards over, for display and for verification. */
-export const OSMOSIS_RETURN_CHANNEL = OSMOSIS_TO_SECRET_CHANNEL

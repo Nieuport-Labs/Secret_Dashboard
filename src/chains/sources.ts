@@ -20,19 +20,6 @@ export interface SourceChain {
   depositChannel: string
   /** Channel on Secret that carries tokens back. */
   withdrawChannel: string
-  /**
-   * This chain's own channel to Osmosis — the first hop "Get gas" needs to
-   * reach the swap contract. Absent on purpose everywhere but Osmosis and the
-   * handful of chains it has actually been verified for: the gas leg's packet
-   * is addressed to an `osmo1…` contract, and sending it over `depositChannel`
-   * (which the code did before this field existed) puts that packet on the
-   * chain's ordinary route to *Secret* instead — where an `osmo1` receiver
-   * cannot be credited, and the packet fails rather than reaching the swap. A
-   * missing value here is what keeps "Get gas" from being offered at all for a
-   * chain nobody has checked, rather than offering it and letting the packet
-   * fail after the user has already signed.
-   */
-  osmosisChannel?: string
   depositGas: number
   withdrawGas: number
   /** Denomination fees are paid in on the source chain. */
@@ -349,10 +336,6 @@ export const SOURCE_CHAINS: SourceChain[] = [
     prefix: 'noble',
     depositChannel: 'channel-17',
     withdrawChannel: 'channel-88',
-    // Noble's own channel-1, STATE_OPEN, counterparty channel-750 on a client
-    // reporting osmosis-1 — checked directly against Noble's LCD, not taken
-    // from the chain-registry's `preferred` flag alone. See chain-facts.md.
-    osmosisChannel: 'channel-1',
     depositGas: 200000,
     withdrawGas: 150000,
     feeDenom: 'uusdc',

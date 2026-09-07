@@ -210,108 +210,67 @@ user a fee allowance with no Secret-side signature from the user at all. Correct
 (`"send SCRT with this message"`), and tops up an existing grant by revoking and re-granting in
 one transaction — so a repeat purchase is safe.
 
-## Osmosis leg (for "Get gas")
+## Osmosis leg (for "Get gas") — three live failures and a migration
 
-|                  |                                                                                                          |
-| ---------------- | -------------------------------------------------------------------------------------------------------- |
-| SCRT on Osmosis  | `ibc/0954E1C28EB7AF5B72D24F3BC2B47BBB2FDF91BDDFD57B74B99E133AED40972A` (`transfer/channel-88/uscrt`)     |
-| Osmosis → Secret | `channel-88`, counterparty client reports `secret-4`                                                     |
-| Crosschain swaps | `osmo1uwk8xc6q0s6t5qcpr6rht3sczu6du83xq8pwxjua0hfj5hzcnh3sqxwvxs`, label `CrossChainSwaps v1.2`, code 37 |
+This feature went through three rounds of "it should work" against a real packet, in order:
 
-The address widely quoted online for XCS
-(`osmo1efakw4was99usxve258p58a5a26f0yt072gvyej5zr4lv5r0hxqqsddqgg`) **does not exist on
-mainnet** — the LCD returns `no such contract`. Resolve deployed addresses by querying, never
-from prose.
+**Round 1 — the receiver.** Osmosis's `crosschain-swaps` contract
+(`osmo1uwk8xc6q0s6t5qcpr6rht3sczu6du83xq8pwxjua0hfj5hzcnh3sqxwvxs`, quoted everywhere as
+`CrossChainSwaps v1.2`) turned out, read from its own on-chain state rather than from the
+label, to be `crates.io:crosschain-swaps` **version 0.1.0** — from before Osmosis's March 2023
+registry-contract migration (`osmosis-labs/osmosis` commit `1d76f4f39d`). It has no
+`registry_contract` field. Routing is a hand-populated `chain_map<prefix>` — `akash`, `axelar`,
+`cosmos`, `evmos`, `juno`, `stars`, `stride`, one governor-only management message per chain.
+**`secret` was never added.** A bare `secret1…` receiver decodes its bech32 prefix and does
+`CHANNEL_MAP.load(storage, "secret")`, which fails: `invalid receiver: secret1…`, live-verified
+2026-09-06 via Osmosis's `write_acknowledgement` event. The malformed-query trick that had
+previously been read as "this deployment matches the current source" only ever proved the
+`QueryMsg` enum has a variant named `recoverable` — true of every version, since that name was
+never changed. Reading actual deployed state is what actually settles a version.
 
-**"Settled in phase 6" turned out to be wrong, and here is the correction.** The malformed-query
-trick (`Error parsing into type crosschain_swaps::msg::QueryMsg: unknown variant ..., expected
-'recoverable'`) only proves the deployed contract's `QueryMsg` enum has one variant named
-`recoverable` — which is true of every version of this contract, old and new, since that variant
-was never renamed. It says nothing about `ExecuteMsg`, and the conclusion drawn from it — "this
-deployment matches the current source" — did not hold. Read the actual deployed bytecode's own
-state instead of trusting that inference:
+**Round 2 — routed around the map, same contract.** The contract's other receiver format,
+`ibc:channel-<n>/<addr>`, skips `CHANNEL_MAP` entirely — confirmed in `execute.rs`, where the
+parsed channel carries straight through to the outbound `MsgTransfer`'s `source_channel`. Sending
+`ibc:channel-88/secret1…` cleared the receiver check. The **swap** then failed instead: `Invalid
+Pool Route: "No route found for ibc/498A…(USDC via Noble) -> ibc/0954…(SCRT)"`. Querying the
+underlying `swaprouter` contract's `get_route` directly confirmed why — it has exactly one
+registered route ending in SCRT: `uosmo → SCRT` (pool 584). Not USDC, not ATOM (checked both).
+Same governor, same one-pair-at-a-time management pattern as the receiver map. This is not a
+message-shape problem; the liquidity path this contract knows simply does not include SCRT from
+anything but OSMO itself.
 
-```
-$ curl .../cosmwasm/wasm/v1/contract/osmo1uwk8x…qxwvxs/state
-contract_info  {"contract":"crates.io:crosschain-swaps","version":"0.1.0"}
-config         {"governor":"osmo1tfu4j…","swap_contract":"osmo1fy547…"}   — no registry_contract
-chain_mapakash    "channel-1"      chain_mapjuno     "channel-42"
-chain_mapaxelar   "channel-208"    chain_mapstars    "channel-75"
-chain_mapcosmos   "channel-0"      chain_mapstride   "channel-326"
-chain_mapevmos    "channel-204"
-```
+**The migration.** Both limits live in contracts this app does not own and cannot patch around —
+each additional asset needs its own governance action from someone else. Skip Go's routing API
+replaced the whole mechanism: `POST /v2/fungible/route` draws on Osmosis's live poolmanager
+(pool 2477 → pool 585 for USDC → SCRT, found and priced automatically, no hand-registered pair
+required) rather than a static list, and `POST /v2/fungible/msgs` returns a single, fully-formed
+`MsgTransfer` for the source chain — its memo already carries the swap instructions and the
+onward IBC forward to Secret. This is what `lib/skipGo.ts` calls; the gas leg is planned there and
+nowhere else now.
 
-**Version 0.1.0 predates Osmosis's March 2023 registry-contract migration**
-(`osmosis-labs/osmosis` commit `1d76f4f39d`, "XCS + Registries integration"). It has no
-`registry_contract` field at all — routing is these `chain_map<prefix>` entries, hand-populated by
-governor-only management messages, one governance action per chain. **`secret` was never added.**
-A bare `secret1…` receiver goes through `validate_simplified_receiver`
-(`checks.rs` at the pre-migration commit `a9725d6`), decodes the bech32 prefix, and does
-`CHANNEL_MAP.load(storage, "secret")` — which fails, because the key does not exist. The error is
-`invalid receiver: secret1…`, and it is unconditional: no channel this app supplies, no memo
-shape, nothing on our side changes it. This is not fixable by adjusting anything this dashboard
-sends — only the contract's governor can add an entry, and no proposal to add Secret has been
-found.
+**Verified against the live API, 2026-09-06** — `POST /v2/fungible/route` with
+`source_asset_denom: uusdc`, `source_asset_chain_id: noble-1`, `dest_asset_denom: uscrt`,
+`dest_asset_chain_id: secret-4`, `amount_in: 130000` returned `does_swap: true`,
+`chain_ids: [noble-1, osmosis-1, secret-4]`, and a two-hop `operations` list through Osmosis's
+poolmanager. `POST /v2/fungible/msgs` with an `address_list` for those three chains returned one
+`/ibc.applications.transfer.v1.MsgTransfer` on `noble-1`, `source_channel: channel-1`, receiver
+`osmo10a3k4h…` — Skip's own entry-point contract, not the retired `crosschain-swaps` address —
+carrying a `swap_and_action` memo whose `post_swap_action.ibc_transfer.ibc_info` names
+`channel-88` and a bare `secret1…` receiver (Skip's contract does its own routing and does not
+hit the old contract's map at all, so no `ibc:channel-88/` prefix is needed here). Confirmed a
+second time directly from this app's own preview, via the page's own `fetch`, past the point
+where an earlier attempt had been mistaken for a CORS failure — the request succeeds and returns
+a live quote.
 
-**What actually works, from the same source:** the contract accepts a second receiver format,
-`ibc:channel-<n>/<addr>`, handled by `validate_explicit_receiver` — no map lookup, no prefix
-check, the channel is used exactly as given. `execute.rs` confirms the string carries straight
-through to the outbound `MsgTransfer`'s `source_channel`, and `next_memo` handling is unaffected
-either way. So the receiver Get-gas sends is `ibc:channel-88/secret1…`, not a bare address —
-`channel-88` being Osmosis's own verified channel to Secret, above.
-
-Two things decide whether the gas leg works at all, both read out of the source that actually
-runs, not the source that happens to share a repository with it:
-
-1. **`next_memo` is the slot that reaches Secret, not `final_memo`.** Confirmed unchanged across
-   both versions: the reply handler builds the outbound `MsgTransfer`'s memo from
-   `forward_to.next_memo`, which is what `next_memo` in the request becomes. SCRT on Osmosis is
-   `transfer/channel-88/uscrt`, so returning it to Secret is a one-hop unwind — there is only one
-   transfer, and its memo is the one carried through. `final_memo` is not read by this version at
-   all.
-2. **The receiver must be the explicit `ibc:channel-88/secret1…` form**, for the reason above.
-
-**Live-verified, 2026-09-06:** a real deposit sent the bare-address form and failed exactly this
-way — `write_acknowledgement` on Osmosis carried `packet_ack: {"error":"ABCI code: 6…"}`, and the
-`ibccallbackerror-ibc-acknowledgement-error` event read `invalid receiver: secret1…`. Standard
-ICS-20 ack-failure semantics then refunded the gas slice back to the sender on the source chain —
-nothing was lost, the feature simply never delivered. The wrap leg, sent as a separate packet in
-the same broadcast, is unaffected by any of this and succeeded on its own; the two packets have
-no relationship the chain enforces.
-
-**Still open:** the contract merges its own `ibc_callback` key into the memo it forwards, to track
-the send. How Secret's `x/ibc-hooks` treats a memo carrying both `ibc_callback` and `wasm` remains
-unverified for `credits` delivery, which is why `native` stays the default — no `wasm` key on that
-leg, nothing to misparse.
-
-### Getting there: each source chain needs its own channel to Osmosis
-
-The gas leg's `MsgTransfer` has to reach _Osmosis_, not Secret — its receiver is the
-`osmo1…` swap contract above, and only Osmosis can credit that address. Depositing directly
-from Osmosis needs no extra hop. Depositing from anywhere else does, and that hop travels
-over a channel this chain has to Osmosis specifically — which is **not** the same channel
-the main leg uses to reach Secret.
-
-**Found the hard way:** a live deposit of 4 USDC from Noble with both Wrap and Get gas
-checked wrapped correctly but delivered no gas. Before this was caught, the code sent the
-gas leg over `chain.depositChannel` for every chain but Osmosis — Noble's ordinary route to
-_Secret_. Secret cannot credit an `osmo1` receiver, so that packet failed while the
-unrelated wrap packet, sent separately, succeeded on its own. Nothing in the UI or the
-broadcast result said so: `sendDeposit` only reports whether the source chain accepted the
-messages for relay, not what happened to either packet afterward.
-
-Each source chain now needs a verified `osmosisChannel` before "Get gas" is offered from it
-at all — see `SourceChain.osmosisChannel` in `chains/sources.ts`. Verified so far:
-
-| Chain | Channel   | Checked                                                                                                |
-| ----- | --------- | ------------------------------------------------------------------------------------------------------ |
-| Noble | channel-1 | Noble's own LCD: `STATE_OPEN`, counterparty `channel-750`, `connection-2`'s client reports `osmosis-1` |
-
-Every other chain is deliberately left unrouted rather than filled in from the chain-registry's
-`preferred` flag alone — the registry has been wrong about which chain an entry actually serves
-before (see Bridge channels, below), and a wrong channel here does not error, it just quietly
-fails to deliver gas the same way this one did. Adding a chain means querying that chain's own
-LCD the way Noble's was, not copying the registry number.
+**What this ends, and what it does not.** `credits` delivery — landing a fee-vault allowance
+instead of spendable SCRT — depended on attaching this app's own hook to the final Secret-side
+memo. Skip decides that memo itself with no documented way to extend it, so `credits` has no
+migration path and is retired along with the contract it depended on; `native` — already the
+default, for an unrelated reason (see the retired `ibc_callback`/`wasm` note this replaces) — is
+now the only path. Every source chain is reachable in principle, subject to Skip actually finding
+a route for that chain's asset, checked live per request rather than read from a table this app
+maintains — the per-chain `osmosisChannel` field and its `canRouteToOsmosis` gate are gone, since
+a hand-maintained "does this chain work" list is the exact failure mode this migration is fixing.
 
 ## Bridge channels
 

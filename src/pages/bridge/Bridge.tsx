@@ -15,17 +15,17 @@ import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
 import AmountField from '@/components/ui/AmountField'
 import Picker from '@/components/ui/Picker'
-import { DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
-import { canRouteToOsmosis, osmosisRouteChannel } from '@/chains/osmosis'
+import { DECIMALS, DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import { SOURCE_CHAINS, chainImageUrl, type SourceChain } from '@/chains/sources'
 import { depositGasLimit, sendDeposit, sendWithdraw, type Leg } from '@/lib/bridge'
 import { queryAllBalances } from '@/lib/bank'
 import { codeHashFor } from '@/lib/codeHash'
-import { buildGasLeg, fittingGasSliceUsd, quoteGasSlice, shouldOfferGas } from '@/lib/getGas'
-import { toBaseUnits } from '@/lib/format'
+import { fittingGasSliceUsd, quoteGasSlice, shouldOfferGas } from '@/lib/getGas'
+import { fromBaseUnits, toBaseUnits } from '@/lib/format'
 import { plainTransfer, wrapDepositMemo } from '@/lib/ibcMemo'
 import { MSG_TRANSFER } from '@/lib/msgTypes'
 import { fetchPrices } from '@/lib/prices'
+import { fetchSkipGasLeg, fetchSkipGasRoute, planSkipAddresses, type SkipGasRoute } from '@/lib/skipGo'
 import { cn } from '@/lib/cn'
 import { useBalances } from '@/hooks/useBalances'
 import { usePermit } from '@/hooks/usePermit'
@@ -186,17 +186,76 @@ export default function Bridge() {
    */
   const walletEmpty = depositing && BigInt(balances.native ?? '0') === 0n
   const gasUrgent = gasOffer.offer && gasOffer.urgent
+
   /*
-   * Routable, separate from "the wallet is ready" — a chain either has a
-   * verified channel to Osmosis or it doesn't, and that has nothing to do with
-   * whether an Osmosis account was found. Folding both into one boolean is
-   * what let a Noble deposit tick the box, sign, and send the gas leg's
-   * `osmo1…`-addressed packet over Noble's ordinary channel to *Secret* —
-   * which can't credit an Osmosis address, so the packet fails and no gas
-   * arrives, while the unrelated wrap leg sails through as its own packet.
+   * Whether a slice of *this* token can actually reach Secret as SCRT right
+   * now, checked live rather than assumed. The previous version of this
+   * feature hand-composed a memo against Osmosis's own `crosschain-swaps`
+   * contract, whose swap step turned out to route through a governor-only
+   * pool list that was never given an entry for anything but OSMO itself — a
+   * live packet bridging USDC failed with "No route found" for exactly that
+   * reason. Skip's routing API draws on Osmosis's live liquidity instead, so
+   * "is there a route" is answered by asking, not by a hand-maintained table
+   * of which chains someone got around to wiring up. See docs/chain-facts.md.
    */
-  const routable = Boolean(chain) && canRouteToOsmosis(chain!)
-  const canGetGas = gasOffer.offer && routable && Boolean(source.osmosisAddress)
+  const [skipRoute, setSkipRoute] = useState<SkipGasRoute | undefined>()
+  const [skipRouteChecked, setSkipRouteChecked] = useState(false)
+
+  // Only changes with the slice size and prices, not with every keystroke in
+  // the amount field — quoteGasSlice sizes the slice independently of the
+  // bridge amount. A named variable rather than the expression inline in the
+  // dependency array below, so the array stays one eslint can check statically.
+  const gasCostBaseUnits = gasOffer.offer ? gasOffer.quote.costBaseUnits : undefined
+
+  useEffect(() => {
+    setSkipRoute(undefined)
+    setSkipRouteChecked(false)
+    if (!depositing || !chain || !route || !gasCostBaseUnits) return
+
+    let cancelled = false
+    void fetchSkipGasRoute({
+      sourceDenom: route.denom,
+      sourceChainId: chain.chainId,
+      amountInBaseUnits: gasCostBaseUnits
+    }).then((result) => {
+      if (cancelled) return
+      setSkipRoute(result)
+      setSkipRouteChecked(true)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [depositing, chain, route, gasCostBaseUnits])
+
+  /** Which address goes on which chain of the route Skip found, or `undefined`
+   *  when the route needs one this app has no way to supply — see
+   *  `planSkipAddresses`. */
+  const skipAddresses =
+    skipRoute && source.address && secretAddress
+      ? planSkipAddresses(skipRoute.chainIds, {
+          source: source.address,
+          osmosis: source.osmosisAddress,
+          secret: secretAddress
+        })
+      : undefined
+
+  const canGetGas = gasOffer.offer && Boolean(skipRoute) && Boolean(skipAddresses)
+
+  /** Why the checkbox is disabled, in the order that actually explains it —
+   *  `undefined` while still checking, since the "checking…" line above this
+   *  one already says so. */
+  const gasUnavailableReason: string | undefined = !skipRouteChecked
+    ? undefined
+    : !skipRoute
+      ? `No route found to swap this into ${DISPLAY_DENOM} right now.`
+      : !source.osmosisAddress
+        ? 'Needs an Osmosis account in your wallet, for recovering the swap if it fails.'
+        : 'The route this needs passes through a chain this app cannot sign for yet.'
+
+  /** SCRT the slice would actually produce — Skip's own estimate from live
+   *  pool state once it answers, the coarser price-based one until then. */
+  const gasOutputBaseUnits =
+    skipRoute?.amountOutBaseUnits ?? (gasOffer.offer ? gasOffer.quote.amountBaseUnits : undefined)
 
   // An empty wallet is not a suggestion. The box starts ticked and the panel it
   // lives in starts open — hiding a precondition behind a disclosure is how
@@ -221,7 +280,7 @@ export default function Bridge() {
       if (depositing) {
         if (!source.address || !queryClient) return
 
-        const useGas = getGas && canGetGas && gasOffer.offer
+        const useGas = getGas && canGetGas && gasOffer.offer && skipRoute && skipAddresses
         const mainAmount = useGas
           ? (BigInt(amountBaseUnits) - BigInt(gasOffer.quote.costBaseUnits)).toString()
           : amountBaseUnits
@@ -240,20 +299,23 @@ export default function Bridge() {
             : plainTransfer(secretAddress)
         })
 
-        const osmosisChannel = osmosisRouteChannel(chain, route.channel)
-        if (useGas && source.osmosisAddress && osmosisChannel) {
+        if (useGas) {
+          // Re-asked at send time rather than reusing a cached message: the
+          // route was checked as soon as the slice size settled, which can be
+          // a while before the user actually presses this button, and the
+          // swap's minimum-output guard should reflect pool state now, not
+          // whenever the checkbox first lit up.
+          const gasLeg = await fetchSkipGasLeg(skipRoute, skipAddresses)
+          if (!gasLeg) {
+            throw new Error(
+              'Could not prepare the gas swap just now — try again, or turn off Get gas for this transfer.'
+            )
+          }
           legs.push({
-            denom: route.denom,
-            amount: gasOffer.quote.costBaseUnits,
-            // To Osmosis, not to Secret: that is where the swap contract is,
-            // and the receiver this leg carries is an osmo1 address that only
-            // Osmosis itself can credit.
-            channel: osmosisChannel,
-            transfer: buildGasLeg({
-              secretAddress,
-              osmosisAddress: source.osmosisAddress,
-              delivery: settings.gasDelivery
-            })
+            denom: gasLeg.denom,
+            amount: gasLeg.amount,
+            channel: gasLeg.channel,
+            transfer: { receiver: gasLeg.receiver, memo: gasLeg.memo }
           })
         }
 
@@ -439,10 +501,17 @@ export default function Bridge() {
                       {gasUrgent
                         ? `You hold no ${DISPLAY_DENOM}, so you could not sign anything on Secret — not even to buy gas. `
                         : ''}
-                      {gasOffer.quote.amountScrt} {DISPLAY_DENOM} (about ${gasOffer.quote.usd?.toFixed(2)}) is
-                      swapped out of this transfer on the way, through Osmosis — roughly{' '}
-                      {transactionsCovered(BigInt(gasOffer.quote.amountBaseUnits)).toLocaleString()}{' '}
-                      transactions.{' '}
+                      {gasOutputBaseUnits ? (
+                        <>
+                          {fromBaseUnits(gasOutputBaseUnits, DECIMALS)} {DISPLAY_DENOM} (about $
+                          {gasOffer.quote.usd?.toFixed(2)}) is swapped out of this transfer on the way,
+                          through Osmosis — roughly{' '}
+                          {transactionsCovered(BigInt(gasOutputBaseUnits)).toLocaleString()}{' '}
+                          transactions.{' '}
+                        </>
+                      ) : (
+                        'Checking whether this can be swapped into SCRT right now… '
+                      )}
                       <button
                         type="button"
                         onClick={() => settings.set('gasSliceUsd', Math.max(0.05, settings.gasSliceUsd / 4))}
@@ -450,12 +519,8 @@ export default function Bridge() {
                       >
                         Take less
                       </button>
-                      {!canGetGas ? (
-                        <span className="mt-1 block text-text-faint">
-                          {routable
-                            ? 'Needs an Osmosis account in your wallet, for recovering the swap if it fails.'
-                            : `Not available from ${chain?.name ?? 'this chain'} yet — only a few chains have a verified route to Osmosis so far.`}
-                        </span>
+                      {gasUnavailableReason ? (
+                        <span className="mt-1 block text-text-faint">{gasUnavailableReason}</span>
                       ) : null}
                     </>
                   ) : gasOffer.reason === 'amount-too-small' ? (

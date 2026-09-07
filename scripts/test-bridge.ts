@@ -9,17 +9,10 @@
  *   npm run test:bridge
  */
 
-import { quoteGasSlice, shouldOfferGas, buildGasLeg, fittingGasSliceUsd } from '../src/lib/getGas.ts'
-import { gasCreditMemo, wrapDepositMemo, osmosisSwapToSecretMemo } from '../src/lib/ibcMemo.ts'
-import { GAS_VAULT_ADDRESS, IBC_HOOKS_WRAPPER } from '../src/chains/secret4.ts'
-import {
-  CROSSCHAIN_SWAPS_CONTRACT,
-  OSMOSIS_TO_SECRET_CHANNEL,
-  SCRT_ON_OSMOSIS,
-  canRouteToOsmosis,
-  osmosisRouteChannel
-} from '../src/chains/osmosis.ts'
-import { SOURCE_CHAINS } from '../src/chains/sources.ts'
+import { quoteGasSlice, shouldOfferGas, fittingGasSliceUsd } from '../src/lib/getGas.ts'
+import { wrapDepositMemo } from '../src/lib/ibcMemo.ts'
+import { parseSkipTransferMsg, planSkipAddresses } from '../src/lib/skipGo.ts'
+import { IBC_HOOKS_WRAPPER } from '../src/chains/secret4.ts'
 
 let passed = 0
 let failed = 0
@@ -35,7 +28,6 @@ function check(name: string, condition: boolean, detail?: unknown): void {
 }
 
 const USER = 'secret1kkmu4vydkppkhzmx00glm20vn47t09544adv0g'
-const OSMO = 'osmo1kkmu4vydkppkhzmx00glm20vn47t09544qc3fkt'
 
 /* -------------------------------------------------------------------------- */
 /* Slice sizing                                                                */
@@ -168,13 +160,13 @@ const hopeless = fittingGasSliceUsd(1, 0.25, 10, 6, '100')
 check('gives up at the floor rather than hanging', hopeless === 0.02, hopeless)
 
 /* -------------------------------------------------------------------------- */
-/* Memo shapes                                                                 */
+/* Memo shapes — the main leg                                                  */
 /* -------------------------------------------------------------------------- */
 
 /*
- * Secret's ibc-hooks requires receiver == memo.wasm.contract. Every one of these
- * asserts that pairing, because setting them independently produces a packet
- * that arrives and quietly does nothing.
+ * Secret's ibc-hooks requires receiver == memo.wasm.contract. This asserts
+ * that pairing, because setting them independently produces a packet that
+ * arrives and quietly does nothing.
  */
 
 const wrap = wrapDepositMemo('secret1token', 'deadbeef', USER)
@@ -183,119 +175,110 @@ check('wrap memo is addressed to the hook contract', wrap.receiver === IBC_HOOKS
 check('wrap receiver equals wasm.contract', wrap.receiver === wrapParsed.wasm.contract)
 check('wrap carries the recipient inside the message', JSON.stringify(wrapParsed.wasm.msg).includes(USER))
 
-const credit = gasCreditMemo(USER)
-const creditParsed = JSON.parse(credit.memo) as {
-  wasm: { contract: string; msg: { grant: { grantee: string } } }
-}
-check('credit memo is addressed to the vault', credit.receiver === GAS_VAULT_ADDRESS)
-check('credit receiver equals wasm.contract', credit.receiver === creditParsed.wasm.contract)
-check('credit names the user as grantee, not as receiver', creditParsed.wasm.msg.grant.grantee === USER)
+/* -------------------------------------------------------------------------- */
+/* Skip Go — routing the gas leg                                              */
+/* -------------------------------------------------------------------------- */
 
-const swap = osmosisSwapToSecretMemo({ secretReceiver: USER, recoveryAddress: OSMO })
-const swapParsed = JSON.parse(swap.memo) as {
-  wasm: {
-    contract: string
-    msg: {
-      osmosis_swap: {
-        output_denom: string
-        receiver: string
-        on_failed_delivery: { local_recovery_addr?: string }
-        next_memo: unknown
+/*
+ * The gas leg used to be a hand-composed memo against Osmosis's own
+ * `crosschain-swaps` contract. Two live packets in a row failed against it:
+ * first "invalid receiver" (its receiver validation resolves a bare `secret1…`
+ * through a governor-only map that was never given an entry for `secret`),
+ * then — once that was fixed — "No route found" (its swap step routes through
+ * an equally governor-only pool list that was never given an entry for
+ * anything but `OSMO → SCRT`). Both limits live in contracts this app does not
+ * own and cannot change. See docs/chain-facts.md for the full trace of both.
+ *
+ * Skip's routing API replaces the whole mechanism: it draws on Osmosis's live
+ * poolmanager rather than a hand-maintained list, and returns a fully-formed
+ * message rather than asking the caller to compose a wasm hook it never
+ * documented. What is tested here is the parsing of that response — the
+ * network call itself is not something a plain-Node assertion list can cover,
+ * so a captured shape stands in for it.
+ */
+
+const skipMsgsResponse = {
+  msgs: [
+    {
+      multi_chain_msg: {
+        chain_id: 'noble-1',
+        path: ['noble-1', 'osmosis-1', 'secret-4'],
+        msg_type_url: '/ibc.applications.transfer.v1.MsgTransfer',
+        msg: JSON.stringify({
+          source_port: 'transfer',
+          source_channel: 'channel-1',
+          token: { denom: 'uusdc', amount: '130000' },
+          sender: 'noble1lvwv5eg44lkj26ntsp6cnl82px7pa08y99vh8e',
+          receiver: 'osmo10a3k4hvk37cc4hnxctw4p95fhscd2z6h2rmx0aukc6rm8u9qqx9smfsh7u',
+          timeout_height: {},
+          // A real payload carries this as a number this large enough to lose
+          // precision in JS; irrelevant here since parseSkipTransferMsg never
+          // reads it, so it is just the field's presence that matters.
+          timeout_timestamp: 1788739871402052000,
+          memo: '{"wasm":{"contract":"osmo10a3k4h…","msg":{"swap_and_action":{}}}}'
+        })
       }
     }
-  }
+  ]
 }
-check('swap is addressed to the crosschain contract', swap.receiver === CROSSCHAIN_SWAPS_CONTRACT)
-check('swap receiver equals wasm.contract', swap.receiver === swapParsed.wasm.contract)
-check(
-  'swap outputs SCRT as Osmosis knows it',
-  swapParsed.wasm.msg.osmosis_swap.output_denom === SCRT_ON_OSMOSIS
-)
-check(
-  'failed delivery is always recoverable, never do_nothing',
-  swapParsed.wasm.msg.osmosis_swap.on_failed_delivery.local_recovery_addr === OSMO
-)
 
-/* -------------------------------------------------------------------------- */
-/* The two deliveries                                                          */
-/* -------------------------------------------------------------------------- */
-
-const native = buildGasLeg({ secretAddress: USER, osmosisAddress: OSMO, delivery: 'native' })
-const nativeInner = JSON.parse(native.memo) as {
-  wasm: { msg: { osmosis_swap: { receiver: string; next_memo: unknown } } }
-}
+const parsedLeg = parseSkipTransferMsg(skipMsgsResponse)
+check('parses the channel out of the source-chain MsgTransfer', parsedLeg?.channel === 'channel-1', parsedLeg)
+check('parses the token amount, not the swap output estimate', parsedLeg?.amount === '130000', parsedLeg)
 check(
-  'native delivery sends SCRT to the user, addressed explicitly by channel',
-  nativeInner.wasm.msg.osmosis_swap.receiver === `ibc:${OSMOSIS_TO_SECRET_CHANNEL}/${USER}`
+  "parses the receiver — Skip's own entry-point contract on Osmosis, not Secret",
+  Boolean(parsedLeg?.receiver.startsWith('osmo1')),
+  parsedLeg
 )
-check('native delivery runs no hook on Secret', nativeInner.wasm.msg.osmosis_swap.next_memo === null)
+check('carries the memo through untouched', typeof parsedLeg?.memo === 'string' && parsedLeg.memo.length > 0)
 
-const credits = buildGasLeg({ secretAddress: USER, osmosisAddress: OSMO, delivery: 'credits' })
-const creditsInner = JSON.parse(credits.memo) as {
-  wasm: { msg: { osmosis_swap: { receiver: string; next_memo: { wasm: { contract: string } } } } }
-}
-/*
- * Regression: a live send with a bare `secret1…` receiver here failed with
- * "invalid receiver". The deployed crosschain-swaps contract (v0.1.0, read
- * from its own on-chain state — see docs/chain-facts.md) resolves a bare
- * address through an internal CHANNEL_MAP keyed by bech32 prefix, and that
- * map was never given an entry for `secret`. `ibc:channel-<n>/<addr>` is the
- * contract's *other* receiver format, which the same source shows bypasses
- * that map entirely and is used as given.
- */
 check(
-  'the receiver is explicit — channel-88, not a bare address the deployed contract cannot resolve',
-  creditsInner.wasm.msg.osmosis_swap.receiver === `ibc:${OSMOSIS_TO_SECRET_CHANNEL}/${GAS_VAULT_ADDRESS}`
+  'a plan needing more than one signature is refused',
+  parseSkipTransferMsg({ msgs: [{}, {}] }) === undefined
+)
+check('an empty plan is refused', parseSkipTransferMsg({ msgs: [] }) === undefined)
+check(
+  'a non-transfer message type is refused rather than misread',
+  parseSkipTransferMsg({
+    msgs: [{ multi_chain_msg: { msg_type_url: '/cosmwasm.wasm.v1.MsgExecuteContract', msg: '{}' } }]
+  }) === undefined
 )
 check(
-  'credit delivery nests the hook in next_memo, the slot that reaches Secret',
-  creditsInner.wasm.msg.osmosis_swap.next_memo.wasm.contract === GAS_VAULT_ADDRESS
+  'malformed JSON in the wrapped message is refused, not thrown',
+  parseSkipTransferMsg({
+    msgs: [
+      { multi_chain_msg: { msg_type_url: '/ibc.applications.transfer.v1.MsgTransfer', msg: 'not json' } }
+    ]
+  }) === undefined
 )
-
-/* -------------------------------------------------------------------------- */
-/* Routing the gas leg to Osmosis, not to Secret                              */
-/* -------------------------------------------------------------------------- */
+check('a response with no msgs field at all is refused', parseSkipTransferMsg({}) === undefined)
 
 /*
- * Regression: a live deposit of 4 USDC from Noble with both Wrap and Get gas
- * checked wrapped correctly but never delivered gas. The gas leg's receiver is
- * an `osmo1…` swap contract, and the code sent that packet over whatever
- * channel a chain other than Osmosis itself happened to have on hand — which,
- * before `osmosisChannel` existed as a field, was `chain.depositChannel`: the
- * ordinary route to *Secret*. Secret cannot credit an `osmo1` receiver, so the
- * packet failed while the unrelated wrap packet, sent separately, succeeded on
- * its own. These assertions pin both halves of the fix: a chain without a
- * verified route must not be treated as routable, and a chain that has one
- * must route over *that* channel rather than its deposit channel to Secret.
+ * Address planning: the two route shapes this app actually signs for. Any
+ * other chain sequence — a route through some third chain neither Osmosis nor
+ * Secret — is refused rather than guessed at, since deriving an address for a
+ * chain nobody asked the wallet to enable is a new failure mode of its own.
  */
 
-const noble = SOURCE_CHAINS.find((c) => c.chainId === 'noble-1')
-const osmosisChain = SOURCE_CHAINS.find((c) => c.chainId === 'osmosis-1')
-const akash = SOURCE_CHAINS.find((c) => c.chainId === 'akashnet-2')
-if (!noble || !osmosisChain || !akash) {
-  throw new Error('fixture chains missing from SOURCE_CHAINS — check chain ids')
-}
-
-check('Osmosis itself is always routable', canRouteToOsmosis(osmosisChain))
-check('Noble is routable — it carries a verified osmosisChannel', canRouteToOsmosis(noble))
-check(
-  'a chain with no verified osmosisChannel is not routable',
-  canRouteToOsmosis(akash) === false,
-  akash.osmosisChannel
-)
+const addresses = { source: 'noble1sender', osmosis: 'osmo1relay', secret: 'secret1receiver' }
 
 check(
-  "Noble's gas leg travels its own channel to Osmosis, not its deposit channel to Secret",
-  osmosisRouteChannel(noble, 'channel-17' /* Noble's depositChannel, for contrast */) === 'channel-1' &&
-    osmosisRouteChannel(noble) !== noble.depositChannel
+  'source → Osmosis → Secret plans all three addresses in order',
+  JSON.stringify(planSkipAddresses(['noble-1', 'osmosis-1', 'secret-4'], addresses)) ===
+    JSON.stringify(['noble1sender', 'osmo1relay', 'secret1receiver'])
 )
 check(
-  'depositing directly from Osmosis needs no hop — it uses the deposit route channel',
-  osmosisRouteChannel(osmosisChain, 'channel-750') === 'channel-750'
+  'depositing from Osmosis itself needs only two — source already is the Osmosis address',
+  JSON.stringify(planSkipAddresses(['osmosis-1', 'secret-4'], addresses)) ===
+    JSON.stringify(['noble1sender', 'secret1receiver'])
 )
 check(
-  'an unrouted chain resolves to no channel at all, rather than a guess',
-  osmosisRouteChannel(akash) === undefined
+  'refused without an Osmosis address when the route needs one',
+  planSkipAddresses(['noble-1', 'osmosis-1', 'secret-4'], { ...addresses, osmosis: undefined }) === undefined
+)
+check(
+  'refused for a route through any chain other than Osmosis',
+  planSkipAddresses(['noble-1', 'stride-1', 'secret-4'], addresses) === undefined
 )
 
 /* -------------------------------------------------------------------------- */
