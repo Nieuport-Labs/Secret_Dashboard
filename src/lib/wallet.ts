@@ -49,7 +49,6 @@ export interface KeplrLike {
 declare global {
   interface Window {
     keplr?: KeplrLike
-    starshell?: { keplr?: KeplrLike }
     leap?: KeplrLike
   }
 }
@@ -83,17 +82,16 @@ export const WALLETS: Record<WalletId, WalletDescriptor> = {
 }
 
 /**
- * StarShell publishes itself under its own key *and*, when Keplr is absent,
- * takes over `window.keplr`. Checking its own namespace first is what keeps
- * "Continue with StarShell" from silently connecting Keplr, and vice versa.
+ * StarShell does not expose a `window.starshell` namespace — by design, per
+ * its own API docs, injecting a detectable global is a fingerprinting risk it
+ * deliberately avoids. What it actually does, confirmed against the reference
+ * dashboard's own (working) detection code, is take over `window.keplr` with
+ * a Keplr-compatible object, the same as Keplr itself. There is no reliable
+ * way to tell the two apart from here, so — like the reference — this app
+ * does not try: both wallet entries resolve to whatever sits at `window.keplr`.
  */
-export function getProvider(id: WalletId): KeplrLike | undefined {
-  if (id === 'starshell') return window.starshell?.keplr ?? undefined
-  // Keplr proper: present, and not StarShell wearing its name.
-  const keplr = window.keplr
-  if (!keplr) return undefined
-  if (window.starshell?.keplr && window.starshell.keplr === keplr) return undefined
-  return keplr
+export function getProvider(_id: WalletId): KeplrLike | undefined {
+  return window.keplr
 }
 
 export function isInstalled(id: WalletId): boolean {

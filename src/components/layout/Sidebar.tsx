@@ -34,8 +34,8 @@ export default function Sidebar() {
       >
         <img src="/img/logo-mark.svg" alt="" className="h-8 w-[30px] shrink-0" />
         <span className="flex flex-col whitespace-nowrap leading-none">
-          <span className="text-title">Secret Dashboard</span>
-          <span className="mt-1 text-label text-text-faint">
+          <span className="text-headline">Secret Dashboard</span>
+          <span className="mt-0.5 text-label text-text-faint">
             version <span className="text-text-muted">1.9</span>
           </span>
         </span>

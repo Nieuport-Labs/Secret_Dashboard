@@ -2,6 +2,7 @@ import { Camera, Trash2 } from 'lucide-react'
 import { useId, useRef } from 'react'
 
 import { cn } from '@/lib/cn'
+import { hueFor } from '@/lib/identicon'
 
 interface Props {
   address: string
@@ -11,17 +12,6 @@ interface Props {
   onPick?: (file: File) => void
   onRemove?: () => void
   saving?: boolean
-}
-
-/**
- * Deterministic hue from the address, so the fallback is stable per account and
- * two accounts are told apart at a glance. Not an identity claim — just a
- * colour, derived locally, sent nowhere.
- */
-function hueFor(address: string): number {
-  let hash = 0
-  for (let i = 0; i < address.length; i += 1) hash = (hash * 31 + address.charCodeAt(i)) % 360
-  return hash
 }
 
 export default function Avatar({ address, url, size = 100, onPick, onRemove, saving = false }: Props) {

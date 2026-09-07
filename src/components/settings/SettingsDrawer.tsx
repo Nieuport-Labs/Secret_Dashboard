@@ -1,4 +1,4 @@
-import { CheckCircle2, Info, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Trash2, XCircle } from 'lucide-react'
 import { useState } from 'react'
 
 import Button from '@/components/ui/Button'
@@ -14,9 +14,13 @@ import {
 import { usePermit } from '@/hooks/usePermit'
 import { availableFee, type FeeGrant } from '@/lib/feegrant-sdk'
 import { formatAmount, shortenAddress } from '@/lib/format'
+import { queryTokenInfo } from '@/lib/snip20'
+import { rememberTokens } from '@/lib/watchlist'
 import { cn } from '@/lib/cn'
+import { useCustomTokens } from '@/store/customTokens'
 import { useFeePayer } from '@/store/feePayer'
 import { useSettings, type FeeMode, type Theme } from '@/store/settings'
+import { useWallet } from '@/store/wallet'
 
 interface Props {
   open: boolean
@@ -52,53 +56,35 @@ const FEE_MODES: Array<{ value: FeeMode; label: string; detail: string }> = [
 export default function SettingsDrawer({ open, onClose }: Props) {
   const settings = useSettings()
   const grants = useFeePayer((state) => state.grants)
+  const activeFeeMode = FEE_MODES.find((mode) => mode.value === settings.feeMode) ?? FEE_MODES[0]
 
   return (
     <Drawer open={open} onClose={onClose} title="Settings">
       <section className="flex flex-col gap-3">
         <h3 className="text-base font-semibold">Transaction fees</h3>
 
-        <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-1 rounded-pill border border-border p-1">
           {FEE_MODES.map((mode) => (
-            <label
+            <button
               key={mode.value}
+              type="button"
+              onClick={() => settings.set('feeMode', mode.value)}
+              aria-pressed={settings.feeMode === mode.value}
               className={cn(
-                'state-layer flex cursor-pointer flex-col gap-1 rounded-control p-3',
-                settings.feeMode === mode.value ? 'bg-accent-container' : 'bg-surface'
+                'state-layer flex-1 rounded-pill px-3 py-2 text-sm font-medium transition-colors duration-[var(--duration-short)] ease-[var(--ease-standard)]',
+                settings.feeMode === mode.value
+                  ? 'bg-accent-strong text-[var(--color-accent-text)]'
+                  : 'text-text-muted'
               )}
             >
-              <span className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="fee-mode"
-                  value={mode.value}
-                  checked={settings.feeMode === mode.value}
-                  onChange={() => settings.set('feeMode', mode.value)}
-                  className="sr-only"
-                />
-                {settings.feeMode === mode.value ? (
-                  <CheckCircle2 size={16} aria-hidden className="text-accent" />
-                ) : (
-                  <span aria-hidden className="size-4 rounded-pill border border-border" />
-                )}
-                <span
-                  className={cn('text-base font-medium', settings.feeMode === mode.value && 'text-accent')}
-                >
-                  {mode.label}
-                </span>
-              </span>
-              <span className="pl-6 text-sm text-text-muted">{mode.detail}</span>
-            </label>
+              {mode.label}
+            </button>
           ))}
         </div>
 
-        {settings.feeMode === 'select' ? <GranterPicker grants={grants} /> : null}
+        <p className="text-sm text-text-faint">{activeFeeMode.detail}</p>
 
-        <p className="flex items-start gap-2 text-sm text-text-faint">
-          <Info size={14} aria-hidden className="mt-0.5 shrink-0" />
-          The chain checks a grant again when the transaction runs, so one can be revoked or drained between
-          choosing it and using it. This wallet pays when that happens.
-        </p>
+        {settings.feeMode === 'select' ? <GranterPicker grants={grants} /> : null}
       </section>
 
       <section className="flex flex-col gap-3">
@@ -158,6 +144,8 @@ export default function SettingsDrawer({ open, onClose }: Props) {
           </span>
         </label>
       </section>
+
+      <CustomTokensSection />
     </Drawer>
   )
 }
@@ -318,6 +306,124 @@ function EndpointSection() {
  * name, so a new permit under the same name would still be refused — which is
  * why only the local half is offered here.
  */
+/**
+ * Add a SNIP-20 by contract address instead of waiting for the registry.
+ *
+ * Collapsed by default and tucked below the permit section — this is for the
+ * rare case of a token that is not in `TOKENS` yet, not a thing most people
+ * ever need, so it should not compete with settings people actually reach for.
+ */
+function CustomTokensSection() {
+  const client = useWallet((state) => state.queryClient)
+  const address = useWallet((state) => state.address)
+  const tokens = useCustomTokens((state) => state.tokens)
+  const addToken = useCustomTokens((state) => state.add)
+  const removeToken = useCustomTokens((state) => state.remove)
+
+  const [expanded, setExpanded] = useState(false)
+  const [input, setInput] = useState('')
+  const [checking, setChecking] = useState(false)
+  const [error, setError] = useState<string | undefined>()
+
+  const submit = async () => {
+    const contractAddress = input.trim()
+    if (!contractAddress) return
+
+    if (tokens.some((token) => token.address === contractAddress)) {
+      setError('Already added.')
+      return
+    }
+    if (!client) {
+      setError('Connect a wallet first — reading a token needs a query client.')
+      return
+    }
+
+    setChecking(true)
+    setError(undefined)
+    try {
+      const info = await queryTokenInfo(client, contractAddress)
+      addToken({
+        symbol: info.symbol,
+        description: info.name !== info.symbol ? info.name : undefined,
+        address: contractAddress,
+        image: 'generic.svg',
+        decimals: info.decimals
+      })
+      // So it shows up without needing a full registry sweep.
+      if (address) rememberTokens(address, [contractAddress])
+      setInput('')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not read that contract.')
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="state-layer flex items-center justify-between rounded-control px-1 py-1 text-left text-sm text-text-faint"
+      >
+        Add a custom token
+        <ChevronDown size={14} aria-hidden className={cn('transition-transform', expanded && 'rotate-180')} />
+      </button>
+
+      {expanded ? (
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-text-faint">
+            Not every SNIP-20 is in the built-in list. Add one by contract address — its symbol and decimals
+            are read from the chain, not typed in.
+          </p>
+
+          <div className="flex gap-2">
+            <input
+              value={input}
+              onChange={(event) => {
+                setInput(event.target.value)
+                setError(undefined)
+              }}
+              placeholder="secret1…"
+              spellCheck={false}
+              className="min-w-0 flex-1 rounded-control border border-border bg-surface px-3 py-2 font-mono text-sm outline-none placeholder:text-text-faint"
+            />
+            <Button variant="soft" shape="control" size="sm" loading={checking} onClick={() => void submit()}>
+              Add
+            </Button>
+          </div>
+
+          {error ? <p className="text-sm text-negative">{error}</p> : null}
+
+          {tokens.length > 0 ? (
+            <ul className="flex flex-col gap-1">
+              {tokens.map((token) => (
+                <li
+                  key={token.address}
+                  className="flex items-center justify-between gap-3 rounded-control bg-surface px-3 py-2 text-sm"
+                >
+                  <span className="min-w-0">
+                    <span className="block font-medium">{token.symbol}</span>
+                    <span className="break-address block text-text-faint">{shortenAddress(token.address)}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeToken(token.address)}
+                    aria-label={`Remove ${token.symbol}`}
+                    className="state-layer shrink-0 rounded-control p-1.5 text-text-faint"
+                  >
+                    <Trash2 size={14} aria-hidden />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 function PermitSection() {
   const { permit, staleTokens, signing, sign, forget } = usePermit()
 

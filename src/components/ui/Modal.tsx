@@ -9,6 +9,9 @@ interface Props {
   onClose: () => void
   title: string
   description?: string
+  /** Rendered beside the heading — a validator's avatar, say. Decorative: the
+   *  accessible name still comes from `title` alone. */
+  icon?: ReactNode
   children: ReactNode
 }
 
@@ -19,7 +22,7 @@ interface Props {
  * becomes the containing block for `position: fixed`, and a dialog opened from
  * the header would otherwise be laid out inside the header.
  */
-export default function Modal({ open, onClose, title, description, children }: Props) {
+export default function Modal({ open, onClose, title, description, icon, children }: Props) {
   const panel = useFocusTrap(open, onClose)
 
   if (!open) return null
@@ -43,9 +46,12 @@ export default function Modal({ open, onClose, title, description, children }: P
         className="glass-panel relative flex w-full max-w-[420px] flex-col gap-5 rounded-card p-5 outline-none motion-safe:animate-[modal-in_var(--duration-medium)_var(--ease-emphasised)]"
       >
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-headline">{title}</h2>
-            {description ? <p className="mt-1 text-base text-text-muted">{description}</p> : null}
+          <div className="flex min-w-0 items-center gap-3">
+            {icon}
+            <div className="min-w-0">
+              <h2 className="truncate text-headline">{title}</h2>
+              {description ? <p className="mt-1 text-base text-text-muted">{description}</p> : null}
+            </div>
           </div>
           <button
             type="button"

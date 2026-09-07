@@ -1,3 +1,5 @@
+import { DENOM } from '@/chains/secret4'
+
 /**
  * Which tokens can travel between which chains, and under what denomination.
  *
@@ -2344,8 +2346,44 @@ export function chainsWithWithdrawals(): string[] {
  * would wrap the wrong one. As the table stands every registry token with a
  * route resolves to one denomination, but that is a fact about today's table
  * and not something to rely on.
+ *
+ * Also `undefined` when the route names something that is not a bank
+ * denomination at all. Secret-native tokens — SHD, SILK, AMBER — leave over a
+ * contract of their own rather than the transfer module, so their withdraw
+ * routes carry a `secret1…` contract address in this field. That address names
+ * nothing in the bank module, and treating it as a denomination produces a wrap
+ * that spends a coin which cannot exist. Only `uscrt` and `ibc/…` are Secret
+ * bank denominations; nothing else is accepted here.
  */
 export function bankDenomFor(token: string): string | undefined {
   const denoms = new Set(withdrawRoutes(token).map((route) => route.denom))
-  return denoms.size === 1 ? [...denoms][0] : undefined
+  if (denoms.size !== 1) return undefined
+  const denom = [...denoms][0]
+  return denom === DENOM || denom.startsWith('ibc/') ? denom : undefined
+}
+
+/**
+ * The reverse: which SNIP-20 a bank denomination wraps into.
+ *
+ * Built by inverting `bankDenomFor` rather than by a second table, so the two
+ * directions cannot drift apart. A denomination claimed by more than one token
+ * is dropped rather than resolved arbitrarily — wrapping into the wrong
+ * contract is not a mistake that shows up until the balance is gone. (As the
+ * table stands there are none; this is a guard, not a workaround.)
+ */
+let byBankDenom: Map<string, string> | undefined
+
+export function tokenAddressForBankDenom(denom: string): string | undefined {
+  if (!byBankDenom) {
+    const claims = new Map<string, string[]>()
+    for (const token of new Set([...DEPOSIT_ROUTES, ...WITHDRAW_ROUTES].map((route) => route.token))) {
+      const bank = bankDenomFor(token)
+      if (!bank) continue
+      claims.set(bank, [...(claims.get(bank) ?? []), token])
+    }
+    byBankDenom = new Map(
+      [...claims].filter(([, tokens]) => tokens.length === 1).map(([bank, tokens]) => [bank, tokens[0]])
+    )
+  }
+  return byBankDenom.get(denom)
 }

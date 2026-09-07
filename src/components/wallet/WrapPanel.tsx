@@ -5,21 +5,23 @@ import AmountField from '@/components/ui/AmountField'
 import Button from '@/components/ui/Button'
 import Drawer from '@/components/ui/Drawer'
 import { DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
-import { queryAllBalances } from '@/lib/bank'
 import { cn } from '@/lib/cn'
 import { toBaseUnits } from '@/lib/format'
 import type { Balances } from '@/hooks/useBalances'
 import { useWalletActions } from '@/hooks/useWalletActions'
 import { bankDenomFor } from '@/tokens/routes'
-import { SSCRT_ADDRESS, TOKENS, tokenByAddress, tokenImageUrl } from '@/tokens/registry'
-import { useWallet } from '@/store/wallet'
+import { privateSymbol, SSCRT_ADDRESS, TOKENS, tokenByAddress, tokenImageUrl } from '@/tokens/registry'
 
 interface Props {
   open: boolean
   onClose: () => void
   balances: Balances
-  /** Preselected by the "you just received X — wrap it?" toast. */
+  /** Preselected by the "you just received X — wrap it?" toast, or by a wallet row. */
   token?: string
+  /** Which way round the panel opens, when the row that opened it knew. */
+  direction?: 'wrap' | 'unwrap'
+  /** Called once a transaction lands, so every list of this account refreshes. */
+  onDone: () => void
 }
 
 type Direction = 'wrap' | 'unwrap'
@@ -33,15 +35,19 @@ type Direction = 'wrap' | 'unwrap'
  * asset list is every token whose underlying denomination on Secret can be
  * named without guessing — see `bankDenomFor`.
  */
-export default function WrapPanel({ open, onClose, balances, token: requested }: Props) {
-  const queryClient = useWallet((state) => state.queryClient)
-  const address = useWallet((state) => state.address)
-  const actions = useWalletActions(balances.refresh)
+export default function WrapPanel({
+  open,
+  onClose,
+  balances,
+  token: requested,
+  direction: requestedDirection,
+  onDone
+}: Props) {
+  const actions = useWalletActions(onDone)
 
   const [direction, setDirection] = useState<Direction>('wrap')
   const [contract, setContract] = useState(SSCRT_ADDRESS)
   const [amount, setAmount] = useState('')
-  const [bank, setBank] = useState<Map<string, string>>(new Map())
 
   /** Tokens whose bank denomination is unambiguous, so a wrap knows what to spend. */
   const wrappable = useMemo(
@@ -54,27 +60,16 @@ export default function WrapPanel({ open, onClose, balances, token: requested }:
     setAmount('')
     actions.reset()
     if (requested && wrappable.some((row) => row.token.address === requested)) setContract(requested)
+    if (requestedDirection) setDirection(requestedDirection)
     // Only when the panel opens; `actions` is rebuilt on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, requested])
+  }, [open, requested, requestedDirection])
 
-  // The public side of the pair. It is not in `useBalances`, which reads the
-  // native denomination and the SNIP-20 contracts but not the IBC vouchers
-  // sitting in the bank module — and a voucher is exactly what a wrap spends.
-  useEffect(() => {
-    if (!open || !queryClient || !address) return
-    let cancelled = false
-    void queryAllBalances(queryClient, address)
-      .then((held) => {
-        if (!cancelled) setBank(held)
-      })
-      .catch(() => {
-        if (!cancelled) setBank(new Map())
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open, queryClient, address, actions.state.kind])
+  // The public side of the pair — the IBC vouchers and `uscrt` sitting in the
+  // bank module, which is what a wrap spends. Read once by `useBalances` and
+  // shared, rather than queried again here: two copies of the same figure can
+  // disagree, and the one on the wallet screen is the one the user is looking at.
+  const bank = balances.bank
 
   const token = tokenByAddress(contract)
   const denom = bankDenomFor(contract)
@@ -116,7 +111,7 @@ export default function WrapPanel({ open, onClose, balances, token: requested }:
   }
 
   const publicLabel = denom === DENOM ? DISPLAY_DENOM : (token?.symbol ?? 'token')
-  const privateLabel = token ? `s${token.symbol}` : 'wrapped'
+  const privateLabel = token ? privateSymbol(token) : 'wrapped'
 
   return (
     <Drawer open={open} onClose={onClose} title="Wrap">
@@ -175,10 +170,17 @@ export default function WrapPanel({ open, onClose, balances, token: requested }:
             }}
           />
 
+          {/*
+            Both sides of this pair are usually called the same thing — the
+            public ATOM voucher and the SNIP-20 that holds it are both "ATOM",
+            and only sSCRT has a ticker of its own. So the words carry the
+            distinction rather than the tickers, which would otherwise render
+            as "ATOM → ATOM".
+          */}
           <p className="flex items-center justify-center gap-2 text-label text-text-faint">
-            {wrapping ? publicLabel : privateLabel}
+            {wrapping ? `Public ${publicLabel}` : `Private ${privateLabel}`}
             <ArrowDown size={13} aria-hidden className="-rotate-90" />
-            {wrapping ? privateLabel : publicLabel}
+            {wrapping ? `Private ${privateLabel}` : `Public ${publicLabel}`}
           </p>
 
           <p className="text-label text-text-muted">

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { resolveLcdUrl } from '@/lib/endpoint'
 import {
   queryDelegations,
   queryRestakeEntries,
   queryRestakeThreshold,
   queryRewards,
+  queryStakingApr,
   queryUnbondings,
   queryUnbondingSeconds,
   queryValidator,
@@ -14,6 +16,7 @@ import {
   type Unbonding,
   type Validator
 } from '@/lib/staking'
+import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 
 export interface StakingData {
@@ -30,6 +33,9 @@ export interface StakingData {
   totalRewards: string
   /** Everything currently delegated, in base units. */
   totalStaked: string
+  /** Annualised staking return, as a fraction (0.05 = 5%). Undefined if any of
+   *  the chain facts it is derived from could not be read. */
+  apr?: number
   loading: boolean
   error?: string
   refresh: () => void
@@ -46,6 +52,7 @@ export interface StakingData {
 export function useStaking(): StakingData {
   const address = useWallet((state) => state.address)
   const client = useWallet((state) => state.queryClient)
+  const lcdOverride = useSettings((state) => state.lcdOverride)
 
   const [validators, setValidators] = useState<Validator[]>([])
   const [delegations, setDelegations] = useState<Map<string, Delegation>>(new Map())
@@ -54,6 +61,7 @@ export function useStaking(): StakingData {
   const [restaking, setRestaking] = useState<Set<string>>(new Set())
   const [restakeThreshold, setRestakeThreshold] = useState<string | undefined>()
   const [unbondingSeconds, setUnbondingSeconds] = useState(0)
+  const [apr, setApr] = useState<number | undefined>()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | undefined>()
   const [nonce, setNonce] = useState(0)
@@ -76,6 +84,17 @@ export function useStaking(): StakingData {
           queryRestakeThreshold(client).catch(() => undefined),
           queryUnbondingSeconds(client).catch(() => 0)
         ])
+
+        // Decoration, not a blocker: the summary bar shows "Unavailable"
+        // rather than holding up the validator list over a third figure.
+        void resolveLcdUrl(lcdOverride)
+          .then(queryStakingApr)
+          .then((value) => {
+            if (!cancelled) setApr(value)
+          })
+          .catch(() => {
+            if (!cancelled) setApr(undefined)
+          })
 
         if (cancelled) return
         setValidators(vals)
@@ -129,7 +148,7 @@ export function useStaking(): StakingData {
     return () => {
       cancelled = true
     }
-  }, [client, address, nonce])
+  }, [client, address, lcdOverride, nonce])
 
   const sum = (values: Iterable<{ amount: string }>) => {
     let total = 0n
@@ -147,6 +166,7 @@ export function useStaking(): StakingData {
     unbondingSeconds,
     totalRewards: sum(rewards.values()),
     totalStaked: sum(delegations.values()),
+    apr,
     loading,
     error,
     refresh

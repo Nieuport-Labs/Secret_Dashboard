@@ -1,35 +1,34 @@
-import { Check, Copy } from 'lucide-react'
+import { ArrowDownToLine, ArrowLeftRight, Check, Copy, Send, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import Avatar from '@/components/wallet/Avatar'
 import type { WalletPanel } from '@/components/wallet/panels'
 import Button from '@/components/ui/Button'
-import { DISPLAY_DENOM } from '@/chains/secret4'
 import { useProfileImage } from '@/hooks/useProfileImage'
-import { formatDisplayAmount, formatFiat, shortenAddress } from '@/lib/format'
-import { useSettings } from '@/store/settings'
+import { shortenAddress } from '@/lib/format'
 
 interface Props {
   address: string
-  /** Native SCRT in base units. Undefined while loading or when the read failed. */
-  native?: string
-  nativeFiat?: number
-  loading: boolean
   onOpenPanel: (panel: WalletPanel) => void
 }
 
+/** Icon on the left, matching the noun of the action rather than a generic
+ *  arrow — Wrap gets a shield because what it does is move a balance into or
+ *  out of the private, encrypted half of the account. */
+const ACTIONS: Array<{ panel: WalletPanel | 'bridge'; label: string; icon: typeof Send }> = [
+  { panel: 'send', label: 'Send', icon: Send },
+  { panel: 'receive', label: 'Receive', icon: ArrowDownToLine },
+  { panel: 'wrap', label: 'Wrap', icon: ShieldCheck },
+  { panel: 'bridge', label: 'Bridge', icon: ArrowLeftRight }
+]
+
 /**
- * The wallet's identity row (Figma 36:157): who you are on the left, what you
- * hold on the right.
- *
- * "Total $SCRT Available" in the design means the native balance, not the sum
- * of everything held — it is the figure that decides whether you can pay for a
- * transaction, which is why it earns the largest type on the screen.
+ * Who you are (Figma 36:157, identity half only — the balance half lives
+ * beside `ActivityList` now, so the two right-hand columns share a width).
  */
-export default function ProfileHeader({ address, native, nativeFiat, loading, onOpenPanel }: Props) {
+export default function ProfileHeader({ address, onOpenPanel }: Props) {
   const navigate = useNavigate()
-  const currency = useSettings((state) => state.currency)
   const { url, upload, remove, saving, error } = useProfileImage()
   const [copied, setCopied] = useState(false)
 
@@ -44,117 +43,60 @@ export default function ProfileHeader({ address, native, nativeFiat, loading, on
   }
 
   return (
-    <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
-      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-stretch">
-        <Avatar
-          address={address}
-          url={url}
-          onPick={(file) => void upload(file)}
-          onRemove={() => void remove()}
-          saving={saving}
-        />
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+      <Avatar
+        address={address}
+        url={url}
+        onPick={(file) => void upload(file)}
+        onRemove={() => void remove()}
+        saving={saving}
+      />
 
-        <div className="flex flex-col justify-between gap-4">
-          <div>
-            <h1 className="text-headline">Hello 👋</h1>
-            <button
-              type="button"
-              onClick={() => void copy()}
-              className="state-layer -mx-1 mt-0.5 flex max-w-full items-center gap-1.5 rounded-control px-1 text-base font-semibold text-text-faint"
-            >
-              {/*
-                A bech32 address is 45 characters and will not fit narrow
-                layouts. Breaking it anywhere leaves a line holding one letter,
-                so it is elided in the middle instead, and shown whole only
-                where the design's single line actually fits.
-              */}
-              <span className="whitespace-nowrap md:hidden">{shortenAddress(address, 12, 6)}</span>
-              <span className="hidden whitespace-nowrap md:inline">{address}</span>
-              {copied ? (
-                <Check size={14} aria-hidden className="shrink-0 text-positive" />
-              ) : (
-                <Copy size={14} aria-hidden className="shrink-0" />
-              )}
-              <span className="sr-only">{copied ? 'Address copied' : 'Copy address'}</span>
-            </button>
-          </div>
-
-          <div className="flex w-full max-w-[388px] gap-2.5">
-            <Button
-              variant="soft"
-              shape="control"
-              size="lg"
-              className="flex-1"
-              onClick={() => onOpenPanel('send')}
-            >
-              Send
-            </Button>
-            <Button
-              variant="soft"
-              shape="control"
-              size="lg"
-              className="flex-1"
-              onClick={() => onOpenPanel('receive')}
-            >
-              Receive
-            </Button>
-            <Button
-              variant="soft"
-              shape="control"
-              size="lg"
-              className="flex-1"
-              onClick={() => onOpenPanel('wrap')}
-            >
-              Wrap
-            </Button>
-            <Button
-              variant="soft"
-              shape="control"
-              size="lg"
-              className="flex-1"
-              onClick={() => navigate('/bridge')}
-            >
-              Bridge
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {error ? (
-        <p className="text-base text-negative" role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      <div className="flex w-full items-center justify-between gap-4 lg:w-[400px]">
-        {/*
-          The design writes this "Total $SCRT Available" and colours the figure
-          orange. Both are dropped: a ticker does not take a dollar sign outside
-          a trading forum, and colour on a number means something changed — a
-          balance that is permanently orange has spent that signal on nothing.
-        */}
-        <div>
-          <p className="text-label text-text-muted">Available</p>
-          {loading && native === undefined ? (
-            <span className="mt-1.5 block h-8 w-32 animate-pulse rounded-control bg-surface" />
-          ) : (
-            <p className="mt-1.5 text-headline tabular-nums">
-              {native === undefined ? (
-                'Unavailable'
-              ) : (
-                <>
-                  {formatDisplayAmount(native)}{' '}
-                  <span className="text-title text-text-muted">{DISPLAY_DENOM}</span>
-                </>
-              )}
-            </p>
-          )}
-          <p className="mt-0.5 text-label text-text-faint">{formatFiat(nativeFiat, currency)}</p>
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div className="min-w-0">
+          <h1 className="text-display">Hello 👋</h1>
+          <button
+            type="button"
+            onClick={() => void copy()}
+            className="state-layer -ml-2 mt-0.5 flex max-w-full min-w-0 items-center gap-2 rounded-control py-1 pl-2 pr-2.5 text-base font-semibold text-text-faint"
+          >
+            {/*
+              A bech32 address is 45 characters and will not always fit —
+              elided in the middle on narrow layouts, and truncated with an
+              ellipsis on wider ones if the column still ends up short of it,
+              rather than overflowing past the icon that copies it.
+            */}
+            <span className="block min-w-0 truncate md:hidden">{shortenAddress(address, 12, 6)}</span>
+            <span className="hidden min-w-0 truncate md:block">{address}</span>
+            {copied ? (
+              <Check size={15} aria-hidden className="shrink-0 text-positive" />
+            ) : (
+              <Copy size={15} aria-hidden className="shrink-0" />
+            )}
+            <span className="sr-only">{copied ? 'Address copied' : 'Copy address'}</span>
+          </button>
         </div>
 
-        <Button variant="soft" shape="control" onClick={() => navigate('/staking')}>
-          Stake
-        </Button>
+        {error ? (
+          <p className="text-base text-negative" role="alert">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="flex gap-2">
+          {ACTIONS.map(({ panel, label, icon: Icon }) => (
+            <Button
+              key={panel}
+              variant="soft"
+              shape="control"
+              size="lg"
+              icon={<Icon size={14} aria-hidden />}
+              onClick={() => (panel === 'bridge' ? navigate('/bridge') : onOpenPanel(panel))}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
       </div>
     </div>
   )

@@ -17,6 +17,8 @@
  * against secret-4. See docs/chain-facts.md.
  */
 
+import { useCustomTokens } from '@/store/customTokens'
+
 export interface TokenInfo {
   /** Ticker, as shown. */
   symbol: string
@@ -52,53 +54,6 @@ export const TOKENS: TokenInfo[] = [
     coingeckoId: 'akash-network'
   },
   {
-    symbol: 'ampBTC',
-    description: 'ERIS staked BTC',
-    address: 'secret10fnn57cdxqksgqprtvp27d3ykkgyffv9n0gnal',
-    image: 'ampwhale.svg',
-    decimals: 8
-  },
-  {
-    symbol: 'ampKUJI',
-    description: 'ERIS staked KUJI',
-    address: 'secret1pf6n6j8xlkxnga5t8w8exdtvcrrjgqms5wdlnj',
-    image: 'ampkuji.svg',
-    decimals: 6,
-    coingeckoId: 'eris-staked-kuji'
-  },
-  {
-    symbol: 'ampLUNA',
-    description: 'ERIS staked LUNA',
-    address: 'secret1cycwquhh63qmc0qgfe76eed6a6yj5x4vzlu3rc',
-    image: 'ampluna.svg',
-    decimals: 6,
-    coingeckoId: 'eris-amplified-luna'
-  },
-  {
-    symbol: 'ampWHALE',
-    description: 'ERIS staked WHALE',
-    address: 'secret1jsaftfxnwwmjxccvc3zqaqmkcpp8fjnvvltvq6',
-    image: 'ampwhale.svg',
-    decimals: 6,
-    coingeckoId: 'eris-amplified-whale'
-  },
-  {
-    symbol: 'ANDR',
-    description: 'Andromeda Governance Token',
-    address: 'secret1dks96n3jz64dyulzjnjazt6cqemr0x0qgn7sd7',
-    image: 'andr.png',
-    decimals: 6,
-    coingeckoId: 'andromeda-2'
-  },
-  {
-    symbol: 'ARCH',
-    description: 'Archway Governance Token',
-    address: 'secret188z7hncvphw4us4h6uy6vlq4qf20jd2vm2vu8c',
-    image: 'archway.svg',
-    decimals: 18,
-    coingeckoId: 'archway'
-  },
-  {
     symbol: 'ATOM',
     description: 'Cosmos Hub Governance Token',
     address: 'secret19e75l25r6sa6nhdf4lggjmgpw0vmpfvsw5cnpe',
@@ -107,65 +62,12 @@ export const TOKENS: TokenInfo[] = [
     coingeckoId: 'cosmos'
   },
   {
-    symbol: 'bINJ',
-    description: 'Backbone staked INJ',
-    address: 'secret17xw4pelwmmhftscrdfntudyv77rkdxvaaelzvs',
-    image: 'binj.png',
-    decimals: 18
-  },
-  {
-    symbol: 'bKUJI',
-    description: 'Backbone staked KUJI',
-    address: 'secret1ve536yukullq5rm67gdpssm23wynfv9gcqh6xn',
-    image: 'bkuji.png',
-    decimals: 6
-  },
-  {
     symbol: 'BLD',
     description: 'Agoric Governance Token',
     address: 'secret1uxvpq889uxjcpj656yjjexsqa3zqm6ntkyjsjq',
     image: 'bld.svg',
     decimals: 6,
     coingeckoId: 'agoric'
-  },
-  {
-    symbol: 'bLUNA',
-    description: 'Backbone staked LUNA',
-    address: 'secret1wzqxaa6g6xa27vrwgygex8xurxdjzjtwzlgwy3',
-    image: 'bluna.png',
-    decimals: 6
-  },
-  {
-    symbol: 'CHEQ',
-    description: 'Cheqd Governance Token',
-    address: 'secret1lfqlcnpveh6at723h5k2nu4jjqeuz0ukpxxdtt',
-    image: 'cheq.svg',
-    decimals: 9,
-    coingeckoId: 'cheqd-network'
-  },
-  {
-    symbol: 'CMDX',
-    description: 'Comdex Governance Token',
-    address: 'secret1mndng80tqppllk0qclgcnvccf9urak08e9w2fl',
-    image: 'cmdx.svg',
-    decimals: 6,
-    coingeckoId: 'comdex'
-  },
-  {
-    symbol: 'CMST',
-    description: 'Composite USD Stablecoin',
-    address: 'secret14l7s0evqw7grxjlesn8yyuk5lexuvkwgpfdxr5',
-    image: 'cmst.svg',
-    decimals: 6,
-    coingeckoId: 'composite'
-  },
-  {
-    symbol: 'CORE',
-    description: 'Coreum Governance Token',
-    address: 'secret1e8p373krsxva4msh0gdh94lg3rhn7npgmd5g8v',
-    image: 'coreum.svg',
-    decimals: 6,
-    coingeckoId: 'coreum'
   },
   {
     symbol: 'dATOM',
@@ -216,28 +118,12 @@ export const TOKENS: TokenInfo[] = [
     coingeckoId: 'eclipse-fi'
   },
   {
-    symbol: 'FLIX',
-    description: 'Omniflix governance token',
-    address: 'secret1agpgsn50xjdggzdzd6kl4jz5ueywtkuhnyyhx5',
-    image: 'flix.svg',
-    decimals: 6,
-    coingeckoId: 'omniflix-network'
-  },
-  {
     symbol: 'GRAV',
     description: 'Gravity Bridge Governance Token',
     address: 'secret1dtghxvrx35nznt8es3fwxrv4qh56tvxv22z79d',
     image: 'grav.svg',
     decimals: 6,
     coingeckoId: 'graviton'
-  },
-  {
-    symbol: 'HARBOR',
-    description: 'Harbor Protocol Governance Token',
-    address: 'secret1lrlkqhmwkh5y4326akn3hwn6j69f8l5656m43e',
-    image: 'harbor.svg',
-    decimals: 6,
-    coingeckoId: 'harbor-2'
   },
   {
     symbol: 'HUAHUA',
@@ -296,30 +182,6 @@ export const TOKENS: TokenInfo[] = [
     coingeckoId: 'kujira'
   },
   {
-    symbol: 'KSM',
-    description: 'Kusama Governance Token',
-    address: 'secret1n4dp5dk6fufqmaalu9y7pnmk2r0hs7kc66a55f',
-    image: 'ksm.svg',
-    decimals: 12,
-    coingeckoId: 'kusama'
-  },
-  {
-    symbol: 'NLS',
-    description: 'Nolus Governance Token',
-    address: 'secret1yafpcu9wpauy5ktymggzk9kmsvmce0hkl9p2h7',
-    image: 'nolus.svg',
-    decimals: 6,
-    coingeckoId: 'nolus'
-  },
-  {
-    symbol: 'NSTK',
-    description: 'Unstake Governance Token',
-    address: 'secret16l5g98d45gqvvn2g79q23h8flfq65cvr9r6c72',
-    image: 'nstk.svg',
-    decimals: 6,
-    coingeckoId: 'unstake-fi'
-  },
-  {
     symbol: 'NTRN',
     description: 'Neutron Governance Token',
     address: 'secret1k644rvd979wn4erjd5g42uehayjwrq094g5uvj',
@@ -342,14 +204,6 @@ export const TOKENS: TokenInfo[] = [
     image: 'luna2.svg',
     decimals: 6,
     coingeckoId: 'terra-luna-2'
-  },
-  {
-    symbol: 'LVN',
-    description: 'Levana native Token',
-    address: 'secret1swrj0fqza3g98d7agm2nmukjfe44h7f5n8aavp',
-    image: 'lvn.svg',
-    decimals: 6,
-    coingeckoId: 'levana-protocol'
   },
   {
     symbol: 'milkTIA',
@@ -384,14 +238,6 @@ export const TOKENS: TokenInfo[] = [
     coingeckoId: 'osmosis'
   },
   {
-    symbol: 'PAGE',
-    description: 'PageDAO',
-    address: 'secret1hhvfxy44e4gp6k7n4e37t7uyqa54dnp68egugg',
-    image: 'page.png',
-    decimals: 8,
-    coingeckoId: 'page'
-  },
-  {
     symbol: 'PICA',
     description: 'Picasso Token',
     address: 'secret1e0y9vf4xr9wffyxsvlz35jzl5st2srkdl8frac',
@@ -414,22 +260,6 @@ export const TOKENS: TokenInfo[] = [
     image: 'qatom.svg',
     decimals: 6,
     coingeckoId: 'qatom'
-  },
-  {
-    symbol: 'QCK',
-    description: 'Quicksilver Governance Token',
-    address: 'secret17d8c96kezszpda3r2c5dtkzlkfxw6mtu7q98ka',
-    image: 'qck.svg',
-    decimals: 6,
-    coingeckoId: 'quicksilver'
-  },
-  {
-    symbol: 'USK',
-    description: 'Kujira USD Stablecoin',
-    address: 'secret1cj2fvj4ap79fl9euz8kqn0k5xlvck0pw9z9xhr',
-    image: 'usk.svg',
-    decimals: 6,
-    coingeckoId: 'kujira'
   },
   {
     symbol: 'USDC',
@@ -550,14 +380,6 @@ export const TOKENS: TokenInfo[] = [
     coingeckoId: 'celestia'
   },
   {
-    symbol: 'UMEE',
-    description: 'UX Chain Governance Token',
-    address: 'secret1f6yg0typy608r567xekwyn3qf0k902llue9w2l',
-    image: 'umee.svg',
-    decimals: 6,
-    coingeckoId: 'umee'
-  },
-  {
     symbol: 'USDT',
     description: 'Native USDT from Kava',
     address: 'secret1htd6s29m2j9h45knwkyucz98m306n32hx8dww3',
@@ -572,14 +394,6 @@ export const TOKENS: TokenInfo[] = [
     image: 'wbtc.svg',
     decimals: 8,
     coingeckoId: 'bitcoin'
-  },
-  {
-    symbol: 'WHALE',
-    description: 'Migaloo Governance Token',
-    address: 'secret1pcftk3ny87zm6thuxyfrtrlm2t8yev5unuvx6c',
-    image: 'migaloo.svg',
-    decimals: 6,
-    coingeckoId: 'white-whale'
   },
   {
     symbol: 'wstETH',
@@ -612,22 +426,6 @@ export const TOKENS: TokenInfo[] = [
     image: 'alter.svg',
     decimals: 6,
     coingeckoId: 'alter',
-    secretNative: true
-  },
-  {
-    symbol: 'ATOM/dATOM LP',
-    description: 'ShadeSwap LP token for ATOM-dATOM',
-    address: 'secret1gddp7wlpkups509u76dca550xuxk6ckjru5x54',
-    image: 'atom_datom_lp.svg',
-    decimals: 6,
-    secretNative: true
-  },
-  {
-    symbol: 'ATOM/stATOM LP',
-    description: 'ShadeSwap LP token for ATOM-stATOM',
-    address: 'secret1kmjr03phgn4v4u0altvvuc53lfmy033wmvddy5',
-    image: 'atom_statom_lp.svg',
-    decimals: 6,
     secretNative: true
   },
   {
@@ -667,14 +465,6 @@ export const TOKENS: TokenInfo[] = [
     secretNative: true
   },
   {
-    symbol: 'SHILL',
-    description: 'Shillstake Governance Token',
-    address: 'secret197dvnt9yjxwn8sjdlx05f7zuk27lsdxtfnwxse',
-    image: 'shill.svg',
-    decimals: 6,
-    secretNative: true
-  },
-  {
     symbol: 'SILK',
     description: 'Shade Protocol Privacy-Preserving Stablecoin',
     address: 'secret1fl449muk5yq8dlad7a22nje4p5d2pnsgymhjfd',
@@ -690,23 +480,6 @@ export const TOKENS: TokenInfo[] = [
     image: 'stkd-scrt.svg',
     decimals: 6,
     coingeckoId: 'stkd-scrt',
-    secretNative: true
-  },
-  {
-    symbol: 'xATOM',
-    description: 'Lent Secret ATOM from Shade',
-    address: 'secret1ydpmlhqat9s2qxwc5ldyms8yp53nhqcvh6mz3c',
-    image: 'atom.svg',
-    decimals: 6,
-    coingeckoId: 'cosmos',
-    secretNative: true
-  },
-  {
-    symbol: 'stATOM/xstATOM LP',
-    description: 'stATOM/xstATOM LP from Shade Protocol',
-    address: 'secret179m85kh3vq6cler57na6c6m5d3lwm3zj0m2v9u',
-    image: 'dshd.svg',
-    decimals: 6,
     secretNative: true
   },
   {
@@ -824,20 +597,51 @@ export const SSCRT_ADDRESS = 'secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek'
 
 const BY_ADDRESS = new Map(TOKENS.map((token) => [token.address, token]))
 
+/**
+ * Tokens plus whatever the user has added by address (see `useCustomTokens`).
+ *
+ * Read lazily rather than imported at module scope: `useCustomTokens` persists
+ * to the same localStorage this module would otherwise need to touch directly,
+ * and importing the store here would tie the static registry to zustand's
+ * init order for no benefit — every caller already goes through a function.
+ */
+function customTokens(): TokenInfo[] {
+  // Deferred import avoided; zustand stores are safe to read outside React.
+  return useCustomTokens.getState().tokens
+}
+
 export function tokenByAddress(address: string): TokenInfo | undefined {
-  return BY_ADDRESS.get(address)
+  return BY_ADDRESS.get(address) ?? customTokens().find((token) => token.address === address)
 }
 
 export function tokenImageUrl(token: TokenInfo): string {
   return `/img/tokens/${token.image}`
 }
 
+/**
+ * What to call a token's private form.
+ *
+ * The registry lists sSCRT under the ticker `SCRT`, because that is the asset
+ * it holds — but the wallet shows the public and the private form side by side,
+ * and two rows both reading "SCRT" is the one place that convention stops
+ * working. Only this pair needs distinguishing: every other token's public form
+ * is an `ibc/…` voucher nobody calls by a ticker.
+ */
+export function privateSymbol(token: TokenInfo): string {
+  return token.address === SSCRT_ADDRESS ? 'sSCRT' : token.symbol
+}
+
+/** Every token this dashboard knows about right now, built-in plus custom. */
+export function allTokens(): TokenInfo[] {
+  return [...TOKENS, ...customTokens()]
+}
+
 /** Every contract a permit should cover, so one signature serves the whole app. */
 export function allTokenAddresses(): string[] {
-  return TOKENS.map((token) => token.address)
+  return allTokens().map((token) => token.address)
 }
 
 /** Tokens that can currently be bridged — i.e. everything Axelar is not carrying. */
 export function bridgeableTokens(): TokenInfo[] {
-  return TOKENS.filter((token) => !token.axelarAsset)
+  return allTokens().filter((token) => !token.axelarAsset)
 }

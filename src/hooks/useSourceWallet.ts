@@ -23,8 +23,14 @@ export function useSourceWallet(chain: SourceChain | undefined) {
   const [address, setAddress] = useState<string | undefined>()
   const [osmosisAddress, setOsmosisAddress] = useState<string | undefined>()
   const [balance, setBalance] = useState<string | undefined>()
+  const [balances, setBalances] = useState<Map<string, string>>(new Map())
   const [error, setError] = useState<string | undefined>()
   const [connecting, setConnecting] = useState(false)
+  const [nonce, setNonce] = useState(0)
+
+  /** Re-read balances without a full reconnect — call after sending, so a
+   *  deposit or withdrawal shows up without waiting for a remount. */
+  const refresh = useCallback(() => setNonce((n) => n + 1), [])
 
   const connect = useCallback(async () => {
     if (!chain || !walletId) return
@@ -37,7 +43,10 @@ export function useSourceWallet(chain: SourceChain | undefined) {
     setConnecting(true)
     setError(undefined)
     try {
-      // Enabling both at once means one approval prompt rather than two.
+      // Enabling both at once means one approval prompt rather than two. Once
+      // Keplr/StarShell has approved a chain, this resolves silently on every
+      // later call — no popup — which is what makes the auto-reconnect below
+      // invisible in the ordinary case.
       await provider.enable(chain.chainId)
       const key = await provider.getKey(chain.chainId)
       setAddress(key.bech32Address)
@@ -60,23 +69,31 @@ export function useSourceWallet(chain: SourceChain | undefined) {
     }
   }, [chain, walletId])
 
-  // Switching chain invalidates the address; nothing here survives it.
+  // Switching chain invalidates the address; nothing here survives it. Then
+  // reconnect right away rather than waiting for another click — once a chain
+  // has been approved in the wallet extension, `connect` resolves without a
+  // prompt, so re-asking for it on every visit was pure friction, not a real
+  // permission check.
   useEffect(() => {
     setAddress(undefined)
     setBalance(undefined)
+    setBalances(new Map())
     setError(undefined)
-  }, [chain?.chainId])
+    if (chain && walletId) void connect()
+    // `connect` changes reference only when `chain`/`walletId` do, so this
+    // does not loop.
+  }, [chain, walletId, connect])
 
-  // The balance on the source chain decides what can be bridged, and the LCD
-  // there is not one this app probes — a failure is reported, not retried.
+  // The balances on the source chain: every denomination held, not just the
+  // fee one, so the token picker can show what each choice is actually worth
+  // without a separate query per token.
   useEffect(() => {
     if (!chain || !address) return
 
     let cancelled = false
-    const denom = chain.feeDenom
 
     void fetch(
-      `${chain.lcd.replace(/\/+$/, '')}/cosmos/bank/v1beta1/balances/${address}/by_denom?denom=${denom}`,
+      `${chain.lcd.replace(/\/+$/, '')}/cosmos/bank/v1beta1/balances/${address}?pagination.limit=200`,
       {
         headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(10_000)
@@ -85,17 +102,23 @@ export function useSourceWallet(chain: SourceChain | undefined) {
       .then((response) =>
         response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`))
       )
-      .then((body: { balance?: { amount?: string } }) => {
-        if (!cancelled) setBalance(body.balance?.amount ?? '0')
+      .then((body: { balances?: { denom: string; amount: string }[] }) => {
+        if (cancelled) return
+        const held = new Map((body.balances ?? []).map((coin) => [coin.denom, coin.amount]))
+        setBalances(held)
+        setBalance(held.get(chain.feeDenom) ?? '0')
       })
       .catch(() => {
-        if (!cancelled) setBalance(undefined)
+        if (!cancelled) {
+          setBalances(new Map())
+          setBalance(undefined)
+        }
       })
 
     return () => {
       cancelled = true
     }
-  }, [chain, address])
+  }, [chain, address, nonce])
 
-  return { address, osmosisAddress, balance, connect, connecting, error }
+  return { address, osmosisAddress, balance, balances, connect, connecting, error, refresh }
 }

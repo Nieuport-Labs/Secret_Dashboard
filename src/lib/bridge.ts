@@ -1,10 +1,11 @@
 import type { SecretNetworkClient } from 'secretjs'
 
-import { DENOM, GAS_PRICE_USCRT } from '@/chains/secret4'
+import { DENOM, GAS, GAS_PRICE_USCRT } from '@/chains/secret4'
 import type { SourceChain } from '@/chains/sources'
 import type { Route } from '@/tokens/routes'
 import { MSG_TRANSFER } from '@/lib/msgTypes'
 import type { HookedTransfer } from '@/lib/ibcMemo'
+import { redeemMsg } from '@/lib/snip20'
 
 /**
  * Sending an IBC transfer from a source chain into Secret.
@@ -63,7 +64,7 @@ function timeoutNanos(): string {
 export async function sendDeposit({ chain, sender, legs, gasLimit }: SendOptions): Promise<SendResult> {
   const { SigningStargateClient, GasPrice } = await loadStargate()
 
-  const provider = window.keplr ?? window.starshell?.keplr
+  const provider = window.keplr
   if (!provider) throw new Error('No wallet extension is available.')
 
   const signer = provider.getOfflineSigner(chain.chainId)
@@ -131,6 +132,15 @@ export interface WithdrawOptions {
   channel?: string
   /** Fee grant to spend, if one covers this. */
   feeGranter?: string
+  /**
+   * Unwrap this SNIP-20 into `denom` in the same transaction, immediately
+   * before sending it out. This is how a withdrawal draws on the private
+   * balance instead of a public one someone would otherwise have to remember
+   * to unwrap by hand first. Omitted for a token that has no private form to
+   * begin with — SCRT chief among them, since native SCRT is what pays gas
+   * and there is nothing upstream of it to unwrap.
+   */
+  unwrap?: { contract: string; codeHash: string }
 }
 
 /**
@@ -141,8 +151,9 @@ export interface WithdrawOptions {
  *
  * The denomination is the one Secret knows: `uscrt` for SCRT itself, an `ibc/…`
  * voucher for anything that arrived over IBC. A SNIP-20 balance cannot be sent
- * this way at all; it has to be unwrapped into its bank denomination first,
- * which is a separate transaction and the caller's job to arrange.
+ * this way directly — it has to be unwrapped into its bank denomination first —
+ * so when `unwrap` is given, that redeem rides in the same transaction as the
+ * transfer, ahead of it, rather than as a separate signature.
  */
 export async function sendWithdraw({
   client,
@@ -152,32 +163,43 @@ export async function sendWithdraw({
   denom,
   amount,
   channel,
-  feeGranter
+  feeGranter,
+  unwrap
 }: WithdrawOptions): Promise<SendResult> {
-  const { MsgTransfer } = await import('secretjs')
+  const { MsgExecuteContract, MsgTransfer } = await import('secretjs')
 
-  const gasLimit = chain.withdrawGas
-  const tx = await client.tx.broadcast(
-    [
-      new MsgTransfer({
-        sender,
-        receiver,
-        source_port: 'transfer',
-        source_channel: channel ?? chain.withdrawChannel,
-        token: { denom, amount },
-        // Seconds here, unlike the source-chain path above: secretjs takes
-        // seconds and converts, cosmjs takes nanoseconds raw.
-        timeout_timestamp: String(Math.floor(Date.now() / 1000) + TIMEOUT_SECONDS),
-        memo: ''
-      })
-    ],
-    {
-      gasLimit,
-      gasPriceInFeeDenom: GAS_PRICE_USCRT,
-      feeDenom: DENOM,
-      feeGranter
-    }
-  )
+  const gasLimit = chain.withdrawGas + (unwrap ? GAS.unwrap : 0)
+  const messages = [
+    ...(unwrap
+      ? [
+          new MsgExecuteContract({
+            sender,
+            contract_address: unwrap.contract,
+            code_hash: unwrap.codeHash,
+            msg: redeemMsg(amount),
+            sent_funds: []
+          })
+        ]
+      : []),
+    new MsgTransfer({
+      sender,
+      receiver,
+      source_port: 'transfer',
+      source_channel: channel ?? chain.withdrawChannel,
+      token: { denom, amount },
+      // Seconds here, unlike the source-chain path above: secretjs takes
+      // seconds and converts, cosmjs takes nanoseconds raw.
+      timeout_timestamp: String(Math.floor(Date.now() / 1000) + TIMEOUT_SECONDS),
+      memo: ''
+    })
+  ]
+
+  const tx = await client.tx.broadcast(messages, {
+    gasLimit,
+    gasPriceInFeeDenom: GAS_PRICE_USCRT,
+    feeDenom: DENOM,
+    feeGranter
+  })
 
   if (tx.code !== 0) {
     throw new Error(tx.rawLog || `Secret rejected it (code ${tx.code}).`)

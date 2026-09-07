@@ -12,7 +12,8 @@
     "typecheck": "tsc -b",
     "format": "prettier --write --ignore-unknown .",
     "verify:chain": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/verify-chain.ts",
-    "test:bridge": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-bridge.ts"
+    "test:bridge": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-bridge.ts",
+    "test:activity": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-activity.ts"
   },
   "dependencies": {
     "@cosmjs/stargate": "^0.39.0",

@@ -4,33 +4,51 @@ import { useEffect, useMemo, useState } from 'react'
 import AmountField from '@/components/ui/AmountField'
 import Button from '@/components/ui/Button'
 import Drawer from '@/components/ui/Drawer'
-import { DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
+import { DECIMALS, DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import { isValidBech32 } from '@/lib/bech32'
 import { toBaseUnits } from '@/lib/format'
 import type { Balances } from '@/hooks/useBalances'
 import { useWalletActions } from '@/hooks/useWalletActions'
-import { tokenImageUrl, type TokenInfo } from '@/tokens/registry'
+import { privateSymbol, tokenImageUrl } from '@/tokens/registry'
 
 interface Props {
   open: boolean
   onClose: () => void
   balances: Balances
+  /** Preselected by the row the send was started from. */
+  asset?: string
+  /** Called once a transaction lands, so every list of this account refreshes. */
+  onDone: () => void
 }
 
 /** The native denomination, given the same shape as a token so one list holds both. */
 const NATIVE_ID = 'native'
 
+/** One thing that can be sent, however it is actually held. */
+interface Sendable {
+  id: string
+  symbol: string
+  detail: string
+  image?: string
+  /** Base units. */
+  amount: string
+  decimals: number
+  private: boolean
+  /** Bank denomination, on the public ones. */
+  denom?: string
+}
+
 /**
  * Sending, from the panel rather than a page of its own.
  *
- * Native and SNIP-20 sit in one list because from here they are the same task,
+ * Public and private sit in one list because from here they are the same task,
  * but they are not the same transaction and the difference is the one thing
  * worth saying out loud: a bank transfer is public and a SNIP-20 transfer is
  * not. That is the reason most of these tokens exist, so the form says which
  * one is about to happen.
  */
-export default function SendPanel({ open, onClose, balances }: Props) {
-  const actions = useWalletActions(balances.refresh)
+export default function SendPanel({ open, onClose, balances, asset, onDone }: Props) {
+  const actions = useWalletActions(onDone)
 
   const [assetId, setAssetId] = useState(NATIVE_ID)
   const [recipient, setRecipient] = useState('')
@@ -43,39 +61,65 @@ export default function SendPanel({ open, onClose, balances }: Props) {
     setRecipient('')
     setAmount('')
     actions.reset()
+    if (asset) setAssetId(asset)
     // Only when the panel opens; `actions` is rebuilt on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  }, [open, asset])
 
-  const held = useMemo(
-    () =>
-      balances.tokens
-        .filter((row) => row.outcome.status === 'ok' && BigInt(row.outcome.amount) > 0n)
-        .map((row) => ({ token: row.token, amount: row.outcome.status === 'ok' ? row.outcome.amount : '0' })),
-    [balances.tokens]
-  )
+  const sendable = useMemo<Sendable[]>(() => {
+    const rows: Sendable[] = []
 
-  const options = [
-    {
-      id: NATIVE_ID,
-      label: DISPLAY_DENOM,
-      detail: 'Public — visible to anyone',
-      image: '/img/secret-mark.svg'
-    },
-    ...held.map(({ token }) => ({
-      id: token.address,
-      label: token.symbol,
-      detail: token.description ?? 'Private SNIP-20',
-      image: tokenImageUrl(token)
-    }))
-  ]
+    /*
+     * Public holdings, native first. A voucher no registry entry claims is left
+     * out: its decimal places are not knowable from the denomination, and a
+     * form that scales the typed amount by a guess sends the wrong number. It
+     * still shows on the wallet screen — it is the account's money — it just
+     * cannot be given a figure to multiply here.
+     */
+    for (const held of balances.publicBalances) {
+      const native = held.denom === DENOM
+      if (!native && !held.token) continue
+      rows.push({
+        id: native ? NATIVE_ID : `bank:${held.denom}`,
+        symbol: native ? DISPLAY_DENOM : held.token!.symbol,
+        detail: 'Public — visible to anyone',
+        image: native ? '/img/secret-mark.svg' : tokenImageUrl(held.token!),
+        amount: held.amount,
+        decimals: native ? DECIMALS : held.token!.decimals,
+        private: false,
+        denom: held.denom
+      })
+    }
 
-  const isNative = assetId === NATIVE_ID
-  const selected: TokenInfo | undefined = held.find((row) => row.token.address === assetId)?.token
-  const decimals = isNative ? 6 : (selected?.decimals ?? 6)
-  const symbol = isNative ? DISPLAY_DENOM : selected?.symbol
-  const image = isNative ? '/img/secret-mark.svg' : selected ? tokenImageUrl(selected) : undefined
-  const available = isNative ? balances.native : held.find((row) => row.token.address === assetId)?.amount
+    for (const row of balances.tokens) {
+      if (row.outcome.status !== 'ok' || BigInt(row.outcome.amount) === 0n) continue
+      rows.push({
+        id: row.token.address,
+        symbol: privateSymbol(row.token),
+        detail: row.token.description ?? 'Private SNIP-20',
+        image: tokenImageUrl(row.token),
+        amount: row.outcome.amount,
+        decimals: row.token.decimals,
+        private: true
+      })
+    }
+
+    return rows
+  }, [balances.publicBalances, balances.tokens])
+
+  const options = sendable.map((row) => ({
+    id: row.id,
+    label: row.symbol,
+    detail: row.detail,
+    image: row.image
+  }))
+
+  const selected = sendable.find((row) => row.id === assetId) ?? sendable[0]
+  const isPrivate = selected?.private ?? false
+  const decimals = selected?.decimals ?? DECIMALS
+  const symbol = selected?.symbol ?? DISPLAY_DENOM
+  const image = selected?.image
+  const available = selected?.amount
 
   let base = '0'
   let amountError: string | undefined
@@ -99,9 +143,9 @@ export default function SendPanel({ open, onClose, balances }: Props) {
   const ready = Boolean(trimmed) && !recipientError && Boolean(amount) && !amountError && BigInt(base) > 0n
 
   const submit = () => {
-    if (!ready) return
-    if (isNative) void actions.sendNative(trimmed, base, DENOM)
-    else void actions.sendToken(assetId, trimmed, base)
+    if (!ready || !selected) return
+    if (selected.private) void actions.sendToken(selected.id, trimmed, base)
+    else void actions.sendNative(trimmed, base, selected.denom ?? DENOM)
   }
 
   return (
@@ -158,11 +202,11 @@ export default function SendPanel({ open, onClose, balances }: Props) {
             it — so it is stated before the button, not after.
           */}
           <p className="flex items-start gap-2 text-label text-text-muted">
-            {isNative ? (
+            {!isPrivate ? (
               <>
                 <Eye size={14} aria-hidden className="mt-px shrink-0" />
-                {DISPLAY_DENOM} moves through the bank module, so the amount and both addresses are public.
-                Wrap it first if this transfer should not be.
+                {symbol} moves through the bank module, so the amount and both addresses are public. Wrap it
+                first if this transfer should not be.
               </>
             ) : (
               <>

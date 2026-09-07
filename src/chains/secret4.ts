@@ -73,6 +73,7 @@ export const DEFAULT_RPC_URLS = [
 
 export const EXPLORER_TX_TEMPLATE = 'https://www.mintscan.io/secret/tx/{hash}'
 export const EXPLORER_ACCOUNT_TEMPLATE = 'https://www.mintscan.io/secret/address/{address}'
+export const EXPLORER_VALIDATOR_TEMPLATE = 'https://www.mintscan.io/secret/validators/{address}'
 
 /**
  * Gas vault contract (`contracts/gas-vault` in jirkacepelka/fee-granter). Pay
@@ -95,6 +96,10 @@ export function explorerTxUrl(hash: string): string {
 
 export function explorerAccountUrl(address: string): string {
   return EXPLORER_ACCOUNT_TEMPLATE.replace('{address}', address)
+}
+
+export function explorerValidatorUrl(address: string): string {
+  return EXPLORER_VALIDATOR_TEMPLATE.replace('{address}', address)
 }
 
 /** Named separately because the copied fee-grant modules expect these spellings. */

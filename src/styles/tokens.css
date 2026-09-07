@@ -52,7 +52,7 @@
 :root {
   --font-sans: 'Google Sans Flex', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 
-  --color-bg: #050505;
+  --color-bg: #080808;
 
   /*
    * Tonal elevation, and it is *translucent*. A raised surface in a dark theme

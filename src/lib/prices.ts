@@ -63,7 +63,7 @@ export async function fetchPriceHistory(
   id: string,
   days = 30,
   currency = 'usd'
-): Promise<{ prices: SeriesPoint[]; volumes: SeriesPoint[] }> {
+): Promise<{ prices: SeriesPoint[]; volumes: SeriesPoint[]; marketCaps: SeriesPoint[] }> {
   const url =
     `${COINGECKO}/coins/${encodeURIComponent(id)}/market_chart` +
     `?vs_currency=${encodeURIComponent(currency)}&days=${days}`
@@ -77,6 +77,7 @@ export async function fetchPriceHistory(
   const body = (await response.json()) as {
     prices?: Array<[number, number]>
     total_volumes?: Array<[number, number]>
+    market_caps?: Array<[number, number]>
   }
 
   const toSeries = (rows: Array<[number, number]> | undefined): SeriesPoint[] =>
@@ -84,5 +85,9 @@ export async function fetchPriceHistory(
       .filter((row) => Array.isArray(row) && Number.isFinite(row[0]) && Number.isFinite(row[1]))
       .map(([t, v]) => ({ t, v }))
 
-  return { prices: toSeries(body.prices), volumes: toSeries(body.total_volumes) }
+  return {
+    prices: toSeries(body.prices),
+    volumes: toSeries(body.total_volumes),
+    marketCaps: toSeries(body.market_caps)
+  }
 }

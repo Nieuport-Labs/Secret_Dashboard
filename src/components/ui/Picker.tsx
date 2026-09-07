@@ -10,6 +10,8 @@ export interface PickerOption {
   /** Second line: what this is, when the label alone is a ticker or a codename. */
   detail?: string
   image?: string
+  /** Trailing, right-aligned — the balance behind this choice, when there is one. */
+  meta?: string
 }
 
 interface DialogProps {
@@ -83,6 +85,9 @@ export function PickerDialog({ open, onClose, label, options, value, onChange }:
                   <span className="block truncate text-label text-text-faint">{option.detail}</span>
                 ) : null}
               </span>
+              {option.meta ? (
+                <span className="shrink-0 text-label tabular-nums text-text-faint">{option.meta}</span>
+              ) : null}
               {option.id === value ? <Check size={16} aria-hidden className="shrink-0 text-accent" /> : null}
             </button>
           </li>

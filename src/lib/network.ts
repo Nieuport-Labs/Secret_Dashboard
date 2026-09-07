@@ -117,3 +117,44 @@ export async function fetchTvlHistory(): Promise<Array<{ t: number; v: number }>
     return []
   }
 }
+
+export interface UnbondingData {
+  /** Everything currently in the 21-day unbonding queue, in display units. */
+  total: number
+  /** One point per day the queue still has to pay out, nearest first. */
+  byDate: Array<{ t: number; v: number }>
+  /** SCRT held on other chains via IBC, in display units. */
+  ibcOut?: number
+}
+
+/**
+ * SCRT working its way out of the unbonding queue, by the day it clears —
+ * what `dash.scrt.network`'s analytics page calls "SCRT Unbonding". Secret's
+ * own staking module can say how much is bonded right now, but not the shape
+ * of what is on its way out; only Lavender.Five's node metrics track that.
+ *
+ * The same response also carries the IBC-out figure the supply breakdown
+ * needs, so that chart rides along on this call rather than making its own.
+ */
+export async function fetchUnbonding(): Promise<UnbondingData | undefined> {
+  try {
+    const body = await getJson<{
+      unbonding_total?: number
+      unbonding_by_date?: Record<string, number>
+      total_ibc_balance_out?: number
+    }>('https://api.lavenderfive.com', '/networks/secretnetwork')
+
+    const byDate = Object.entries(body.unbonding_by_date ?? {})
+      .map(([date, amount]) => ({ t: new Date(date).getTime(), v: amount }))
+      .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.v))
+      .sort((a, b) => a.t - b.t)
+
+    return {
+      total: body.unbonding_total ?? byDate.reduce((sum, point) => sum + point.v, 0),
+      byDate,
+      ibcOut: typeof body.total_ibc_balance_out === 'number' ? body.total_ibc_balance_out : undefined
+    }
+  } catch {
+    return undefined
+  }
+}

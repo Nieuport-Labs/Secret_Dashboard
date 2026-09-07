@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { queryNativeBalance } from '@/lib/bank'
+import { queryAllBalances } from '@/lib/bank'
 import { mapWithLimit } from '@/lib/concurrency'
 import { fiatValue } from '@/lib/format'
 import type { Permit } from '@/lib/permit'
 import { fetchPrices } from '@/lib/prices'
 import { queryBalance, type BalanceOutcome } from '@/lib/snip20'
 import { loadWatchlist, rememberTokens } from '@/lib/watchlist'
-import { allTokenAddresses, tokenByAddress, TOKENS, type TokenInfo } from '@/tokens/registry'
+import { allTokenAddresses, allTokens, tokenByAddress, type TokenInfo } from '@/tokens/registry'
+import { tokenAddressForBankDenom } from '@/tokens/routes'
+import { DENOM } from '@/chains/secret4'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 
@@ -37,10 +39,34 @@ export interface TokenBalance {
   fiat?: number
 }
 
+/** A denomination held in the open, in the bank module. */
+export interface PublicBalance {
+  /** `uscrt` or an `ibc/…` voucher. */
+  denom: string
+  /** Base units. */
+  amount: string
+  /**
+   * The SNIP-20 this denomination wraps into, when this app knows one. Its
+   * absence is what makes a voucher unwrappable — and unnameable, since the
+   * decimal places come from the same entry.
+   */
+  token?: TokenInfo
+  fiat?: number
+}
+
 export interface Balances {
   /** Native SCRT, in base units. The only thing on this chain that pays gas. */
   native?: string
   nativeFiat?: number
+  /**
+   * Every public denomination the account holds, keyed by denom — `uscrt` and
+   * the `ibc/…` vouchers. Read without a permit, because none of it is private:
+   * this is the half of the wallet an explorer can see too, and the half a wrap
+   * spends.
+   */
+  bank: Map<string, string>
+  /** The same holdings as rows, priced and with the zero denominations dropped. */
+  publicBalances: PublicBalance[]
   tokens: TokenBalance[]
   loading: boolean
   /** Set when the native read failed. SNIP-20 failures are per token, in `outcome`. */
@@ -71,6 +97,8 @@ export function useBalances(permit: Permit | undefined): Balances {
   const currency = useSettings((state) => state.currency)
 
   const [native, setNative] = useState<string | undefined>()
+  const [bank, setBank] = useState<Map<string, string>>(new Map())
+  const [publicBalances, setPublicBalances] = useState<PublicBalance[]>([])
   const [scrtPrice, setScrtPrice] = useState<number | undefined>()
   const [tokens, setTokens] = useState<TokenBalance[]>([])
   const [loading, setLoading] = useState(false)
@@ -96,6 +124,8 @@ export function useBalances(permit: Permit | undefined): Balances {
   useEffect(() => {
     if (!address || !client) {
       setNative(undefined)
+      setBank(new Map())
+      setPublicBalances([])
       setTokens([])
       return
     }
@@ -110,23 +140,50 @@ export function useBalances(permit: Permit | undefined): Balances {
 
     const run = async () => {
       const contracts = permit ? (sweep ? allTokenAddresses() : loadWatchlist(address)) : []
-      const priceIds = [SCRT_PRICE_ID, ...TOKENS.map((t) => t.coingeckoId).filter(Boolean)] as string[]
+      const priceIds = [SCRT_PRICE_ID, ...allTokens().map((t) => t.coingeckoId).filter(Boolean)] as string[]
 
-      const [nativeResult, prices] = await Promise.all([
+      const [bankResult, prices] = await Promise.all([
+        // Every denomination in one read rather than `uscrt` alone: the public
+        // vouchers sit in the same query, and the wallet has to show them for
+        // the same reason it shows SCRT — they are the account's money, and
+        // they are the ones that are not private yet.
+        //
         // Caught by hand rather than with allSettled, so the reason survives
         // into a message instead of becoming an opaque rejected slot.
-        queryNativeBalance(client, address).catch((caught: unknown) => caught as Error),
+        queryAllBalances(client, address).catch((caught: unknown) => caught as Error),
         // Prices are decoration; a failure must not cost anyone their balances.
         fetchPrices(priceIds, currency.toLowerCase()).catch(() => new Map<string, number>())
       ])
 
       if (cancelled) return
 
-      if (nativeResult instanceof Error) {
-        setError(nativeResult.message)
+      if (bankResult instanceof Error) {
+        setError(bankResult.message)
         setNative(undefined)
+        setBank(new Map())
+        setPublicBalances([])
       } else {
-        setNative(nativeResult)
+        setBank(bankResult)
+        // The bank module omits a zero balance rather than returning "0", and
+        // here that absence really is zero: the query succeeded.
+        setNative(bankResult.get(DENOM) ?? '0')
+        setPublicBalances(
+          [...bankResult]
+            .filter(([, amount]) => BigInt(amount) > 0n)
+            .map(([denom, amount]) => {
+              const contract = tokenAddressForBankDenom(denom)
+              const token = contract ? tokenByAddress(contract) : undefined
+              const priceId = denom === DENOM ? SCRT_PRICE_ID : token?.coingeckoId
+              return {
+                denom,
+                amount,
+                token,
+                fiat: priceId
+                  ? fiatValue(amount, prices.get(priceId), denom === DENOM ? undefined : token?.decimals)
+                  : undefined
+              }
+            })
+        )
       }
       setScrtPrice(prices.get(SCRT_PRICE_ID))
 
@@ -179,6 +236,8 @@ export function useBalances(permit: Permit | undefined): Balances {
   return {
     native,
     nativeFiat: native === undefined ? undefined : fiatValue(native, scrtPrice),
+    bank,
+    publicBalances,
     tokens,
     loading,
     error,

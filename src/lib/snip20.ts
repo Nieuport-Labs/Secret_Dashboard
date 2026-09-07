@@ -25,6 +25,31 @@ interface BalanceReply {
   viewing_key_error?: { msg?: string }
 }
 
+export interface TokenInfoReply {
+  name: string
+  symbol: string
+  decimals: number
+}
+
+/** `token_info` needs no permit — it is the same for every caller. */
+export async function queryTokenInfo(
+  client: SecretNetworkClient,
+  contractAddress: string
+): Promise<TokenInfoReply> {
+  const codeHash = await codeHashFor(client, contractAddress)
+  const reply = (await client.query.compute.queryContract({
+    contract_address: contractAddress,
+    code_hash: codeHash,
+    query: { token_info: {} }
+  })) as { token_info?: TokenInfoReply }
+
+  const info = reply?.token_info
+  if (!info || typeof info.symbol !== 'string' || typeof info.decimals !== 'number') {
+    throw new Error(`Unexpected reply: ${JSON.stringify(reply).slice(0, 160)}`)
+  }
+  return info
+}
+
 export async function queryBalance(
   client: SecretNetworkClient,
   permit: Permit,

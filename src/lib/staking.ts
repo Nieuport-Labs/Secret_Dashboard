@@ -193,6 +193,72 @@ export async function queryUnbondingSeconds(client: SecretNetworkClient): Promis
   return Number(String(raw).replace(/s$/, '')) || 0
 }
 
+/**
+ * Staking APR — the annualised return a SCRT holder gets for delegating.
+ *
+ * No module returns this directly; it is derived from three things that are
+ * each on the chain: annual inflation, the cut withheld from it before it
+ * reaches stakers, and the fraction of supply actually bonded. Everything not
+ * staked dilutes the stakers' share, which is why the bonded ratio sits in the
+ * denominator — a chain emitting 5% a year with only 30% of supply staked pays
+ * each staker a return sized against that 30%, not the whole of supply.
+ *
+ * Read over the LCD directly rather than through the typed client: the
+ * inflation query there returns a raw protobuf `Dec` as bytes, and the REST
+ * endpoint already hands back the decimal string secretjs would otherwise have
+ * to be asked to decode. Verified against secret-4 — see docs/chain-facts.md.
+ */
+export async function queryStakingApr(lcdUrl: string): Promise<number | undefined> {
+  const base = lcdUrl.replace(/\/+$/, '')
+  const get = async <T>(path: string): Promise<T> => {
+    const response = await fetch(`${base}${path}`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(12_000)
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    return response.json() as Promise<T>
+  }
+
+  const [inflation, pool, supply, distribution] = await Promise.all([
+    get<{ inflation?: string }>('/cosmos/mint/v1beta1/inflation'),
+    get<{ pool?: { bonded_tokens?: string } }>('/cosmos/staking/v1beta1/pool'),
+    get<{ amount?: { amount?: string } }>(`/cosmos/bank/v1beta1/supply/by_denom?denom=${DENOM}`),
+    // Secret adds `secret_foundation_tax` on top of the standard
+    // `community_tax`; both are withheld from newly-minted SCRT before any of
+    // it reaches a delegator.
+    get<{ params?: { community_tax?: string; secret_foundation_tax?: string } }>(
+      '/cosmos/distribution/v1beta1/params'
+    )
+  ])
+
+  const rate = Number(inflation.inflation)
+  const bonded = BigInt(pool.pool?.bonded_tokens ?? '0')
+  const totalSupply = BigInt(supply.amount?.amount ?? '0')
+  if (!Number.isFinite(rate) || totalSupply === 0n || bonded === 0n) return undefined
+
+  const bondedRatio = Number((bonded * 10_000n) / totalSupply) / 10_000
+  const withheld =
+    Number(distribution.params?.community_tax ?? '0') + Number(distribution.params?.secret_foundation_tax ?? '0')
+
+  return (rate * (1 - withheld)) / bondedRatio
+}
+
+/**
+ * This validator's share of everything bonded on the chain, as a fraction
+ * (0.05 = 5%).
+ *
+ * `undefined` for a validator that is not currently in the bonded set — jailed
+ * or unbonding — since its `tokens` figure is not a voting-power figure
+ * comparable to the ones that are, and `undefined` when the total itself is
+ * unknown. Never returns a value silently computed against the wrong base.
+ */
+export function shareOfBonded(validator: Validator, totalBondedTokens: bigint): number | undefined {
+  if (validator.status !== 'BOND_STATUS_BONDED' || totalBondedTokens <= 0n) return undefined
+  // Basis points of a basis point: precise enough for a figure shown to two
+  // decimal places without dividing a 15-digit token amount as a float.
+  return Number((BigInt(validator.tokens) * 1_000_000n) / totalBondedTokens) / 1_000_000
+}
+
 /* -------------------------------------------------------------------------- */
 /* Messages                                                                    */
 /* -------------------------------------------------------------------------- */

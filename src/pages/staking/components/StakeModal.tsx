@@ -1,13 +1,17 @@
-import { ExternalLink } from 'lucide-react'
-import { useState } from 'react'
+import { ChevronDown, ExternalLink, Github, Globe, Linkedin, Twitter } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
+import { PickerDialog } from '@/components/ui/Picker'
+import ValidatorAvatar from '@/pages/staking/components/ValidatorAvatar'
 import { DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import type { ActionState } from '@/hooks/useStakingActions'
+import { useValidatorProfile } from '@/hooks/useValidatorProfile'
 import { formatAmount, fromBaseUnits, toBaseUnits } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { Delegation, Validator } from '@/lib/staking'
+import type { SocialLink } from '@/lib/validatorImage'
 
 type Mode = 'delegate' | 'undelegate' | 'redelegate'
 
@@ -15,6 +19,12 @@ interface Props {
   validator: Validator
   validators: Validator[]
   delegation?: Delegation
+  /** From Keybase, when this validator published an identity and it resolved. */
+  image?: string
+  /** Avatars for the other validators, for the Move destination picker. */
+  images?: Map<string, string>
+  /** This validator's share of everything bonded on the chain, as a fraction. */
+  networkShare?: number
   /** Native SCRT, in base units. */
   available?: string
   unbondingSeconds: number
@@ -23,6 +33,36 @@ interface Props {
   onDelegate: (amount: string) => void
   onUndelegate: (amount: string) => void
   onRedelegate: (toValidator: string, amount: string) => void
+}
+
+/** A URL for display: whatever a validator operator typed into `website` is
+ *  not guaranteed to include a scheme, and the raw string is too long to sit
+ *  next to an icon anyway. */
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url.startsWith('http') ? url : `https://${url}`).hostname
+  } catch {
+    return url
+  }
+}
+
+function withScheme(url: string): string {
+  return url.startsWith('http') ? url : `https://${url}`
+}
+
+/** Keybase's own vocabulary for a proof type, not this app's — passed through
+ *  for anything it doesn't have a specific icon for rather than hidden. */
+function socialIcon(type: SocialLink['type']): ReactNode {
+  switch (type) {
+    case 'twitter':
+      return <Twitter size={15} aria-hidden />
+    case 'github':
+      return <Github size={15} aria-hidden />
+    case 'linkedin':
+      return <Linkedin size={15} aria-hidden />
+    default:
+      return <Globe size={15} aria-hidden />
+  }
 }
 
 const MODES: Array<{ value: Mode; label: string }> = [
@@ -35,6 +75,9 @@ export default function StakeModal({
   validator,
   validators,
   delegation,
+  image,
+  images,
+  networkShare,
   available,
   unbondingSeconds,
   state,
@@ -43,11 +86,18 @@ export default function StakeModal({
   onUndelegate,
   onRedelegate
 }: Props) {
+  // Whatever the row's own avatar fetch already warmed the cache with (see
+  // `useValidatorProfile`) renders instantly; this only does its own network
+  // work the first time this particular identity is asked about.
+  const profile = useValidatorProfile(validator.identity)
+
   const [mode, setMode] = useState<Mode>(delegation ? 'undelegate' : 'delegate')
   const [amount, setAmount] = useState('')
   const [destination, setDestination] = useState(
     validators.find((v) => v.address !== validator.address)?.address ?? ''
   )
+  const [pickingDestination, setPickingDestination] = useState(false)
+  const destinationValidator = validators.find((v) => v.address === destination)
 
   const staked = delegation?.amount ?? '0'
   const max = mode === 'delegate' ? (available ?? '0') : staked
@@ -74,8 +124,57 @@ export default function StakeModal({
       open
       onClose={onClose}
       title={validator.moniker}
-      description={`${(validator.commission * 100).toFixed(1)}% commission`}
+      description={`${(validator.commission * 100).toFixed(1)}% commission${
+        networkShare !== undefined ? ` · ${(networkShare * 100).toFixed(2)}% voting power` : ''
+      }`}
+      icon={<ValidatorAvatar address={validator.address} moniker={validator.moniker} image={image} size={36} />}
     >
+      {/*
+        The operator's own words and links, when Keybase or the chain itself
+        has them — everything here is a public claim the validator made, the
+        same as what Keplr's validator page draws on. Neither is guaranteed to
+        exist: `details` is a free-text field nobody is required to fill in,
+        and a social link needs a Keybase identity that resolves at all.
+      */}
+      {validator.details || validator.website || (profile?.socials.length ?? 0) > 0 ? (
+        <div className="flex flex-col gap-3 border-b border-border pb-4">
+          {validator.details ? (
+            <p className="line-clamp-4 text-sm leading-relaxed text-text-muted">{validator.details}</p>
+          ) : null}
+
+          {validator.website || (profile?.socials.length ?? 0) > 0 ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {validator.website ? (
+                <a
+                  href={withScheme(validator.website)}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  title={validator.website}
+                  className="state-layer flex items-center gap-1.5 rounded-control px-2 py-1 text-sm text-text-muted"
+                >
+                  <Globe size={15} aria-hidden />
+                  {hostnameOf(validator.website)}
+                </a>
+              ) : null}
+
+              {profile?.socials.map((social) => (
+                <a
+                  key={social.url}
+                  href={social.url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  title={social.url}
+                  aria-label={`${validator.moniker} on ${social.type}`}
+                  className="state-layer flex size-8 items-center justify-center rounded-pill text-text-muted"
+                >
+                  {socialIcon(social.type)}
+                </a>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {state.kind === 'done' ? (
         <div className="flex flex-col gap-4">
           <p className="text-base">Sent.</p>
@@ -113,22 +212,53 @@ export default function StakeModal({
           </div>
 
           {mode === 'redelegate' ? (
-            <label className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2">
               <span className="text-base font-medium">To</span>
-              <select
-                value={destination}
-                onChange={(event) => setDestination(event.target.value)}
-                className="rounded-control border border-border bg-surface px-3 py-2.5 text-base outline-none"
+              {/*
+                A searchable dialog rather than a native `<select>`: a
+                moniker starting with an emoji — several validators on
+                secret-4 do this — renders inside a native dropdown at
+                whatever oversized size the OS gives emoji in a list box,
+                which on some platforms is most of the screen. This is the
+                same picker the "Stake" button up top uses.
+              */}
+              <button
+                type="button"
+                onClick={() => setPickingDestination(true)}
+                className="state-layer flex items-center gap-2.5 rounded-control border border-border bg-surface px-3 py-2.5 text-left"
               >
-                {validators
+                {destinationValidator ? (
+                  <ValidatorAvatar
+                    address={destinationValidator.address}
+                    moniker={destinationValidator.moniker}
+                    image={images?.get(destinationValidator.identity ?? '')}
+                    size={24}
+                  />
+                ) : null}
+                <span className="min-w-0 flex-1 truncate text-base">
+                  {destinationValidator
+                    ? `${destinationValidator.moniker} — ${(destinationValidator.commission * 100).toFixed(1)}%`
+                    : 'Choose a validator'}
+                </span>
+                <ChevronDown size={16} aria-hidden className="shrink-0 text-text-muted" />
+              </button>
+
+              <PickerDialog
+                open={pickingDestination}
+                onClose={() => setPickingDestination(false)}
+                label="Validator"
+                options={validators
                   .filter((v) => v.address !== validator.address)
-                  .map((v) => (
-                    <option key={v.address} value={v.address}>
-                      {v.moniker} — {(v.commission * 100).toFixed(1)}%
-                    </option>
-                  ))}
-              </select>
-            </label>
+                  .map((v) => ({
+                    id: v.address,
+                    label: v.moniker,
+                    detail: `${(v.commission * 100).toFixed(1)}% commission`,
+                    image: v.identity ? images?.get(v.identity) : undefined
+                  }))}
+                value={destination}
+                onChange={setDestination}
+              />
+            </div>
           ) : null}
 
           <label className="flex flex-col gap-2">

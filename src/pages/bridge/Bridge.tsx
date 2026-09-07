@@ -15,15 +15,15 @@ import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
 import AmountField from '@/components/ui/AmountField'
 import Picker from '@/components/ui/Picker'
-import { DECIMALS, DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
+import { DECIMALS, DISPLAY_DENOM, GAS, explorerTxUrl } from '@/chains/secret4'
 import { SOURCE_CHAINS, chainImageUrl, type SourceChain } from '@/chains/sources'
 import { depositGasLimit, sendDeposit, sendWithdraw, type Leg } from '@/lib/bridge'
 import { queryAllBalances } from '@/lib/bank'
 import { codeHashFor } from '@/lib/codeHash'
 import { fittingGasSliceUsd, quoteGasSlice, shouldOfferGas } from '@/lib/getGas'
-import { fromBaseUnits, toBaseUnits } from '@/lib/format'
+import { formatAmount, fromBaseUnits, toBaseUnits } from '@/lib/format'
 import { plainTransfer, wrapDepositMemo } from '@/lib/ibcMemo'
-import { MSG_TRANSFER } from '@/lib/msgTypes'
+import { MSG_EXECUTE_CONTRACT, MSG_TRANSFER } from '@/lib/msgTypes'
 import { fetchPrices } from '@/lib/prices'
 import { fetchSkipGasLeg, fetchSkipGasRoute, planSkipAddresses, type SkipGasRoute } from '@/lib/skipGo'
 import { cn } from '@/lib/cn'
@@ -38,7 +38,7 @@ import {
   tokensToChain,
   withdrawRoute
 } from '@/tokens/routes'
-import { tokenByAddress, tokenImageUrl } from '@/tokens/registry'
+import { SSCRT_ADDRESS, tokenByAddress, tokenImageUrl } from '@/tokens/registry'
 import { transactionsCovered, useFeePayer } from '@/store/feePayer'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
@@ -119,6 +119,20 @@ export default function Bridge() {
         : withdrawRoute(tokenAddress, chain.chainId)
       : undefined
 
+  // SCRT is the one token this bridge does not push toward privacy by
+  // default: it is the gas token, so landing it spendable and public is
+  // usually what someone actually wants. Everything else defaults toward the
+  // private form, on both legs of the trip.
+  const isScrtToken = tokenAddress === SSCRT_ADDRESS
+
+  // Wrap on arrival defaults on for anything that is not SCRT, and resets to
+  // that recommendation whenever the token changes — a choice someone made for
+  // AKT should not silently carry over to ATOM.
+  useEffect(() => {
+    setWrap(isScrtToken ? settings.autoWrapDeposits : true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resets on token identity, not on every settings change
+  }, [tokenAddress, isScrtToken])
+
   useEffect(() => {
     const ids = ['secret', token?.coingeckoId].filter((id): id is string => !!id)
     void fetchPrices(ids)
@@ -148,7 +162,25 @@ export default function Bridge() {
   }, [depositing, queryClient, secretAddress, status.kind])
 
   const decimals = token?.decimals ?? 6
-  const available = depositing ? source.balance : route ? (secretBank.get(route.denom) ?? '0') : undefined
+
+  /*
+   * A withdrawal draws on the *private* SNIP-20 balance and unwraps it in the
+   * same transaction as the transfer out — see `send()` below — so that is
+   * what "available" means here, not the public bank balance the token would
+   * otherwise sit in unnoticed. SCRT is the one exception: it is already
+   * public by default (see `isScrtToken` above), so its available amount is
+   * the bank balance it has always been.
+   */
+  const privateOutcome = tokenAddress ? balances.tokens.find((b) => b.token.address === tokenAddress)?.outcome : undefined
+  const privateBalance = privateOutcome?.status === 'ok' ? privateOutcome.amount : undefined
+
+  const available = depositing
+    ? source.balance
+    : !route
+      ? undefined
+      : isScrtToken
+        ? (secretBank.get(route.denom) ?? '0')
+        : privateBalance
 
   let amountBaseUnits = '0'
   let amountError: string | undefined
@@ -326,8 +358,24 @@ export default function Bridge() {
           gasLimit: depositGasLimit(chain, route, legs.length, wrap)
         })
         setStatus({ kind: 'done', hash: result.hash })
+        // The source side spends immediately; Secret's side only lands once the
+        // packet relays, which the periodic poll and the next visit both still
+        // catch, but there is no reason to wait on it for the half that already
+        // changed.
+        source.refresh()
+        balances.refresh()
       } else {
-        if (!signingClient || !source.address) return
+        if (!signingClient || !source.address || !queryClient) return
+
+        // Everything but SCRT withdraws from the private balance, unwrapped
+        // in the same transaction as the send — see `sendWithdraw`. The code
+        // hash is read live for the same reason it is on the deposit side: a
+        // stale one fails the execute outright rather than degrading.
+        const unwrap = isScrtToken
+          ? undefined
+          : { contract: token.address, codeHash: await codeHashFor(queryClient, token.address) }
+        const gasLimit = chain.withdrawGas + (unwrap ? GAS.unwrap : 0)
+        const msgTypes = unwrap ? [MSG_EXECUTE_CONTRACT, MSG_TRANSFER] : [MSG_TRANSFER]
 
         const result = await sendWithdraw({
           client: signingClient,
@@ -337,9 +385,16 @@ export default function Bridge() {
           denom: route.denom,
           amount: amountBaseUnits,
           channel: route.channel,
-          feeGranter: granterFor(chain.withdrawGas, [MSG_TRANSFER])
+          feeGranter: granterFor(gasLimit, msgTypes),
+          unwrap
         })
         setStatus({ kind: 'done', hash: result.hash })
+        // Unwrap-and-send changes both the private balance and the public one,
+        // and the source side gains a packet's worth once it relays — the
+        // `secretBank` effect already refetches on `status.kind`, this covers
+        // the rest.
+        balances.refresh()
+        source.refresh()
       }
     } catch (error) {
       setStatus({ kind: 'failed', message: error instanceof Error ? error.message : String(error) })
@@ -419,12 +474,38 @@ export default function Bridge() {
           available={available}
           decimals={decimals}
           error={amountError}
-          options={tokens.map((t) => ({
-            id: t.address,
-            label: t.symbol,
-            detail: t.description,
-            image: tokenImageUrl(t)
-          }))}
+          options={tokens.map((t) => {
+            // What each choice is worth before it is even selected — read from
+            // the one balance sweep already in hand (the source chain's full
+            // list when depositing, the private SNIP-20 balances and public
+            // bank balance when withdrawing) rather than a query per token.
+            const routeForToken = chain
+              ? depositing
+                ? depositRoute(t.address, chain.chainId)
+                : withdrawRoute(t.address, chain.chainId)
+              : undefined
+
+            const tokenOutcome = balances.tokens.find((b) => b.token.address === t.address)?.outcome
+            const held = depositing
+              ? routeForToken
+                ? source.balances.get(routeForToken.denom)
+                : undefined
+              : t.address === SSCRT_ADDRESS
+                ? routeForToken
+                  ? secretBank.get(routeForToken.denom)
+                  : undefined
+                : tokenOutcome?.status === 'ok'
+                  ? tokenOutcome.amount
+                  : undefined
+
+            return {
+              id: t.address,
+              label: t.symbol,
+              detail: t.description,
+              image: tokenImageUrl(t),
+              meta: held !== undefined ? formatAmount(held, { decimals: t.decimals }) : undefined
+            }
+          })}
           value={tokenAddress}
           onSelect={(id) => {
             setTokenAddress(id)
@@ -476,7 +557,7 @@ export default function Bridge() {
                   checked={wrap}
                   onChange={setWrap}
                   icon={<ShieldCheck size={16} aria-hidden className="text-accent" />}
-                  title="Wrap on arrival"
+                  title={isScrtToken ? 'Wrap on arrival' : 'Wrap on arrival (recommended)'}
                 >
                   Arrives as a private SNIP-20 instead of sitting on Secret in public. Costs a little more gas
                   on the source chain.
@@ -625,15 +706,15 @@ export default function Bridge() {
         ) : null}
 
         {/*
-          A withdrawal spends the bank denomination, so a token held wrapped is
-          invisible to it. Saying so where the zero appears beats leaving
-          someone to conclude their balance has gone.
+          SCRT is the one withdrawal that still spends the public bank balance
+          directly rather than unwrapping on the way out — see `isScrtToken`
+          above. A token held wrapped is invisible to that balance, so saying
+          so where the zero appears beats leaving someone to conclude their
+          SCRT has gone.
         */}
-        {!depositing && available === '0' && token ? (
+        {!depositing && isScrtToken && available === '0' && token ? (
           <p className="text-label text-text-faint">
-            This sends the public balance on Secret
-            {route && route.denom !== DENOM ? ', which is the voucher it arrived as' : ''}. If you hold{' '}
-            {token.symbol} wrapped,{' '}
+            This sends the public SCRT balance on Secret. If you hold it wrapped as {token.symbol},{' '}
             <button
               type="button"
               onClick={() => navigate('/wallet?panel=wrap')}
@@ -642,6 +723,17 @@ export default function Bridge() {
               unwrap it first
             </button>
             .
+          </p>
+        ) : null}
+
+        {/*
+          Every other withdrawal unwraps the private balance in the same
+          transaction as the send — the whole point being that nobody has to
+          separately remember to unwrap before bridging out.
+        */}
+        {!depositing && !isScrtToken && token ? (
+          <p className="text-label text-text-faint">
+            Unwraps your private {token.symbol} and sends it out in one transaction.
           </p>
         ) : null}
       </div>
