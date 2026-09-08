@@ -1,17 +1,17 @@
-import { ChevronDown, ExternalLink, Github, Globe, Linkedin, Twitter } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { ChevronDown, ExternalLink, Globe } from 'lucide-react'
+import { useState } from 'react'
 
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { PickerDialog } from '@/components/ui/Picker'
 import ValidatorAvatar from '@/pages/staking/components/ValidatorAvatar'
+import { hostnameOf, socialIcon, withScheme } from '@/pages/staking/components/validatorSocial'
 import { DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import type { ActionState } from '@/hooks/useStakingActions'
 import { useValidatorProfile } from '@/hooks/useValidatorProfile'
 import { formatAmount, fromBaseUnits, toBaseUnits } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { Delegation, Validator } from '@/lib/staking'
-import type { SocialLink } from '@/lib/validatorImage'
 
 type Mode = 'delegate' | 'undelegate' | 'redelegate'
 
@@ -33,36 +33,6 @@ interface Props {
   onDelegate: (amount: string) => void
   onUndelegate: (amount: string) => void
   onRedelegate: (toValidator: string, amount: string) => void
-}
-
-/** A URL for display: whatever a validator operator typed into `website` is
- *  not guaranteed to include a scheme, and the raw string is too long to sit
- *  next to an icon anyway. */
-function hostnameOf(url: string): string {
-  try {
-    return new URL(url.startsWith('http') ? url : `https://${url}`).hostname
-  } catch {
-    return url
-  }
-}
-
-function withScheme(url: string): string {
-  return url.startsWith('http') ? url : `https://${url}`
-}
-
-/** Keybase's own vocabulary for a proof type, not this app's — passed through
- *  for anything it doesn't have a specific icon for rather than hidden. */
-function socialIcon(type: SocialLink['type']): ReactNode {
-  switch (type) {
-    case 'twitter':
-      return <Twitter size={15} aria-hidden />
-    case 'github':
-      return <Github size={15} aria-hidden />
-    case 'linkedin':
-      return <Linkedin size={15} aria-hidden />
-    default:
-      return <Globe size={15} aria-hidden />
-  }
 }
 
 const MODES: Array<{ value: Mode; label: string }> = [

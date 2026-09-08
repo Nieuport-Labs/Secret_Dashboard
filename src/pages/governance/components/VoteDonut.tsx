@@ -1,13 +1,18 @@
 import { VOTE_COLORS, VOTE_ORDER } from '@/pages/governance/components/voteColors'
-import { VOTE_LABELS, type Tally } from '@/lib/governance'
+import { VOTE_LABELS, type Tally, type VoteOption } from '@/lib/governance'
 
 interface Props {
   tally: Tally
   size?: number
+  /** Controlled from outside so the same hover can dim the breakdown list
+   *  beside this ring and the validator chart below it. */
+  hovered?: VoteOption
+  onHover?: (option: VoteOption | undefined) => void
 }
 
 /**
- * The split as a ring, with whichever option leads named in the middle.
+ * The split as a ring, with whichever option leads named in the middle — or,
+ * while a segment is hovered, that option's own share instead.
  *
  * A ring rather than a pie because the hole is where the headline figure goes,
  * and that figure — "Yes 100%" — is the thing anyone actually reads off this.
@@ -16,7 +21,7 @@ interface Props {
  * with arc paths: the arithmetic is one circumference and a running offset,
  * which is far harder to get subtly wrong than four sets of arc endpoints.
  */
-export default function VoteDonut({ tally, size = 168 }: Props) {
+export default function VoteDonut({ tally, size = 168, hovered, onHover }: Props) {
   const cast = tally.yes + tally.abstain + tally.no + tally.veto
 
   const amounts: Record<(typeof VOTE_ORDER)[number], bigint> = {
@@ -46,6 +51,7 @@ export default function VoteDonut({ tally, size = 168 }: Props) {
   const leader = VOTE_ORDER.reduce((best, option) =>
     amounts[option] > amounts[best] ? option : best
   )
+  const centered = hovered ?? leader
 
   let offset = 0
 
@@ -74,14 +80,18 @@ export default function VoteDonut({ tally, size = 168 }: Props) {
               strokeWidth={stroke}
               strokeDasharray={dash}
               strokeDashoffset={-thisOffset}
+              opacity={hovered === undefined || hovered === option ? 1 : 0.3}
+              className="cursor-pointer transition-opacity duration-[var(--duration-short)] ease-[var(--ease-standard)]"
+              onPointerEnter={() => onHover?.(option)}
+              onPointerLeave={() => onHover?.(undefined)}
             />
           )
         })}
       </svg>
 
-      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-        <span className="text-label text-text-muted">{VOTE_LABELS[leader]}</span>
-        <span className="text-headline tabular-nums">{(share(amounts[leader]) * 100).toFixed(2)}%</span>
+      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+        <span className="text-label text-text-muted">{VOTE_LABELS[centered]}</span>
+        <span className="text-headline tabular-nums">{(share(amounts[centered]) * 100).toFixed(2)}%</span>
       </div>
     </div>
   )

@@ -1,8 +1,9 @@
-import { ArrowLeft, ChevronDown, ExternalLink, Landmark } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Landmark } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
+import CollapsibleSection from '@/components/ui/CollapsibleSection'
 import EmptyState from '@/components/ui/EmptyState'
 import StatusBadge from '@/pages/governance/components/StatusBadge'
 import ValidatorVoteMap from '@/pages/governance/components/ValidatorVoteMap'
@@ -17,7 +18,8 @@ import {
   evaluate,
   messageTypeLabel,
   timeRemaining,
-  type Tally
+  type Tally,
+  type VoteOption
 } from '@/lib/governance'
 import { useGovernanceActions } from '@/hooks/useGovernanceActions'
 import { useProposal } from '@/hooks/useProposal'
@@ -29,7 +31,9 @@ export default function ProposalDetail() {
   const navigate = useNavigate()
   const address = useWallet((state) => state.address)
 
-  const [detailsOpen, setDetailsOpen] = useState(true)
+  /** Shared between the donut, the breakdown list beside it and the
+   *  validator chart below — hovering one dims the rest of all three. */
+  const [hoveredOption, setHoveredOption] = useState<VoteOption | undefined>()
 
   const data = useProposal(id)
   const open = data.proposal?.status === 'PROPOSAL_STATUS_VOTING_PERIOD'
@@ -142,8 +146,7 @@ export default function ProposalDetail() {
             </div>
           </section>
 
-          <section className="flex flex-col gap-2.5">
-            <h2 className="text-title">Description</h2>
+          <CollapsibleSection title="Description">
             {/*
               The proposer's own text, rendered as plain text and nothing else.
               Anyone who can pay the deposit can put anything in here, and
@@ -159,51 +162,29 @@ export default function ProposalDetail() {
             ) : (
               <p className="text-base text-text-faint">This proposal has no description.</p>
             )}
-          </section>
+          </CollapsibleSection>
 
           {proposal.messages.length > 0 ? (
-            <section className="flex flex-col gap-2.5">
-              <button
-                type="button"
-                onClick={() => setDetailsOpen((shown) => !shown)}
-                aria-expanded={detailsOpen}
-                className="state-layer -mx-1.5 flex w-fit items-center gap-1.5 rounded-control px-1.5 py-0.5"
-              >
-                <h2 className="text-title">Details</h2>
-                <ChevronDown
-                  size={16}
-                  aria-hidden
-                  className={cn(
-                    'text-text-faint transition-transform duration-[var(--duration-short)] ease-[var(--ease-standard)]',
-                    detailsOpen && 'rotate-180'
-                  )}
-                />
-              </button>
-              {detailsOpen ? (
-                <>
-                  <p className="text-label text-text-faint">
-                    What this proposal executes if it passes.
-                  </p>
-                  {proposal.messages.map((message, index) => (
-                    <MessageFields key={index} message={message} />
-                  ))}
-                </>
-              ) : null}
-            </section>
+            <CollapsibleSection title="Details" description="What this proposal executes if it passes.">
+              {proposal.messages.map((message, index) => (
+                <MessageFields key={index} message={message} />
+              ))}
+            </CollapsibleSection>
           ) : null}
 
           {open ? (
-            <section className="flex flex-col gap-2.5">
-              <h2 className="text-title">Validator votes</h2>
-              <p className="text-label text-text-faint">
-                Every bonded validator, sized by voting power and coloured by how it voted.
-              </p>
+            <CollapsibleSection
+              title="Validator votes"
+              description="Validators that have voted so far, sized by their share of the network's voting power."
+            >
               <ValidatorVoteMap
                 votes={validatorVotes.votes}
+                bondedTokens={data.bondedTokens}
+                hoveredOption={hoveredOption}
                 loading={validatorVotes.loading}
                 error={validatorVotes.error}
               />
-            </section>
+            </CollapsibleSection>
           ) : null}
         </div>
 
@@ -211,7 +192,7 @@ export default function ProposalDetail() {
           <section className="card flex flex-col items-center gap-4 p-5">
             <h2 className="self-start text-title">Vote details</h2>
 
-            <VoteDonut tally={tally} />
+            <VoteDonut tally={tally} hovered={hoveredOption} onHover={setHoveredOption} />
 
             {outcome ? (
               <div className="flex flex-wrap justify-center gap-2">
@@ -244,7 +225,15 @@ export default function ProposalDetail() {
 
             <dl className="grid w-full grid-cols-2 gap-x-4 gap-y-3">
               {VOTE_ORDER.map((option) => (
-                <div key={option} className="min-w-0">
+                <div
+                  key={option}
+                  onPointerEnter={() => setHoveredOption(option)}
+                  onPointerLeave={() => setHoveredOption(undefined)}
+                  className={cn(
+                    'min-w-0 cursor-default transition-opacity duration-[var(--duration-short)] ease-[var(--ease-standard)]',
+                    hoveredOption !== undefined && hoveredOption !== option && 'opacity-30'
+                  )}
+                >
                   <dt className="flex items-center gap-1.5 text-label text-text-muted">
                     <span
                       aria-hidden

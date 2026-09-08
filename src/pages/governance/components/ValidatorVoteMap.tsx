@@ -1,38 +1,62 @@
+import { useState } from 'react'
+
 import type { ValidatorVote } from '@/hooks/useValidatorVotes'
+import { useBalances } from '@/hooks/useBalances'
+import { useStaking } from '@/hooks/useStaking'
+import { useStakingActions } from '@/hooks/useStakingActions'
+import { useValidatorImages } from '@/hooks/useValidatorImages'
+import StakeModal from '@/pages/staking/components/StakeModal'
+import ValidatorAvatar from '@/pages/staking/components/ValidatorAvatar'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { formatDisplayAmount } from '@/lib/format'
-import { VOTE_LABELS } from '@/lib/governance'
+import { VOTE_LABELS, type VoteOption } from '@/lib/governance'
+import { shareOfBonded, type Validator } from '@/lib/staking'
 import { squarify } from '@/lib/treemap'
-import { VOTE_COLORS, VOTE_ORDER } from '@/pages/governance/components/voteColors'
+import { VOTE_COLORS } from '@/pages/governance/components/voteColors'
 
 interface Props {
   votes: ValidatorVote[]
+  /** Everything bonded network-wide, in base units — the whole a validator's
+   *  share is measured against. */
+  bondedTokens: bigint
+  /** Hovered from the vote breakdown beside this chart, so hovering "Yes"
+   *  there highlights every "Yes" validator here without touching this
+   *  chart's own per-tile hover. */
+  hoveredOption?: VoteOption
   loading?: boolean
   error?: string
 }
 
-/*
- * A virtual canvas, not pixels: `squarify` only needs an aspect ratio to
- * decide how square each tile comes out, and every tile below is positioned
- * in percent of it — so the layout holds however wide the real column ends up.
- * The ratio is roughly this section's own at the two-column breakpoint.
- */
 const CANVAS_WIDTH = 720
-const CANVAS_HEIGHT = 220
+const CANVAS_HEIGHT = 300
 
 /**
- * Every bonded validator, sized by voting power and coloured by how it voted
- * — grey for one that has not.
+ * Every validator that has voted so far, as a squarified treemap: area is
+ * each validator's share of everything bonded, colour is how it voted.
+ * Validators that have not voted yet are left out entirely rather than drawn
+ * grey — the one thing this chart answers is who has moved so far, and on a
+ * proposal early in its voting period forty near-silent tiles buried that
+ * under noise.
  *
- * A treemap rather than a list: with 40-plus validators spanning three orders
- * of magnitude of stake, a list either sorts by power (and buries who voted
- * which way) or by vote (and buries how much of the chain that represents).
- * Tile area answers both at once.
+ * Clicking a tile opens the same stake/unstake/move panel the staking page
+ * does — seeing how a validator voted is exactly the moment someone might
+ * want to move their stake toward or away from them, so that flow is wired
+ * in here rather than only linking out to the staking page.
  */
-export default function ValidatorVoteMap({ votes, loading, error }: Props) {
-  const bonded = votes
-    .filter((v) => BigInt(v.validator.tokens) > 0n)
-    .sort((a, b) => (BigInt(b.validator.tokens) > BigInt(a.validator.tokens) ? 1 : -1))
+export default function ValidatorVoteMap({ votes, bondedTokens, hoveredOption, loading, error }: Props) {
+  const [hovered, setHovered] = useState<string | undefined>()
+  const [selected, setSelected] = useState<Validator | undefined>()
+
+  const staking = useStaking()
+  const balances = useBalances(undefined)
+  const actions = useStakingActions(() => staking.refresh())
+  const images = useValidatorImages(staking.validators)
+
+  /** A tile dims when either hover source picks out someone else — its own
+   *  hover, or the vote-breakdown's per-option one. */
+  const dimmed = (validator: { address: string }, option: VoteOption | undefined) =>
+    (hovered !== undefined && hovered !== validator.address) ||
+    (hoveredOption !== undefined && hoveredOption !== option)
 
   if (error) {
     return (
@@ -42,21 +66,28 @@ export default function ValidatorVoteMap({ votes, loading, error }: Props) {
     )
   }
 
-  if (bonded.length === 0) {
+  const cast = votes
+    .filter((v) => v.option && BigInt(v.validator.tokens) > 0n)
+    .sort((a, b) => (BigInt(b.validator.tokens) > BigInt(a.validator.tokens) ? 1 : -1))
+
+  if (cast.length === 0) {
     if (loading) {
       return (
         <div
-          className="w-full animate-pulse rounded-control bg-surface"
+          className="w-full animate-pulse rounded-card bg-surface"
           style={{ aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}` }}
           aria-busy
         />
       )
     }
-    return <p className="text-label text-text-faint">No bonded validators to show.</p>
+    return <p className="text-label text-text-faint">No votes yet.</p>
   }
 
+  const total = bondedTokens > 0n ? Number(bondedTokens) : cast.reduce((sum, v) => sum + Number(v.validator.tokens), 0)
+  const share = (tokens: string) => (total > 0 ? (Number(tokens) / total) * 100 : 0)
+
   const rects = squarify(
-    bonded.map((v) => Number(v.validator.tokens)),
+    cast.map(({ validator }) => Number(validator.tokens)),
     CANVAS_WIDTH,
     CANVAS_HEIGHT
   )
@@ -64,68 +95,80 @@ export default function ValidatorVoteMap({ votes, loading, error }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <div
-        className="relative w-full overflow-hidden rounded-control"
+        className="relative w-full overflow-hidden rounded-card"
+        role="img"
         style={{ aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}` }}
+        aria-label={`Validators that have voted so far: ${cast
+          .map(({ validator, option }) => `${validator.moniker} ${VOTE_LABELS[option!]} ${share(validator.tokens).toFixed(2)}%`)
+          .join(', ')}.`}
       >
-        {bonded.map(({ validator, option }, index) => {
+        {cast.map(({ validator, option }, index) => {
           const rect = rects[index]
           if (!rect) return null
 
-          const label = option
-            ? `${validator.moniker} — ${VOTE_LABELS[option]}`
-            : `${validator.moniker} — has not voted`
-          const showLabel = rect.width >= 56 && rect.height >= 22
+          const showAvatar = rect.width >= 32 && rect.height >= 32
+          const showLabel = rect.width >= 80 && rect.height >= 40
 
           return (
-            <div
+            <button
               key={validator.address}
-              title={`${label} (${formatDisplayAmount(validator.tokens)} ${DISPLAY_DENOM})`}
-              className={
-                option
-                  ? 'absolute flex items-center justify-center overflow-hidden border border-bg p-1 text-center'
-                  : 'absolute flex items-center justify-center overflow-hidden border border-bg bg-surface-3 p-1 text-center'
-              }
+              type="button"
+              onClick={() => setSelected(validator)}
+              onPointerEnter={() => setHovered(validator.address)}
+              onPointerLeave={() => setHovered(undefined)}
               style={{
                 left: `${(rect.x / CANVAS_WIDTH) * 100}%`,
                 top: `${(rect.y / CANVAS_HEIGHT) * 100}%`,
                 width: `${(rect.width / CANVAS_WIDTH) * 100}%`,
                 height: `${(rect.height / CANVAS_HEIGHT) * 100}%`,
-                backgroundColor: option ? VOTE_COLORS[option] : undefined
+                backgroundColor: VOTE_COLORS[option!],
+                border: '1px solid var(--color-bg)',
+                opacity: dimmed(validator, option) ? 0.3 : 1
               }}
+              className="absolute flex cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden p-1 transition-opacity duration-[var(--duration-short)] ease-[var(--ease-standard)]"
+              title={`${validator.moniker} — ${VOTE_LABELS[option!]} (${formatDisplayAmount(validator.tokens)} ${DISPLAY_DENOM}, ${share(validator.tokens).toFixed(2)}% of voting power)`}
             >
+              {showAvatar ? (
+                <ValidatorAvatar
+                  address={validator.address}
+                  moniker={validator.moniker}
+                  image={validator.identity ? images.get(validator.identity) : undefined}
+                  size={showLabel ? 32 : 22}
+                />
+              ) : null}
               {showLabel ? (
                 <span
-                  className={
-                    option
-                      ? 'truncate px-1 text-xs font-medium text-white'
-                      : 'truncate px-1 text-xs font-medium text-text-faint'
-                  }
-                  style={option ? { textShadow: '0 1px 2px rgb(0 0 0 / 0.45)' } : undefined}
+                  className="max-w-full truncate px-1 text-xs font-medium text-white"
+                  style={{ textShadow: '0 1px 2px rgb(0 0 0 / 0.45)' }}
                 >
                   {validator.moniker}
                 </span>
               ) : null}
-            </div>
+            </button>
           )
         })}
       </div>
 
-      <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-label text-text-muted">
-        {VOTE_ORDER.map((option) => (
-          <span key={option} className="inline-flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="size-2.5 rounded-pill"
-              style={{ backgroundColor: VOTE_COLORS[option] }}
-            />
-            {VOTE_LABELS[option]}
-          </span>
-        ))}
-        <span className="inline-flex items-center gap-1.5">
-          <span aria-hidden className="size-2.5 rounded-pill bg-surface-3" />
-          Not voted
-        </span>
-      </div>
+      {selected ? (
+        <StakeModal
+          validator={selected}
+          validators={staking.validators}
+          delegation={staking.delegations.get(selected.address)}
+          image={selected.identity ? images.get(selected.identity) : undefined}
+          images={images}
+          networkShare={shareOfBonded(selected, bondedTokens)}
+          available={balances.native}
+          unbondingSeconds={staking.unbondingSeconds}
+          state={actions.state}
+          onClose={() => {
+            setSelected(undefined)
+            actions.reset()
+          }}
+          onDelegate={(amount) => void actions.delegate(selected.address, amount)}
+          onUndelegate={(amount) => void actions.undelegate(selected.address, amount)}
+          onRedelegate={(to, amount) => void actions.redelegate(selected.address, to, amount)}
+        />
+      ) : null}
     </div>
   )
 }
