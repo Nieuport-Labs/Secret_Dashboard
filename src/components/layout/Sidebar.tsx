@@ -42,7 +42,7 @@ export default function Sidebar() {
       </NavLink>
 
       <ul className="contents lg:flex lg:flex-col lg:gap-0.5">
-        {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+        {NAV_ITEMS.map(({ to, label, short, icon: Icon }) => (
           <li key={to} className="min-w-0 flex-1 lg:flex-none">
             <NavLink
               to={to}
@@ -76,7 +76,17 @@ export default function Sidebar() {
                         not inherit a font size that happens to be nearby. */}
                     <Icon size={18} strokeWidth={1.75} aria-hidden />
                   </span>
-                  <span className="w-full truncate text-center text-[10px] leading-none lg:w-auto lg:text-left lg:text-base lg:leading-normal">
+                  {/*
+                    Two spans rather than one, because the two layouts do not
+                    want the same words. The bar gets `short` where a
+                    destination has one — a seventh item took each cell down to
+                    roughly fifty pixels, which is under what "Governance" needs
+                    — while the rail always spells the destination out in full.
+                  */}
+                  <span className="w-full truncate text-center text-[10px] leading-none lg:hidden">
+                    {short ?? label}
+                  </span>
+                  <span className="hidden lg:block lg:w-auto lg:text-left lg:text-base lg:leading-normal">
                     {label}
                   </span>
                 </>

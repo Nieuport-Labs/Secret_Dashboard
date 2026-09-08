@@ -16,6 +16,7 @@ import { handleAccountChange, lastUsedWallet, useWallet } from '@/store/wallet'
  */
 const Bridge = lazy(() => import('@/pages/bridge/Bridge'))
 const Staking = lazy(() => import('@/pages/staking/Staking'))
+const Governance = lazy(() => import('@/pages/governance/Governance'))
 const Ecosystem = lazy(() => import('@/pages/ecosystem/Ecosystem'))
 const Network = lazy(() => import('@/pages/network/Network'))
 const Powertools = lazy(() => import('@/pages/powertools/Powertools'))
@@ -68,6 +69,14 @@ export default function App() {
           element={
             <Suspense fallback={<p className="text-base text-text-muted">Loading staking…</p>}>
               <Staking />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/governance"
+          element={
+            <Suspense fallback={<p className="text-base text-text-muted">Loading governance…</p>}>
+              <Governance />
             </Suspense>
           }
         />

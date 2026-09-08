@@ -45,6 +45,8 @@ export const GAS = {
   /** Per validator, added on top of a base. */
   setAutoRestake: 60_000,
   ibcTransfer: 150_000,
+  /** A vote writes one record and re-reads the voter's delegations to weight it. */
+  vote: 120_000,
   /** Vault execute plus the grant it issues (and a revoke when topping up). */
   buyGasCredit: 400_000,
   grantAllowance: 100_000,

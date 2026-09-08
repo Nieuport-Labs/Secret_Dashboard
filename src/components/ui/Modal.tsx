@@ -43,13 +43,32 @@ export default function Modal({ open, onClose, title, description, icon, childre
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="glass-panel relative flex w-full max-w-[420px] flex-col gap-5 rounded-card p-5 outline-none motion-safe:animate-[modal-in_var(--duration-medium)_var(--ease-emphasised)]"
+        /*
+          Never taller than the screen it is on. Without the cap a dialog with
+          a lot in it grows past the viewport and loses its heading off the top
+          and its primary button off the bottom — the two parts it cannot
+          afford to lose. `dvh` rather than `vh` so a mobile browser's
+          retracting toolbar does not cut it off anyway, and the 2rem is the
+          padding on the wrapper this sits in.
+
+          `overflow-y-auto` is the fallback for a dialog whose content does not
+          manage its own scrolling; one that does (a `min-h-0 flex-1` child)
+          keeps this outer box from ever needing to scroll.
+        */
+        className="glass-panel relative flex max-h-[calc(100dvh-2rem)] w-full max-w-[420px] flex-col gap-5 overflow-y-auto rounded-card p-5 outline-none motion-safe:animate-[modal-in_var(--duration-medium)_var(--ease-emphasised)]"
       >
-        <div className="flex items-start justify-between gap-4">
+        {/* Never squeezed by a tall body — the heading is the dialog's label. */}
+        <div className="flex shrink-0 items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
             {icon}
             <div className="min-w-0">
-              <h2 className="truncate text-headline">{title}</h2>
+              {/*
+                Wraps rather than truncates. A dialog's heading is the one piece
+                of text on it that has to be read in full — a governance
+                proposal's title runs to a sentence, and an ellipsis there hides
+                the thing being decided on.
+              */}
+              <h2 className="text-balance break-words text-headline">{title}</h2>
               {description ? <p className="mt-1 text-base text-text-muted">{description}</p> : null}
             </div>
           </div>
