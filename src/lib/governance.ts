@@ -201,6 +201,45 @@ export async function queryMyVote(
 }
 
 /**
+ * Every individual vote cast on a proposal, voter account address to option.
+ *
+ * Only meaningful while the proposal is still open: the chain prunes votes
+ * once it tallies one, the same reason `queryMyVote` only ever asks about a
+ * proposal that hasn't closed yet. A weighted vote's options are collapsed to
+ * the first — split-weight votes are rare enough on secret-4 not to be worth
+ * a stacked-vote chart of their own.
+ */
+export async function queryProposalVotes(
+  client: SecretNetworkClient,
+  id: string
+): Promise<Map<string, VoteOption>> {
+  const votes = new Map<string, VoteOption>()
+  let key: Uint8Array | undefined
+
+  // A page per iteration, capped well above anything a single proposal's
+  // ballot has ever needed — a safety net against a paginated query looping
+  // forever, not a real limit.
+  for (let page = 0; page < 25; page++) {
+    const response = await client.query.gov.votes({
+      proposal_id: id,
+      pagination: { limit: '200', key }
+    })
+
+    for (const vote of response.votes ?? []) {
+      const option = vote.options?.[0]?.option
+      if (vote.voter && option) {
+        votes.set(vote.voter, String(option).replace('VOTE_OPTION_', '') as VoteOption)
+      }
+    }
+
+    key = response.pagination?.next_key
+    if (!key || key.length === 0) break
+  }
+
+  return votes
+}
+
+/**
  * Quorum, thresholds and the deposit floor.
  *
  * One request: `params_type` is a legacy selector that splits the answer into

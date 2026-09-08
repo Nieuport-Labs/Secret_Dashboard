@@ -1,13 +1,16 @@
-import { ArrowLeft, ExternalLink, Landmark } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ExternalLink, Landmark } from 'lucide-react'
+import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
 import StatusBadge from '@/pages/governance/components/StatusBadge'
+import ValidatorVoteMap from '@/pages/governance/components/ValidatorVoteMap'
 import VoteDonut from '@/pages/governance/components/VoteDonut'
 import VotePanel from '@/pages/governance/components/VotePanel'
 import { VOTE_COLORS, VOTE_ORDER } from '@/pages/governance/components/voteColors'
 import { DISPLAY_DENOM, explorerAccountUrl } from '@/chains/secret4'
+import { cn } from '@/lib/cn'
 import { formatDisplayAmount, shortenAddress } from '@/lib/format'
 import {
   VOTE_LABELS,
@@ -18,6 +21,7 @@ import {
 } from '@/lib/governance'
 import { useGovernanceActions } from '@/hooks/useGovernanceActions'
 import { useProposal } from '@/hooks/useProposal'
+import { useValidatorVotes } from '@/hooks/useValidatorVotes'
 import { useWallet } from '@/store/wallet'
 
 export default function ProposalDetail() {
@@ -25,13 +29,25 @@ export default function ProposalDetail() {
   const navigate = useNavigate()
   const address = useWallet((state) => state.address)
 
+  const [detailsOpen, setDetailsOpen] = useState(true)
+
   const data = useProposal(id)
+  const open = data.proposal?.status === 'PROPOSAL_STATUS_VOTING_PERIOD'
+  /*
+   * Individual votes are chain state the same as the tally, and are pruned
+   * the moment a proposal is tallied — so this only ever asks while `open`,
+   * same as the live tally above it.
+   */
+  const validatorVotes = useValidatorVotes(id, open)
   /*
    * Re-reading after a vote rather than patching the tally locally: it moves by
    * the voter's whole delegated stake, and guessing that number on the client
    * would show a figure the chain never agreed to.
    */
-  const actions = useGovernanceActions(() => data.refresh())
+  const actions = useGovernanceActions(() => {
+    data.refresh()
+    validatorVotes.refresh()
+  })
 
   if (data.notFound) {
     return (
@@ -63,7 +79,6 @@ export default function ProposalDetail() {
   }
 
   const proposal = data.proposal
-  const open = proposal.status === 'PROPOSAL_STATUS_VOTING_PERIOD'
   const tally: Tally = (open ? data.tally : proposal.finalTally) ?? proposal.finalTally
   const outcome = data.params
     ? evaluate(tally, data.bondedTokens, data.params, proposal.expedited)
@@ -148,13 +163,46 @@ export default function ProposalDetail() {
 
           {proposal.messages.length > 0 ? (
             <section className="flex flex-col gap-2.5">
-              <h2 className="text-title">Details</h2>
+              <button
+                type="button"
+                onClick={() => setDetailsOpen((shown) => !shown)}
+                aria-expanded={detailsOpen}
+                className="state-layer -mx-1.5 flex w-fit items-center gap-1.5 rounded-control px-1.5 py-0.5"
+              >
+                <h2 className="text-title">Details</h2>
+                <ChevronDown
+                  size={16}
+                  aria-hidden
+                  className={cn(
+                    'text-text-faint transition-transform duration-[var(--duration-short)] ease-[var(--ease-standard)]',
+                    detailsOpen && 'rotate-180'
+                  )}
+                />
+              </button>
+              {detailsOpen ? (
+                <>
+                  <p className="text-label text-text-faint">
+                    What this proposal executes if it passes.
+                  </p>
+                  {proposal.messages.map((message, index) => (
+                    <MessageFields key={index} message={message} />
+                  ))}
+                </>
+              ) : null}
+            </section>
+          ) : null}
+
+          {open ? (
+            <section className="flex flex-col gap-2.5">
+              <h2 className="text-title">Validator votes</h2>
               <p className="text-label text-text-faint">
-                What this proposal executes if it passes.
+                Every bonded validator, sized by voting power and coloured by how it voted.
               </p>
-              {proposal.messages.map((message, index) => (
-                <MessageFields key={index} message={message} />
-              ))}
+              <ValidatorVoteMap
+                votes={validatorVotes.votes}
+                loading={validatorVotes.loading}
+                error={validatorVotes.error}
+              />
             </section>
           ) : null}
         </div>
