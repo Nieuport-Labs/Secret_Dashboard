@@ -23,13 +23,16 @@ import { ImageResponse } from '@vercel/og'
  * latency-sensitive the way `middleware.ts` treats a real visitor's page
  * load.
  *
- * Exported as `GET`, not a bare default — Vercel's current Web Handler
- * contract for a plain (non-framework) `api/*` file. A default-exported
- * `handler(request)` is the older Node-specific shape, and this project's
- * `.tsx` entry landed on a build path that emitted literal `import` syntax
- * into the deployed `.js` without marking it as a module, which Node then
- * refused to load at all. The named `GET` export takes the documented route
- * instead of fighting that bundling quirk.
+ * `.mts`, not `.tsx`, and no JSX. Vercel's Node builder kept emitting this
+ * function's compiled `.js` with the literal `import` syntax still in it but
+ * no `"type": "module"` anywhere Node would find it — a bundling mismatch
+ * specific to this project that a sibling `package.json` and a differently
+ * named export both failed to change. `.mts` is unambiguous to both
+ * TypeScript and Node — it compiles to an ES module full stop, no detection
+ * involved — which is what finally sidesteps it. TypeScript does not allow
+ * JSX in a `.mts` file, so the element tree below is built with a small `h()`
+ * helper instead of markup; `ImageResponse` (via satori) only ever needed a
+ * plain `{ type, props }` tree, which is all JSX compiled down to anyway.
  *
  * Self-contained otherwise. This bundles by itself, separately from Vite —
  * the `@/` path aliases the rest of the app uses do not resolve here, so the
@@ -38,6 +41,17 @@ import { ImageResponse } from '@vercel/og'
  * `src/lib/governance.ts` and `src/lib/identicon.ts` for the source of truth
  * if either ever drifts.
  */
+
+interface VNode {
+  type: string
+  props: Record<string, unknown>
+}
+
+/** Builds the same `{ type, props: { children, ... } }` shape JSX compiles to. */
+function h(type: string, props: Record<string, unknown> = {}, ...children: unknown[]): VNode {
+  const flat = children.flat(Infinity as 1).filter((child) => child !== null && child !== undefined && child !== false)
+  return { type, props: { ...props, children: flat.length === 1 ? flat[0] : flat } }
+}
 
 const BG = '#080808'
 const TEXT = '#ffffff'
@@ -124,49 +138,57 @@ export async function GET(request: Request) {
     subtitle = 'Wallet, bridge, staking and the Secret dApp ecosystem'
   }
 
-  return new ImageResponse(
-    (
-      <div
-        style={{
-          height: '100%',
-          width: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          backgroundColor: BG,
-          fontFamily: 'Inter',
-          padding: '72px',
-          position: 'relative'
-        }}
-      >
-        {/* A quiet wash of brand colour in the corner — the one flourish, kept
-            behind everything else so it reads as light rather than a shape. */}
-        <div
-          style={{
-            position: 'absolute',
-            top: -260,
-            right: -220,
-            width: 640,
-            height: 640,
-            borderRadius: 9999,
-            display: 'flex',
-            background: `radial-gradient(circle, ${ACCENT}33 0%, ${ACCENT}00 70%)`
-          }}
-        />
+  const tree = h(
+    'div',
+    {
+      style: {
+        height: '100%',
+        width: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        backgroundColor: BG,
+        fontFamily: 'Inter',
+        padding: '72px',
+        position: 'relative'
+      }
+    },
+    // A quiet wash of brand colour in the corner — the one flourish, kept
+    // behind everything else so it reads as light rather than a shape.
+    h('div', {
+      style: {
+        position: 'absolute',
+        top: -260,
+        right: -220,
+        width: 640,
+        height: 640,
+        borderRadius: 9999,
+        display: 'flex',
+        background: `radial-gradient(circle, ${ACCENT}33 0%, ${ACCENT}00 70%)`
+      }
+    }),
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <svg width="34" height="35" viewBox="0 0 48.2143 50" fill="none">
-            <path d={LOGO_PATH} fill={ACCENT} />
-          </svg>
-          <span style={{ fontSize: 26, fontWeight: 700, color: TEXT, letterSpacing: -0.5 }}>
-            Secret Dashboard
-          </span>
-        </div>
+    h(
+      'div',
+      { style: { display: 'flex', alignItems: 'center', gap: 16 } },
+      h(
+        'svg',
+        { width: '34', height: '35', viewBox: '0 0 48.2143 50', fill: 'none' },
+        h('path', { d: LOGO_PATH, fill: ACCENT })
+      ),
+      h(
+        'span',
+        { style: { fontSize: 26, fontWeight: 700, color: TEXT, letterSpacing: -0.5 } },
+        'Secret Dashboard'
+      )
+    ),
 
-        <div style={{ display: 'flex', flex: 1 }} />
+    h('div', { style: { display: 'flex', flex: 1 } }),
 
-        {avatar ? (
-          <div
-            style={{
+    avatar
+      ? h(
+          'div',
+          {
+            style: {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -178,16 +200,20 @@ export async function GET(request: Request) {
               fontWeight: 700,
               color: TEXT,
               background: `linear-gradient(140deg, hsl(${avatar.hue} 62% 38%), hsl(${(avatar.hue + 40) % 360} 58% 22%))`
-            }}
-          >
-            {avatar.initial}
-          </div>
-        ) : null}
+            }
+          },
+          avatar.initial
+        )
+      : null,
 
-        {eyebrow ? (
-          <div style={{ display: 'flex', marginBottom: 22 }}>
-            <span
-              style={{
+    eyebrow
+      ? h(
+          'div',
+          { style: { display: 'flex', marginBottom: 22 } },
+          h(
+            'span',
+            {
+              style: {
                 display: 'flex',
                 alignItems: 'center',
                 fontSize: 22,
@@ -196,56 +222,60 @@ export async function GET(request: Request) {
                 backgroundColor: `${eyebrow.color}29`,
                 padding: '8px 20px',
                 borderRadius: 9999
-              }}
-            >
-              {eyebrow.label}
-            </span>
-          </div>
-        ) : null}
+              }
+            },
+            eyebrow.label
+          )
+        )
+      : null,
 
-        <div
-          style={{
-            display: 'flex',
-            fontSize: kind === 'profile' ? 56 : 58,
-            fontWeight: 700,
-            lineHeight: 1.15,
-            letterSpacing: -1.5,
-            color: TEXT,
-            maxWidth: 1000,
-            // Would read better in a monospace face for an address, but
-            // satori only knows the families handed to it in `fonts` below —
-            // asking for one that isn't there risks the whole image failing
-            // to render, which is a worse outcome than a proportional font.
-            fontFamily: 'Inter'
-          }}
-        >
-          {title}
-        </div>
-
-        <div style={{ display: 'flex', marginTop: 20, fontSize: 26, color: TEXT_MUTED, maxWidth: 920 }}>
-          {subtitle}
-        </div>
-
-        <div style={{ display: 'flex', flex: 1 }} />
-
-        <div style={{ display: 'flex', height: 1, backgroundColor: BORDER, marginBottom: 28 }} />
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 20, color: TEXT_FAINT }}>
-          {/* The real host of whatever domain this is being served from —
-              never a hardcoded guess, so a custom domain later needs no
-              change here. */}
-          <span style={{ display: 'flex' }}>{url.hostname}</span>
-          <span style={{ display: 'flex' }}>Secret Network</span>
-        </div>
-      </div>
+    h(
+      'div',
+      {
+        style: {
+          display: 'flex',
+          fontSize: kind === 'profile' ? 56 : 58,
+          fontWeight: 700,
+          lineHeight: 1.15,
+          letterSpacing: -1.5,
+          color: TEXT,
+          maxWidth: 1000,
+          // Would read better in a monospace face for an address, but satori
+          // only knows the families handed to it in `fonts` below — asking
+          // for one that isn't there risks the whole image failing to
+          // render, which is a worse outcome than a proportional font.
+          fontFamily: 'Inter'
+        }
+      },
+      title
     ),
-    {
-      width: 1200,
-      height: 630,
-      fonts: [
-        { name: 'Inter', data: regular, weight: 400, style: 'normal' },
-        { name: 'Inter', data: bold, weight: 700, style: 'normal' }
-      ]
-    }
+
+    h(
+      'div',
+      { style: { display: 'flex', marginTop: 20, fontSize: 26, color: TEXT_MUTED, maxWidth: 920 } },
+      subtitle
+    ),
+
+    h('div', { style: { display: 'flex', flex: 1 } }),
+
+    h('div', { style: { display: 'flex', height: 1, backgroundColor: BORDER, marginBottom: 28 } }),
+
+    h(
+      'div',
+      { style: { display: 'flex', justifyContent: 'space-between', fontSize: 20, color: TEXT_FAINT } },
+      // The real host of whatever domain this is being served from — never a
+      // hardcoded guess, so a custom domain later needs no change here.
+      h('span', { style: { display: 'flex' } }, url.hostname),
+      h('span', { style: { display: 'flex' } }, 'Secret Network')
+    )
   )
+
+  return new ImageResponse(tree as never, {
+    width: 1200,
+    height: 630,
+    fonts: [
+      { name: 'Inter', data: regular, weight: 400, style: 'normal' },
+      { name: 'Inter', data: bold, weight: 700, style: 'normal' }
+    ]
+  })
 }
