@@ -9,6 +9,31 @@
       name="description"
       content="An entry point into Secret Network — wallet, bridge, staking and the Secret dApp ecosystem."
     />
+
+    <!--
+      Link previews. Static, and therefore the same card for every URL in the
+      app: a crawler does not run the SPA, so nothing set from React can reach
+      it. A profile link shared to Twitter or Discord will show this card rather
+      than the address it points at — naming the address would need a server
+      rendering per-URL tags, which this app deliberately does not have.
+
+      No og:image yet. The tag is omitted rather than pointed at the favicon,
+      because an SVG is not rendered by most platforms and a broken image is
+      worse than a text card.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Secret Dashboard" />
+    <meta property="og:title" content="Secret Dashboard" />
+    <meta
+      property="og:description"
+      content="An entry point into Secret Network — wallet, bridge, staking and the Secret dApp ecosystem."
+    />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Secret Dashboard" />
+    <meta
+      name="twitter:description"
+      content="An entry point into Secret Network — wallet, bridge, staking and the Secret dApp ecosystem."
+    />
   </head>
   <body>
     <div id="root"></div>

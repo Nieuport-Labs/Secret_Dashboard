@@ -1,11 +1,12 @@
 import { CheckCircle2, ExternalLink, Eye, ShieldCheck } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 
 import AmountField from '@/components/ui/AmountField'
 import Button from '@/components/ui/Button'
 import Drawer from '@/components/ui/Drawer'
 import { DECIMALS, DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import { isValidBech32 } from '@/lib/bech32'
+import { cn } from '@/lib/cn'
 import { toBaseUnits } from '@/lib/format'
 import type { Balances } from '@/hooks/useBalances'
 import { useWalletActions } from '@/hooks/useWalletActions'
@@ -17,6 +18,17 @@ interface Props {
   balances: Balances
   /** Preselected by the row the send was started from. */
   asset?: string
+  /** Prefilled recipient — a donation opened from someone's profile. */
+  recipient?: string
+  /**
+   * The recipient cannot be edited.
+   *
+   * For a donation, where the page already established who is being paid.
+   * Letting it be typed over would turn "give this person something" into a
+   * general send form that happens to start on the right address, and the one
+   * mistake worth designing out here is paying the wrong account.
+   */
+  recipientLocked?: boolean
   /** Called once a transaction lands, so every list of this account refreshes. */
   onDone: () => void
 }
@@ -47,24 +59,33 @@ interface Sendable {
  * not. That is the reason most of these tokens exist, so the form says which
  * one is about to happen.
  */
-export default function SendPanel({ open, onClose, balances, asset, onDone }: Props) {
+export default function SendPanel({
+  open,
+  onClose,
+  balances,
+  asset,
+  recipient: prefilled,
+  recipientLocked = false,
+  onDone
+}: Props) {
   const actions = useWalletActions(onDone)
+  const lockedNoteId = useId()
 
   const [assetId, setAssetId] = useState(NATIVE_ID)
-  const [recipient, setRecipient] = useState('')
+  const [recipient, setRecipient] = useState(prefilled ?? '')
   const [amount, setAmount] = useState('')
 
   // A panel that reopens showing the last transfer's receipt is a panel that
   // looks like it is about to send it again.
   useEffect(() => {
     if (!open) return
-    setRecipient('')
+    setRecipient(prefilled ?? '')
     setAmount('')
     actions.reset()
     if (asset) setAssetId(asset)
     // Only when the panel opens; `actions` is rebuilt on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, asset])
+  }, [open, asset, prefilled])
 
   const sendable = useMemo<Sendable[]>(() => {
     const rows: Sendable[] = []
@@ -155,7 +176,9 @@ export default function SendPanel({ open, onClose, balances, asset, onDone }: Pr
           hash={actions.state.hash}
           onAgain={() => {
             setAmount('')
-            setRecipient('')
+            // Back to the locked recipient, not to blank — "send another" from
+            // a donation still means to the same person.
+            setRecipient(prefilled ?? '')
             actions.reset()
           }}
         />
@@ -169,8 +192,24 @@ export default function SendPanel({ open, onClose, balances, asset, onDone }: Pr
               placeholder="secret1…"
               spellCheck={false}
               autoComplete="off"
-              className="break-address rounded-control border border-border bg-surface px-3 py-2.5 font-mono text-sm outline-none placeholder:text-text-faint"
+              /*
+                `readOnly` rather than `disabled`: a disabled field is dropped
+                from the tab order and read out as unavailable, when what is
+                true here is that the address is settled — it should still be
+                reachable, selectable and copyable.
+              */
+              readOnly={recipientLocked}
+              aria-describedby={recipientLocked ? lockedNoteId : undefined}
+              className={cn(
+                'break-address rounded-control border border-border px-3 py-2.5 font-mono text-sm outline-none placeholder:text-text-faint',
+                recipientLocked ? 'cursor-default bg-transparent text-text-muted' : 'bg-surface'
+              )}
             />
+            {recipientLocked ? (
+              <span id={lockedNoteId} className="text-label text-text-faint">
+                Set by the profile you opened this from.
+              </span>
+            ) : null}
             {recipientError ? (
               <span className="text-label text-negative" role="alert">
                 {recipientError}

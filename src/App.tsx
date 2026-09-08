@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 
 import AppShell from '@/components/layout/AppShell'
 import { onAccountChange } from '@/lib/wallet'
@@ -22,6 +22,7 @@ const Ecosystem = lazy(() => import('@/pages/ecosystem/Ecosystem'))
 const Network = lazy(() => import('@/pages/network/Network'))
 const Powertools = lazy(() => import('@/pages/powertools/Powertools'))
 const Onboarding = lazy(() => import('@/pages/onboarding/Onboarding'))
+const Profile = lazy(() => import('@/pages/profile/Profile'))
 
 export default function App() {
   const theme = useSettings((state) => state.theme)
@@ -53,8 +54,29 @@ export default function App() {
   const connected = status === 'connected'
 
   return (
-    <AppShell>
-      <Routes>
+    <Routes>
+      {/*
+        A shareable profile, addressed by the account itself — `/secret1abc…`.
+        Outside the shell on purpose: it is the one page a stranger reaches
+        before they have any relationship with this app, and a rail of
+        destinations they cannot use yet frames a personal page as someone
+        else's product. It carries its own way in instead.
+
+        Declared before the shell's routes for readability only — React Router
+        ranks by specificity, not source order, so every static path below
+        still beats this one, and the page rejects anything that is not a valid
+        address rather than claiming it.
+      */}
+      <Route
+        path="/:address"
+        element={
+          <Suspense fallback={null}>
+            <Profile />
+          </Suspense>
+        }
+      />
+
+      <Route element={<Shell />}>
         <Route path="/" element={<Navigate to="/wallet" replace />} />
         <Route path="/wallet" element={connected ? <Wallet /> : <Welcome />} />
         <Route
@@ -124,7 +146,21 @@ export default function App() {
           }
         />
         <Route path="*" element={<Navigate to="/wallet" replace />} />
-      </Routes>
+      </Route>
+    </Routes>
+  )
+}
+
+/**
+ * The shell as a layout route, so a page can sit outside it.
+ *
+ * `AppShell` still takes `children`, unchanged — this only adapts it to the
+ * `Outlet` a layout route renders through.
+ */
+function Shell() {
+  return (
+    <AppShell>
+      <Outlet />
     </AppShell>
   )
 }
