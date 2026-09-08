@@ -23,6 +23,14 @@ import { ImageResponse } from '@vercel/og'
  * latency-sensitive the way `middleware.ts` treats a real visitor's page
  * load.
  *
+ * Exported as `GET`, not a bare default — Vercel's current Web Handler
+ * contract for a plain (non-framework) `api/*` file. A default-exported
+ * `handler(request)` is the older Node-specific shape, and this project's
+ * `.tsx` entry landed on a build path that emitted literal `import` syntax
+ * into the deployed `.js` without marking it as a module, which Node then
+ * refused to load at all. The named `GET` export takes the documented route
+ * instead of fighting that bundling quirk.
+ *
  * Self-contained otherwise. This bundles by itself, separately from Vite —
  * the `@/` path aliases the rest of the app uses do not resolve here, so the
  * handful of constants this needs (status colours, the hue formula) are
@@ -87,7 +95,7 @@ async function loadGoogleFont(weight: 400 | 700): Promise<ArrayBuffer> {
   return fetch(match[1]).then((res) => res.arrayBuffer())
 }
 
-export default async function handler(request: Request) {
+export async function GET(request: Request) {
   const url = new URL(request.url)
   const kind = url.searchParams.get('kind') ?? 'site'
 
