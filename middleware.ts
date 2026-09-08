@@ -75,9 +75,15 @@ const LCD_URLS = [
   'https://secretnetwork-api.lavenderfive.com'
 ]
 
-async function fetchProposal(
-  id: string
-): Promise<{ title: string; status: string; expedited: boolean } | undefined> {
+interface ProposalMeta {
+  title: string
+  status: string
+  expedited: boolean
+  votingStart?: string
+  votingEnd?: string
+}
+
+async function fetchProposal(id: string): Promise<ProposalMeta | undefined> {
   for (const base of LCD_URLS) {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 2000)
@@ -90,7 +96,9 @@ async function fetchProposal(
       return {
         title: String(proposal.title ?? `Proposal #${id}`),
         status: String(proposal.status ?? 'PROPOSAL_STATUS_UNSPECIFIED'),
-        expedited: Boolean(proposal.expedited)
+        expedited: Boolean(proposal.expedited),
+        votingStart: typeof proposal.voting_start_time === 'string' ? proposal.voting_start_time : undefined,
+        votingEnd: typeof proposal.voting_end_time === 'string' ? proposal.voting_end_time : undefined
       }
     } catch {
       continue
@@ -121,11 +129,15 @@ async function resolveMeta(url: URL): Promise<Meta> {
     const proposal = await fetchProposal(id)
     if (proposal) {
       const statusLabel = STATUS_LABELS[proposal.status] ?? 'Unknown'
+      const dates =
+        proposal.votingStart && proposal.votingEnd
+          ? `&start=${encodeURIComponent(proposal.votingStart)}&end=${encodeURIComponent(proposal.votingEnd)}`
+          : ''
       return {
         title: `#${id} · ${proposal.title} · Secret Dashboard`,
         description: `${statusLabel}${proposal.expedited ? ' · expedited' : ''} — Secret Network governance proposal #${id}. Read the full text and vote on Secret Dashboard.`,
         url: `${origin}/governance/${id}`,
-        image: `${origin}/api/og?kind=proposal&id=${encodeURIComponent(id)}&title=${encodeURIComponent(proposal.title)}&status=${encodeURIComponent(proposal.status)}`
+        image: `${origin}/api/og?kind=proposal&id=${encodeURIComponent(id)}&title=${encodeURIComponent(proposal.title)}&status=${encodeURIComponent(proposal.status)}${dates}`
       }
     }
     // Fetch failed or the id does not exist — fall through to the generic

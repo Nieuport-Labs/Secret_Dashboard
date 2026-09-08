@@ -62,8 +62,8 @@ const ACCENT = '#ff3912'
 /** The title's font size, and a character budget conservative enough that
  * even an all-caps, wide-glyph title fits in one line at that size within
  * the canvas — there is no text measurement here to check with. */
-const TITLE_FONT_SIZE = 52
-const MAX_TITLE = 36
+const TITLE_FONT_SIZE = 56
+const MAX_TITLE = 26
 
 /** Mirrors `STATUS_LABELS` and the tone table in `StatusBadge.tsx`. */
 const STATUS: Record<string, { label: string; color: string }> = {
@@ -102,6 +102,22 @@ function escapeXml(text: string): string {
     .replace(/"/g, '&quot;')
 }
 
+/** "Sep 8 – Sep 9" — the year only shown when the two ends fall in different
+ * ones, which for a governance voting period is effectively never. */
+function formatDateRange(startIso: string, endIso: string): string | undefined {
+  const start = new Date(startIso)
+  const end = new Date(endIso)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return undefined
+
+  const short = { month: 'short', day: 'numeric', timeZone: 'UTC' } as const
+  const sameYear = start.getUTCFullYear() === end.getUTCFullYear()
+  const endLabel = end.toLocaleDateString(
+    'en-US',
+    sameYear ? short : { ...short, year: 'numeric' }
+  )
+  return `${start.toLocaleDateString('en-US', short)} – ${endLabel}`
+}
+
 /**
  * A font file resvg can point at by path — `@resvg/resvg-js` only accepts
  * fonts as local files or system fonts, not raw buffers, so the bytes this
@@ -136,6 +152,7 @@ export async function GET(request: Request) {
   let title: string
   let subtitle: string
   let avatar: { initial: string; hue: number } | undefined
+  let dateRange: string | undefined
 
   if (kind === 'proposal') {
     const id = url.searchParams.get('id') ?? ''
@@ -145,6 +162,9 @@ export async function GET(request: Request) {
     title = truncate(rawTitle, MAX_TITLE)
     eyebrow = { label: id ? `#${id} · ${status.label}` : status.label, color: status.color }
     subtitle = 'Secret Network governance'
+    const start = url.searchParams.get('start')
+    const end = url.searchParams.get('end')
+    dateRange = start && end ? formatDateRange(start, end) : undefined
   } else if (kind === 'profile') {
     const address = url.searchParams.get('address') ?? ''
     title = shorten(address, 14, 8)
@@ -155,57 +175,82 @@ export async function GET(request: Request) {
     subtitle = 'Wallet, bridge, staking and the Secret dApp ecosystem'
   }
 
-  // Vertical anchors for the content block. Fixed rather than computed —
-  // there are only three layouts (site, proposal, profile) and each reads
-  // fine at these numbers on a 630px canvas; no layout engine needed for
-  // three fixed cases.
-  const titleY = eyebrow || avatar ? 348 : 336
-  const subtitleY = titleY + 42
+  // Vertical anchors for the content block — fixed, not computed. There are
+  // only three layouts, each reads fine at these numbers on a 630px canvas,
+  // and there is no text-measurement engine here to lay it out properly.
+  const CONTENT_TOP = 262
+  const TITLE_Y = 414
+  const SUBTITLE_Y = TITLE_Y + 50
+  const DATE_Y = SUBTITLE_Y + 44
 
   const eyebrowSvg = eyebrow
     ? (() => {
-        const width = 40 + eyebrow.label.length * 16
-        return `<rect x="${PAD}" y="266" width="${width}" height="44" rx="22" fill="${eyebrow.color}" fill-opacity="0.16" />
-       <text x="${PAD + width / 2}" y="294" text-anchor="middle" font-family="Inter" font-weight="700" font-size="22" fill="${eyebrow.color}">${escapeXml(eyebrow.label)}</text>`
+        const width = 56 + eyebrow.label.length * 16
+        const midY = CONTENT_TOP + 24
+        return `<rect x="${PAD}" y="${CONTENT_TOP}" width="${width}" height="48" rx="24" fill="${eyebrow.color}" fill-opacity="0.15" />
+       <circle cx="${PAD + 26}" cy="${midY}" r="5" fill="${eyebrow.color}" />
+       <text x="${PAD + 40}" y="${midY + 8}" font-family="Inter" font-weight="700" font-size="22" fill="${eyebrow.color}">${escapeXml(eyebrow.label)}</text>`
       })()
     : ''
 
   const avatarSvg = avatar
     ? `<defs>
          <linearGradient id="avatar" x1="0" y1="0" x2="1" y2="1">
-           <stop offset="0%" stop-color="hsl(${avatar.hue}, 62%, 38%)" />
+           <stop offset="0%" stop-color="hsl(${avatar.hue}, 62%, 40%)" />
            <stop offset="100%" stop-color="hsl(${(avatar.hue + 40) % 360}, 58%, 22%)" />
          </linearGradient>
        </defs>
-       <circle cx="${PAD + 48}" cy="264" r="48" fill="url(#avatar)" />
-       <text x="${PAD + 48}" y="280" text-anchor="middle" font-family="Inter" font-weight="700" font-size="42" fill="${TEXT}">${escapeXml(avatar.initial)}</text>`
+       <circle cx="${PAD + 52}" cy="${CONTENT_TOP + 24}" r="52" fill="url(#avatar)" />
+       <circle cx="${PAD + 52}" cy="${CONTENT_TOP + 24}" r="52" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="2" />
+       <text x="${PAD + 52}" y="${CONTENT_TOP + 41}" text-anchor="middle" font-family="Inter" font-weight="700" font-size="44" fill="${TEXT}">${escapeXml(avatar.initial)}</text>`
     : ''
+
+  const dateSvg = dateRange
+    ? `<text x="${PAD}" y="${DATE_Y}" font-family="Inter" font-weight="600" font-size="21" fill="${TEXT_FAINT}" letter-spacing="0.3">${escapeXml(dateRange.toUpperCase())}</text>`
+    : ''
+
+  const badgeLabel = 'Secret Network'
+  const badgeWidth = 44 + badgeLabel.length * 11.5
+  const badgeX = WIDTH - PAD - badgeWidth
 
   const svg = `<svg width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
     <defs>
-      <radialGradient id="glow" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" stop-color="${ACCENT}" stop-opacity="0.2" />
+      <radialGradient id="glowTop" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="${ACCENT}" stop-opacity="0.28" />
+        <stop offset="100%" stop-color="${ACCENT}" stop-opacity="0" />
+      </radialGradient>
+      <radialGradient id="glowBottom" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="${ACCENT}" stop-opacity="0.14" />
         <stop offset="100%" stop-color="${ACCENT}" stop-opacity="0" />
       </radialGradient>
     </defs>
 
     <rect width="${WIDTH}" height="${HEIGHT}" fill="${BG}" />
-    <circle cx="${WIDTH - 220}" cy="-260" r="320" fill="url(#glow)" />
+
+    <!-- Two soft washes of brand colour, opposite corners, for depth rather
+         than a flat ground — kept behind everything else so they read as
+         light, not shapes. -->
+    <circle cx="${WIDTH - 140}" cy="-180" r="380" fill="url(#glowTop)" />
+    <circle cx="-60" cy="${HEIGHT + 120}" r="360" fill="url(#glowBottom)" />
+
+    <!-- The dashboard's own mark, oversized and almost invisible, bleeding
+         off the corner — a watermark rather than a repeated logo. -->
+    <path d="${LOGO_PATH}" fill="${ACCENT}" fill-opacity="0.05" transform="translate(760, 210) scale(9) rotate(8)" />
 
     <g transform="translate(${PAD}, ${PAD})">
       <path d="${LOGO_PATH}" fill="${ACCENT}" transform="scale(0.7)" />
       <text x="50" y="26" font-family="Inter" font-weight="700" font-size="26" fill="${TEXT}">Secret Dashboard</text>
     </g>
 
+    <rect x="${badgeX}" y="60" width="${badgeWidth}" height="40" rx="20" fill="none" stroke="${BORDER}" stroke-width="1.5" />
+    <text x="${badgeX + badgeWidth / 2}" y="86" text-anchor="middle" font-family="Inter" font-weight="600" font-size="18" fill="${TEXT_FAINT}">${badgeLabel}</text>
+
     ${eyebrowSvg}
     ${avatarSvg}
 
-    <text x="${PAD}" y="${titleY}" font-family="Inter" font-weight="700" font-size="${TITLE_FONT_SIZE}" fill="${TEXT}">${escapeXml(title)}</text>
-    <text x="${PAD}" y="${subtitleY}" font-family="Inter" font-weight="400" font-size="26" fill="${TEXT_MUTED}">${escapeXml(subtitle)}</text>
-
-    <line x1="${PAD}" y1="${HEIGHT - PAD - 30}" x2="${WIDTH - PAD}" y2="${HEIGHT - PAD - 30}" stroke="${BORDER}" stroke-width="1" />
-    <text x="${PAD}" y="${HEIGHT - PAD}" font-family="Inter" font-weight="400" font-size="20" fill="${TEXT_FAINT}">${escapeXml(url.hostname)}</text>
-    <text x="${WIDTH - PAD}" y="${HEIGHT - PAD}" text-anchor="end" font-family="Inter" font-weight="400" font-size="20" fill="${TEXT_FAINT}">Secret Network</text>
+    <text x="${PAD}" y="${TITLE_Y}" font-family="Inter" font-weight="700" font-size="${TITLE_FONT_SIZE}" fill="${TEXT}">${escapeXml(title)}</text>
+    <text x="${PAD}" y="${SUBTITLE_Y}" font-family="Inter" font-weight="400" font-size="27" fill="${TEXT_MUTED}">${escapeXml(subtitle)}</text>
+    ${dateSvg}
   </svg>`
 
   const png = new Resvg(svg, {
