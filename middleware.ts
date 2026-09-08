@@ -1,6 +1,9 @@
 import { next } from '@vercel/edge'
 
-import { isValidBech32 } from './src/lib/bech32'
+// Vercel's own middleware bundler type-checks under `moduleResolution:
+// nodenext`, which — unlike this repo's own `bundler` resolution — requires
+// the extension a relative ESM import will actually resolve to at runtime.
+import { isValidBech32 } from './src/lib/bech32.js'
 
 /**
  * Gives link-preview bots a real title, description and image per URL — a

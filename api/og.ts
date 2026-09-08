@@ -23,16 +23,18 @@ import { ImageResponse } from '@vercel/og'
  * latency-sensitive the way `middleware.ts` treats a real visitor's page
  * load.
  *
- * `.mts`, not `.tsx`, and no JSX. Vercel's Node builder kept emitting this
- * function's compiled `.js` with the literal `import` syntax still in it but
- * no `"type": "module"` anywhere Node would find it — a bundling mismatch
- * specific to this project that a sibling `package.json` and a differently
- * named export both failed to change. `.mts` is unambiguous to both
- * TypeScript and Node — it compiles to an ES module full stop, no detection
- * involved — which is what finally sidesteps it. TypeScript does not allow
- * JSX in a `.mts` file, so the element tree below is built with a small `h()`
- * helper instead of markup; `ImageResponse` (via satori) only ever needed a
- * plain `{ type, props }` tree, which is all JSX compiled down to anyway.
+ * `.ts`, not `.tsx`, and no JSX. The `.tsx` version of this file kept
+ * deploying with its compiled `.js` carrying the literal `import` line and no
+ * `"type": "module"` anywhere Node would find it — Node then refused to load
+ * it at all. A sibling `package.json`, a differently named export, and even
+ * `.mts` (unambiguous ESM to Node, but apparently not a Function entrypoint
+ * Vercel's zero-config builder recognises — it silently fell through to the
+ * SPA rewrite instead of building at all) each failed to change that. Plain
+ * `.ts` is the extension every Vercel Functions doc example actually uses,
+ * and it is what finally built and ran. TypeScript does not allow JSX outside
+ * a `.tsx` file, so the element tree below is built with a small `h()` helper
+ * instead of markup; `ImageResponse` (via satori) only ever needed a plain
+ * `{ type, props }` tree, which is all JSX compiles down to anyway.
  *
  * Self-contained otherwise. This bundles by itself, separately from Vite —
  * the `@/` path aliases the rest of the app uses do not resolve here, so the
