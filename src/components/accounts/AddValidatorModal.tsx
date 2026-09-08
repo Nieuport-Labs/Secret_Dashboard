@@ -6,6 +6,8 @@ import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { errorMessage } from '@/lib/errors'
 import { shortenAddress } from '@/lib/format'
+import { useValidatorImages } from '@/hooks/useValidatorImages'
+import { useValidatorProfile } from '@/hooks/useValidatorProfile'
 import { queryValidator, type Validator } from '@/lib/staking'
 import { queryAllValidators, toValoper } from '@/lib/validator'
 import ValidatorAvatar from '@/pages/staking/components/ValidatorAvatar'
@@ -78,8 +80,20 @@ export default function AddValidatorModal({ open, onClose }: Props) {
       .slice(0, 40)
   }, [validators, query])
 
+  // Only for what is on screen. Asking Keybase about all 236 validators to
+  // show 40 of them would spend a third party's rate limit on rows nobody
+  // scrolled to.
+  const images = useValidatorImages(results)
+  const ownedProfile = useValidatorProfile(owned?.identity)
+
   const choose = (validator: Validator, operator?: string) => {
-    add({ kind: 'validator', valoper: validator.address, moniker: validator.moniker, operator })
+    add({
+      kind: 'validator',
+      valoper: validator.address,
+      moniker: validator.moniker,
+      identity: validator.identity,
+      operator
+    })
     setQuery('')
     onClose()
     navigate('/validator')
@@ -90,7 +104,12 @@ export default function AddValidatorModal({ open, onClose }: Props) {
       <div className="flex min-h-0 flex-1 flex-col gap-4">
         {owned && address ? (
           <div className="flex items-center gap-3 rounded-card border border-border bg-surface p-4">
-            <ValidatorAvatar address={owned.address} moniker={owned.moniker} size={36} />
+            <ValidatorAvatar
+              address={owned.address}
+              moniker={owned.moniker}
+              image={ownedProfile?.image}
+              size={36}
+            />
             <div className="min-w-0 flex-1">
               <p className="flex items-center gap-1.5 text-label text-accent">
                 <ShieldCheck size={13} aria-hidden />
@@ -138,7 +157,12 @@ export default function AddValidatorModal({ open, onClose }: Props) {
                     }
                     className="state-layer flex w-full items-center gap-3 rounded-control px-3 py-2.5 text-left"
                   >
-                    <ValidatorAvatar address={validator.address} moniker={validator.moniker} size={28} />
+                    <ValidatorAvatar
+                      address={validator.address}
+                      moniker={validator.moniker}
+                      image={validator.identity ? images.get(validator.identity) : undefined}
+                      size={28}
+                    />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-base">{validator.moniker}</span>
                       <span className="text-label text-text-faint">

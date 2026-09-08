@@ -25,6 +25,13 @@ export interface LinkedAccount {
   valoper: string
   moniker: string
   /**
+   * Keybase identity, stored so the switcher can show the validator's own
+   * picture without first querying the chain for it. Absent for a validator
+   * that published none, and for one added before this was recorded — both of
+   * which fall back to the generated avatar.
+   */
+  identity?: string
+  /**
    * The `secret1…` account that operates this validator, when the wallet
    * proved it by being that account. Absent for one added by searching, which
    * is a bookmark rather than a login — the difference between the two is
