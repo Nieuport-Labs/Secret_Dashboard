@@ -11,6 +11,7 @@ import {
   type Tally,
   type VoteOption
 } from '@/lib/governance'
+import { useActingAddress } from '@/store/accounts'
 import { useWallet } from '@/store/wallet'
 
 export interface ProposalData {
@@ -36,7 +37,8 @@ export interface ProposalData {
  */
 export function useProposal(id: string | undefined): ProposalData {
   const client = useWallet((state) => state.queryClient)
-  const address = useWallet((state) => state.address)
+  /** In validator mode "my vote" means the validator's, not the wallet's. */
+  const address = useActingAddress()
 
   const [proposal, setProposal] = useState<Proposal | undefined>()
   const [tally, setTally] = useState<Tally | undefined>()

@@ -12,19 +12,35 @@ interface Props {
   myVote?: VoteOption
   /** Whether a wallet is connected at all. Voting needs one; reading does not. */
   connected: boolean
+  /**
+   * Whether this vote can actually be cast. In validator mode that is a
+   * question about permission rather than connection: the wallet may be
+   * connected and still hold no authority over the validator's vote.
+   */
+  canVote: boolean
+  /** The validator this vote belongs to, when it is not the wallet's own. */
+  votingAs?: string
   state: ActionState
   onVote: (option: VoteOption) => void
 }
 
 /** Casting or changing a vote. Only rendered while a proposal is actually open. */
-export default function VotePanel({ myVote, connected, state, onVote }: Props) {
+export default function VotePanel({ myVote, connected, canVote, votingAs, state, onVote }: Props) {
   const [choice, setChoice] = useState<VoteOption | undefined>(myVote)
   const sending = state.kind === 'sending'
 
   return (
     <div className="card flex flex-col gap-4 p-5">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-title">{myVote ? 'Change your vote' : 'Cast your vote'}</h2>
+        <h2 className="text-title">
+          {votingAs
+            ? myVote
+              ? `Change ${votingAs}’s vote`
+              : `Vote as ${votingAs}`
+            : myVote
+              ? 'Change your vote'
+              : 'Cast your vote'}
+        </h2>
         {myVote ? (
           <span className="flex items-center gap-1 text-label text-accent">
             <Check size={12} aria-hidden />
@@ -39,7 +55,7 @@ export default function VotePanel({ myVote, connected, state, onVote }: Props) {
             key={option}
             type="button"
             aria-pressed={choice === option}
-            disabled={!connected || sending}
+            disabled={!canVote || sending}
             onClick={() => setChoice(option)}
             className={cn(
               'state-layer flex items-center gap-2 rounded-control border px-3 py-2.5 text-base font-medium',
@@ -81,21 +97,42 @@ export default function VotePanel({ myVote, connected, state, onVote }: Props) {
           to change nothing, so it is only offered once the choice differs from
           what is already on record.
         */
-        disabled={!connected || choice === undefined || choice === myVote}
+        disabled={!canVote || choice === undefined || choice === myVote}
         onClick={() => choice && onVote(choice)}
       >
-        {connected ? (myVote ? 'Change vote' : 'Cast vote') : 'Connect a wallet to vote'}
+        {!connected
+          ? 'Connect a wallet to vote'
+          : !canVote
+            ? 'Not permitted to vote'
+            : myVote
+              ? 'Change vote'
+              : 'Cast vote'}
       </Button>
 
       {/*
         Voting power is delegated stake, full stop — a balance sitting unstaked
         counts for nothing. Someone who votes and sees no movement in the tally
-        deserves to know why before they sign, not after.
+        deserves to know why before they sign, not after. For a validator that
+        stake is its delegators', which is the whole reason its vote matters.
       */}
-      <p className="text-label text-text-faint">
-        Your vote is weighted by what you have staked. Undelegated {DISPLAY_DENOM} carries no voting
-        power.
-      </p>
+      {votingAs ? (
+        connected && !canVote ? (
+          <p className="text-label text-text-faint">
+            {votingAs}’s operator has not granted this wallet permission to vote. The Validator screen
+            has the command that would.
+          </p>
+        ) : (
+          <p className="text-label text-text-faint">
+            This vote is cast by {votingAs} and carries the stake delegated to it. Delegators who vote
+            for themselves override it.
+          </p>
+        )
+      ) : (
+        <p className="text-label text-text-faint">
+          Your vote is weighted by what you have staked. Undelegated {DISPLAY_DENOM} carries no voting
+          power.
+        </p>
+      )}
     </div>
   )
 }

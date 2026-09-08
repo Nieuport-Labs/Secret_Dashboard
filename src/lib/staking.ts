@@ -49,7 +49,7 @@ export interface Unbonding {
 /* Queries                                                                     */
 /* -------------------------------------------------------------------------- */
 
-function toValidator(v: {
+export function toValidator(v: {
   operator_address?: string
   description?: { moniker?: string; website?: string; details?: string; identity?: string }
   commission?: { commission_rates?: { rate?: string } }
