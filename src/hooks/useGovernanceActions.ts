@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 
 import { DENOM, GAS, GAS_PRICE_USCRT } from '@/chains/secret4'
+import { errorMessage } from '@/lib/errors'
 import { voteMessage, type VoteOption } from '@/lib/governance'
 import { MSG_VOTE } from '@/lib/msgTypes'
 import { useFeePayer } from '@/store/feePayer'
@@ -44,7 +45,7 @@ export function useGovernanceActions(onSuccess?: () => void) {
         setState({ kind: 'done', hash: tx.transactionHash })
         onSuccess?.()
       } catch (error) {
-        setState({ kind: 'failed', message: error instanceof Error ? error.message : String(error) })
+        setState({ kind: 'failed', message: errorMessage(error) })
       }
     },
     [client, address, granterFor, onSuccess]

@@ -43,8 +43,18 @@ export interface Proposal {
   status: ProposalStatus
   /** Type URLs of what this proposal would execute if it passed. */
   messageTypes: string[]
+  /**
+   * The messages themselves, as the chain returned them.
+   *
+   * Kept raw and untyped on purpose: there are dozens of proposal message
+   * types across Cosmos and Secret's own modules, and the detail page shows
+   * whatever fields a given one happens to carry rather than knowing about
+   * each in advance.
+   */
+  messages: Array<Record<string, unknown>>
   submitTime?: Date
   depositEndTime?: Date
+  votingStartTime?: Date
   votingEndTime?: Date
   /** Base units of SCRT put up so far. */
   totalDeposit: string
@@ -97,6 +107,7 @@ function toProposal(raw: {
   final_tally_result?: Record<string, string | undefined>
   submit_time?: unknown
   deposit_end_time?: unknown
+  voting_start_time?: unknown
   voting_end_time?: unknown
   total_deposit?: Array<{ denom?: string; amount?: string }>
   proposer?: string
@@ -110,8 +121,10 @@ function toProposal(raw: {
     summary: raw.summary?.trim() ?? '',
     status: (raw.status as ProposalStatus) ?? 'PROPOSAL_STATUS_UNSPECIFIED',
     messageTypes: (raw.messages ?? []).map((m) => String(m['@type'] ?? '')).filter(Boolean),
+    messages: raw.messages ?? [],
     submitTime: parseTimestamp(raw.submit_time),
     depositEndTime: parseTimestamp(raw.deposit_end_time),
+    votingStartTime: parseTimestamp(raw.voting_start_time),
     votingEndTime: parseTimestamp(raw.voting_end_time),
     // Deposits can in principle be in any denom; only SCRT counts toward the
     // minimum, so summing the rest would overstate how close it is.
@@ -125,41 +138,24 @@ function toProposal(raw: {
   }
 }
 
-export interface ProposalPage {
-  proposals: Proposal[]
-  /** How many exist in total under this filter, for "showing N of M". */
-  total: number
-}
-
 /**
- * A page of proposals, newest first.
+ * Every proposal the chain has, newest first.
  *
- * Reverse order is the chain's own, not a client-side sort: secret-4 has close
- * to three hundred proposals and the ones anyone can still act on are always
- * the newest. Paged by offset rather than by `next_key` because the key comes
- * back base64-encoded while the request type wants raw bytes, and an offset
- * over a list that only ever grows at the far end is stable enough.
+ * All of them in one request rather than paged. secret-4's whole governance
+ * history is 290 proposals and about 800 KB uncompressed — one request, near
+ * enough a second, and gzipped over the wire by any browser. Paging would save
+ * little and cost the thing that matters most on this page: searching and
+ * filtering across the entire history instead of across whichever page happens
+ * to be loaded, which is a search that quietly lies about what it did not find.
+ *
+ * Reverse order is the chain's own, not a client-side sort.
  */
-export async function queryProposals(
-  client: SecretNetworkClient,
-  { status, limit = 25, offset = 0 }: { status?: ProposalStatus; limit?: number; offset?: number } = {}
-): Promise<ProposalPage> {
+export async function queryAllProposals(client: SecretNetworkClient): Promise<Proposal[]> {
   const response = await client.query.gov.proposals({
-    // The querier treats an omitted status as "any"; passing the unspecified
-    // enum instead would filter for proposals that have no status at all.
-    ...(status ? { proposal_status: status as never } : {}),
-    pagination: {
-      limit: String(limit),
-      offset: String(offset),
-      reverse: true,
-      count_total: true
-    }
+    pagination: { limit: '500', reverse: true }
   })
 
-  return {
-    proposals: (response.proposals ?? []).map(toProposal).filter((p) => p.id),
-    total: Number(response.pagination?.total ?? 0)
-  }
+  return (response.proposals ?? []).map(toProposal).filter((p) => p.id)
 }
 
 export async function queryProposal(
@@ -328,6 +324,36 @@ export const STATUS_LABELS: Record<ProposalStatus, string> = {
   PROPOSAL_STATUS_PASSED: 'Passed',
   PROPOSAL_STATUS_REJECTED: 'Rejected',
   PROPOSAL_STATUS_FAILED: 'Failed'
+}
+
+/**
+ * "Expires in 20h", for a proposal with a deadline still ahead of it.
+ *
+ * `undefined` once a proposal is decided — a closed one has an end date, not
+ * time remaining, and counting down to a moment in the past reads as a bug.
+ */
+export function timeRemaining(proposal: Proposal): string | undefined {
+  const deadline =
+    proposal.status === 'PROPOSAL_STATUS_VOTING_PERIOD'
+      ? proposal.votingEndTime
+      : proposal.status === 'PROPOSAL_STATUS_DEPOSIT_PERIOD'
+        ? proposal.depositEndTime
+        : undefined
+
+  if (!deadline) return undefined
+
+  const ms = deadline.getTime() - Date.now()
+  // Past its deadline but not yet tallied — the chain closes it on the next
+  // block, so neither "expired" nor a countdown is true.
+  if (ms <= 0) return 'Closing'
+
+  const minutes = Math.floor(ms / 60_000)
+  if (minutes < 60) return `Expires in ${Math.max(1, minutes)}m`
+
+  const hours = Math.floor(minutes / 60)
+  if (hours < 48) return `Expires in ${hours}h`
+
+  return `Expires in ${Math.floor(hours / 24)}d ${hours % 24}h`
 }
 
 /**

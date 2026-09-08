@@ -17,6 +17,7 @@ import { handleAccountChange, lastUsedWallet, useWallet } from '@/store/wallet'
 const Bridge = lazy(() => import('@/pages/bridge/Bridge'))
 const Staking = lazy(() => import('@/pages/staking/Staking'))
 const Governance = lazy(() => import('@/pages/governance/Governance'))
+const ProposalDetail = lazy(() => import('@/pages/governance/ProposalDetail'))
 const Ecosystem = lazy(() => import('@/pages/ecosystem/Ecosystem'))
 const Network = lazy(() => import('@/pages/network/Network'))
 const Powertools = lazy(() => import('@/pages/powertools/Powertools'))
@@ -77,6 +78,16 @@ export default function App() {
           element={
             <Suspense fallback={<p className="text-base text-text-muted">Loading governance…</p>}>
               <Governance />
+            </Suspense>
+          }
+        />
+        {/* Each proposal has its own address, so one can be linked, shared and
+            opened in a tab of its own. */}
+        <Route
+          path="/governance/:id"
+          element={
+            <Suspense fallback={<p className="text-base text-text-muted">Loading proposal…</p>}>
+              <ProposalDetail />
             </Suspense>
           }
         />
