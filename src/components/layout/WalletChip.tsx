@@ -1,5 +1,5 @@
 import { Check, ChevronDown, LogOut, Plus, Settings as SettingsIcon } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import AddAccountModal from '@/components/accounts/AddAccountModal'
@@ -7,6 +7,7 @@ import AddValidatorModal from '@/components/accounts/AddValidatorModal'
 import Menu, { MenuItem } from '@/components/ui/Menu'
 import { useValidatorProfile } from '@/hooks/useValidatorProfile'
 import { shortenAddress } from '@/lib/format'
+import { queryValidator } from '@/lib/staking'
 import ValidatorAvatar from '@/pages/staking/components/ValidatorAvatar'
 import { useAccounts, useActiveValidator, type LinkedAccount } from '@/store/accounts'
 import { useWallet } from '@/store/wallet'
@@ -131,13 +132,13 @@ export default function WalletChip({ onOpenSettings }: Props) {
 /**
  * A linked account's own picture, falling back to the generated one.
  *
- * Its own component because the lookup is a hook and the switcher renders one
- * row per account. The identity was recorded when the account was added, so
- * this costs no chain query — and the Keybase result is cached, so the same
- * validator's row and the chip beside it fetch once between them.
+ * Its own component because the lookups are hooks and the switcher renders one
+ * row per account. The Keybase result is cached, so a validator's row and the
+ * chip beside it fetch once between them.
  */
 function AccountAvatar({ account, size }: { account: LinkedAccount; size: number }) {
-  const profile = useValidatorProfile(account.identity)
+  const identity = useStoredIdentity(account)
+  const profile = useValidatorProfile(identity)
 
   return (
     <ValidatorAvatar
@@ -147,4 +148,36 @@ function AccountAvatar({ account, size }: { account: LinkedAccount; size: number
       size={size}
     />
   )
+}
+
+/**
+ * The account's Keybase identity, fetched once for accounts that predate it
+ * being recorded and written back so it is never fetched again.
+ *
+ * Backfilled rather than left to the user to fix by removing and re-adding the
+ * account: they have no way of knowing that is what a missing picture means.
+ * The result is stored either way — a validator that published no identity
+ * records an empty string, which is what stops this asking again every render.
+ */
+function useStoredIdentity(account: LinkedAccount): string | undefined {
+  const client = useWallet((state) => state.queryClient)
+  const setIdentity = useAccounts((state) => state.setIdentity)
+  const { valoper, identity } = account
+
+  useEffect(() => {
+    if (identity !== undefined || !client) return
+
+    let cancelled = false
+    void queryValidator(client, valoper)
+      .then((validator) => {
+        if (!cancelled && validator) setIdentity(valoper, validator.identity ?? '')
+      })
+      .catch(() => undefined)
+
+    return () => {
+      cancelled = true
+    }
+  }, [client, valoper, identity, setIdentity])
+
+  return identity || undefined
 }
