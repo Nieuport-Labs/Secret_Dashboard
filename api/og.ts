@@ -1,4 +1,12 @@
-import { ImageResponse } from '@vercel/og'
+import * as satoriModule from 'satori'
+import { Resvg } from '@resvg/resvg-js'
+
+type SatoriFn = (node: unknown, options: Record<string, unknown>) => Promise<string>
+
+// `satori`'s CJS build exports its function as `.default`; a namespace
+// import sidesteps needing `esModuleInterop` in whatever tsconfig Vercel's
+// builder applies to this directory.
+const satori = (satoriModule as unknown as { default: SatoriFn }).default
 
 /**
  * Renders the PNG behind every `og:image` and `twitter:image` in the app.
@@ -13,35 +21,36 @@ import { ImageResponse } from '@vercel/og'
  * params; this file only knows how to turn params into pixels; it has no idea
  * which page asked for them.
  *
- * A Node.js Function, not an Edge one — deliberately. `@vercel/og`'s package
+ * `satori` (JSX-shaped tree → SVG) plus `@resvg/resvg-js` (SVG → PNG,
+ * a native binding) directly, rather than `@vercel/og` — the package this
+ * started with. `@vercel/og` wraps exactly this pair, but its packaged
+ * Node build turned out to be broken outside Next.js's own bundler: it
  * resolves to a build that imports `fs` and `module` unless something
- * (Next.js's own build step) tells it otherwise, and outside Next.js there is
- * nothing to do that telling; pointed at the edge sandbox it fails to deploy
- * with "referencing unsupported modules".
+ * (Next.js's own build step) tells it otherwise, so pointed at the edge
+ * sandbox it fails outright ("referencing unsupported modules"); moved to
+ * Node, its internal CJS-interop shim does a dynamic `require("fs")` to
+ * lazy-load harfbuzzjs that Node refuses once the file executes as an ES
+ * module; forced to CommonJS instead, Node refuses to `require()` the
+ * package at all, because that same build is itself written with ESM
+ * `export` syntax — broken in both directions, all inside one dependency
+ * this project does not control. `satori` and `@resvg/resvg-js` are the two
+ * libraries `@vercel/og` is built from, used the ordinary way, with neither
+ * problem — a native binding needs no dynamic `require`, and satori ships
+ * real, separate `import`/`require` builds rather than one file trying to
+ * answer to both.
  *
- * `.ts`, compiled to CommonJS by `api/package.json` — the extension and the
- * module format each had to be fixed separately, and both are load-bearing:
+ * A Node.js Function, not an Edge one — `@resvg/resvg-js` is a native
+ * binding, which the edge sandbox cannot run. Not a meaningful cost: a
+ * link-preview bot's one request per share is not latency-sensitive the way
+ * `middleware.ts` treats a real visitor's page load.
  *
- *   .tsx (JSX)     → not the extension; a real Function, but its compiled
- *                    `.js` kept literal `import` syntax with no `"type":
- *                    "module"` anywhere Node would find, so Node refused to
- *                    load it — "Cannot use import statement outside a
- *                    module". Renaming the export didn't change that.
- *   .mts / .cjs     → not a Function entrypoint extension Vercel's zero-config
- *                    builder recognises at all; it built nothing, and
- *                    requests silently fell through to the SPA's catch-all
- *                    rewrite (a 200, served from cache, with nothing to say
- *                    it wasn't the intended page).
- *   .ts, ESM        → the right extension, and it built and ran — into a bug
- *                    *inside* `@vercel/og` itself: its Node build's
- *                    CJS-interop shim does a dynamic `require("fs")` to load
- *                    harfbuzzjs, which Node refuses under `import`. The
- *                    package is built to be `require()`d, not `import`ed.
- *
- * `api/package.json` (`{ "type": "commonjs" }`) overrides the root's
- * `"type": "module"` for just this directory, so this file — despite reading
- * like ordinary ESM `import`/`export` — compiles to real `require()` calls,
- * which is what `@vercel/og`'s Node build actually expects.
+ * `.ts`, compiled to CommonJS by `api/package.json` (`{ "type": "commonjs"
+ * }`, overriding the root's `"type": "module"` for just this directory).
+ * `.ts` is the extension actually recognised as a Function entrypoint by
+ * Vercel's zero-config builder — `.mts` and `.cjs` are not; requests to
+ * either fell straight through to the SPA's catch-all rewrite instead of
+ * reaching a function at all, a 200 with nothing to say it was the wrong
+ * page.
  *
  * Self-contained otherwise. This bundles by itself, separately from Vite —
  * the `@/` path aliases the rest of the app uses do not resolve here, so the
@@ -279,12 +288,27 @@ export async function GET(request: Request) {
     )
   )
 
-  return new ImageResponse(tree as never, {
+  const svg = await satori(tree, {
     width: 1200,
     height: 630,
     fonts: [
       { name: 'Inter', data: regular, weight: 400, style: 'normal' },
       { name: 'Inter', data: bold, weight: 700, style: 'normal' }
     ]
+  })
+
+  const png = new Resvg(svg, { fitTo: { mode: 'width', value: 1200 } }).render().asPng()
+
+  // `Buffer` satisfies `BodyInit` at runtime (it is a `Uint8Array`) but not
+  // structurally under `lib: dom`'s types, which know nothing of Node's
+  // Buffer generic — a plain view over the same bytes clears that up.
+  return new Response(new Uint8Array(png), {
+    headers: {
+      'content-type': 'image/png',
+      // A share's card is drawn once and then linked from everywhere that
+      // share reaches — safe to cache hard rather than re-rendering (a font
+      // fetch plus a native SVG rasterisation) on every crawler hit.
+      'cache-control': 'public, max-age=86400, immutable'
+    }
   })
 }
