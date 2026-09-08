@@ -5,6 +5,7 @@ import AppShell from '@/components/layout/AppShell'
 import { onAccountChange } from '@/lib/wallet'
 import Wallet from '@/pages/wallet/Wallet'
 import Welcome from '@/pages/welcome/Welcome'
+import { useActiveValidator } from '@/store/accounts'
 import { applyTheme, useSettings } from '@/store/settings'
 import { handleAccountChange, lastUsedWallet, useWallet } from '@/store/wallet'
 
@@ -23,6 +24,8 @@ const Network = lazy(() => import('@/pages/network/Network'))
 const Powertools = lazy(() => import('@/pages/powertools/Powertools'))
 const Onboarding = lazy(() => import('@/pages/onboarding/Onboarding'))
 const Profile = lazy(() => import('@/pages/profile/Profile'))
+const Validator = lazy(() => import('@/pages/validator/Validator'))
+const ValidatorStats = lazy(() => import('@/pages/validator/ValidatorStats'))
 
 export default function App() {
   const theme = useSettings((state) => state.theme)
@@ -52,6 +55,11 @@ export default function App() {
   useEffect(() => onAccountChange(handleAccountChange), [])
 
   const connected = status === 'connected'
+  // Acting as a validator moves the home of the app: the wallet screen is not
+  // where someone in that mode expects to land, and its rail no longer offers
+  // a way back to it.
+  const validatorMode = Boolean(useActiveValidator())
+  const home = validatorMode ? '/validator' : '/wallet'
 
   return (
     <Routes>
@@ -77,7 +85,7 @@ export default function App() {
       />
 
       <Route element={<Shell />}>
-        <Route path="/" element={<Navigate to="/wallet" replace />} />
+        <Route path="/" element={<Navigate to={home} replace />} />
         <Route path="/wallet" element={connected ? <Wallet /> : <Welcome />} />
         <Route
           path="/bridge"
@@ -137,6 +145,36 @@ export default function App() {
             </Suspense>
           }
         />
+        {/*
+          Both validator screens exist only while a validator is the account on
+          screen. Reached without one — a stale bookmark, or after switching
+          back to the wallet — they send you home rather than rendering a page
+          about nobody.
+        */}
+        <Route
+          path="/validator"
+          element={
+            validatorMode ? (
+              <Suspense fallback={<p className="text-base text-text-muted">Loading the validator…</p>}>
+                <Validator />
+              </Suspense>
+            ) : (
+              <Navigate to="/wallet" replace />
+            )
+          }
+        />
+        <Route
+          path="/validator/stats"
+          element={
+            validatorMode ? (
+              <Suspense fallback={<p className="text-base text-text-muted">Loading stats…</p>}>
+                <ValidatorStats />
+              </Suspense>
+            ) : (
+              <Navigate to="/wallet" replace />
+            )
+          }
+        />
         <Route
           path="/onboarding"
           element={
@@ -145,7 +183,7 @@ export default function App() {
             </Suspense>
           }
         />
-        <Route path="*" element={<Navigate to="/wallet" replace />} />
+        <Route path="*" element={<Navigate to={home} replace />} />
       </Route>
     </Routes>
   )

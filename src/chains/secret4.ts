@@ -14,6 +14,9 @@ export const DENOM = 'uscrt'
 export const DISPLAY_DENOM = 'SCRT'
 export const DECIMALS = 6
 export const BECH32_PREFIX = 'secret'
+/** Same key, different hat: an account's validator and consensus spellings. */
+export const BECH32_VALOPER_PREFIX = 'secretvaloper'
+export const BECH32_VALCONS_PREFIX = 'secretvalcons'
 
 /**
  * Gas price used to turn a gas limit into a fee amount, and passed to the
@@ -47,6 +50,15 @@ export const GAS = {
   ibcTransfer: 150_000,
   /** A vote writes one record and re-reads the voter's delegations to weight it. */
   vote: 120_000,
+  /** Validator operations. Each rewrites one record the staking module owns. */
+  editValidator: 150_000,
+  withdrawCommission: 150_000,
+  unjail: 150_000,
+  /**
+   * Added on top of the inner message when sending one under an authz grant.
+   * The wrapper costs a grant lookup and a second round of message routing.
+   */
+  authzExec: 50_000,
   /** Vault execute plus the grant it issues (and a revoke when topping up). */
   buyGasCredit: 400_000,
   grantAllowance: 100_000,

@@ -12,7 +12,11 @@
  * somebody else's transitive dependency, pinned at 1.x, and depending on a
  * package this project never declared is a break waiting for the next install.
  *
- * BIP-173, restricted to what is needed here — verification, not encoding.
+ * BIP-173. Encoding is here too, for the one thing that needs it: Cosmos gives
+ * an account, its validator and its consensus identity three different prefixes
+ * over the same 20 bytes, so `secret1…` and `secretvaloper1…` are the same key
+ * spelled twice and converting between them is how the app recognises that the
+ * connected wallet operates a validator.
  */
 
 const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
@@ -71,4 +75,78 @@ export function isValidBech32(address: string, prefix: string): boolean {
   }
 
   return polymod([...expandPrefix(prefix), ...values]) === 1
+}
+
+/**
+ * Regroup a byte stream into `to`-bit words.
+ *
+ * Bech32 carries 5-bit words while everything it addresses is bytes, so this
+ * runs in both directions. Padding is right for 8→5 (the tail of the last byte
+ * needs somewhere to go) and wrong for 5→8, where a non-zero remainder means
+ * the string was malformed rather than short.
+ */
+function convertBits(data: readonly number[], from: number, to: number, pad: boolean): number[] | undefined {
+  let accumulator = 0
+  let bits = 0
+  const result: number[] = []
+  const max = (1 << to) - 1
+
+  for (const value of data) {
+    if (value < 0 || value >> from !== 0) return undefined
+    accumulator = (accumulator << from) | value
+    bits += from
+    while (bits >= to) {
+      bits -= to
+      result.push((accumulator >> bits) & max)
+    }
+  }
+
+  if (pad) {
+    if (bits > 0) result.push((accumulator << (to - bits)) & max)
+  } else if (bits >= from || ((accumulator << (to - bits)) & max) !== 0) {
+    return undefined
+  }
+
+  return result
+}
+
+/** The payload of a bech32 string, with the prefix it was carrying. */
+export function decodeBech32(address: string): { prefix: string; bytes: Uint8Array } | undefined {
+  const lower = address.toLowerCase()
+  if (address !== lower && address !== address.toUpperCase()) return undefined
+
+  // The separator is the *last* `1`, since the prefix may contain one.
+  const separator = lower.lastIndexOf('1')
+  if (separator < 1 || separator + 7 > lower.length || lower.length > 90) return undefined
+
+  const prefix = lower.slice(0, separator)
+  const words: number[] = []
+  for (const character of lower.slice(separator + 1)) {
+    const value = CHARSET.indexOf(character)
+    if (value === -1) return undefined
+    words.push(value)
+  }
+
+  if (polymod([...expandPrefix(prefix), ...words]) !== 1) return undefined
+
+  const bytes = convertBits(words.slice(0, -6), 5, 8, false)
+  return bytes ? { prefix, bytes: Uint8Array.from(bytes) } : undefined
+}
+
+export function encodeBech32(prefix: string, bytes: Uint8Array): string {
+  const words = convertBits([...bytes], 8, 5, true)
+  if (!words) throw new Error('Cannot encode these bytes as bech32')
+
+  // Six zero words stand in for the checksum while it is being computed.
+  const checksum = polymod([...expandPrefix(prefix), ...words, 0, 0, 0, 0, 0, 0]) ^ 1
+  const tail: number[] = []
+  for (let i = 0; i < 6; i++) tail.push((checksum >> (5 * (5 - i))) & 31)
+
+  return `${prefix}1${[...words, ...tail].map((word) => CHARSET[word]).join('')}`
+}
+
+/** Re-spell an address under a different prefix, e.g. `secret1…` → `secretvaloper1…`. */
+export function reprefix(address: string, prefix: string): string | undefined {
+  const decoded = decodeBech32(address)
+  return decoded ? encodeBech32(prefix, decoded.bytes) : undefined
 }

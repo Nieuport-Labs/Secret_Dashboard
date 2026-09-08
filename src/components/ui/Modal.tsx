@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { ChevronLeft, X } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -12,6 +12,12 @@ interface Props {
   /** Rendered beside the heading — a validator's avatar, say. Decorative: the
    *  accessible name still comes from `title` alone. */
   icon?: ReactNode
+  /**
+   * Returns to the step this one was opened from. Given only by a dialog that
+   * is genuinely one of several in sequence — closing such a step and closing
+   * the whole flow are different intentions, and one button cannot mean both.
+   */
+  onBack?: () => void
   children: ReactNode
 }
 
@@ -22,7 +28,7 @@ interface Props {
  * becomes the containing block for `position: fixed`, and a dialog opened from
  * the header would otherwise be laid out inside the header.
  */
-export default function Modal({ open, onClose, title, description, icon, children }: Props) {
+export default function Modal({ open, onClose, title, description, icon, onBack, children }: Props) {
   const panel = useFocusTrap(open, onClose)
 
   if (!open) return null
@@ -60,6 +66,16 @@ export default function Modal({ open, onClose, title, description, icon, childre
         {/* Never squeezed by a tall body — the heading is the dialog's label. */}
         <div className="flex shrink-0 items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
+            {onBack ? (
+              <button
+                type="button"
+                onClick={onBack}
+                aria-label="Back"
+                className="state-layer -m-1.5 shrink-0 rounded-pill p-1.5 text-text-muted"
+              >
+                <ChevronLeft size={18} aria-hidden />
+              </button>
+            ) : null}
             {icon}
             <div className="min-w-0">
               {/*

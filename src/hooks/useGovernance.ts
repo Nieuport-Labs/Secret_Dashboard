@@ -13,6 +13,7 @@ import {
   type Tally,
   type VoteOption
 } from '@/lib/governance'
+import { useActingAddress } from '@/store/accounts'
 import { useWallet } from '@/store/wallet'
 
 export interface GovernanceData {
@@ -73,7 +74,8 @@ export async function loadLiveState(
  */
 export function useGovernance(): GovernanceData {
   const client = useWallet((state) => state.queryClient)
-  const address = useWallet((state) => state.address)
+  /** In validator mode "my vote" means the validator's, not the wallet's. */
+  const address = useActingAddress()
 
   const [proposals, setProposals] = useState<Proposal[]>([])
   const [params, setParams] = useState<GovParams | undefined>()

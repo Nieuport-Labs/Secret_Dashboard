@@ -24,12 +24,15 @@ import {
 import { useGovernanceActions } from '@/hooks/useGovernanceActions'
 import { useProposal } from '@/hooks/useProposal'
 import { useValidatorVotes } from '@/hooks/useValidatorVotes'
+import { useActiveValidator } from '@/store/accounts'
 import { useWallet } from '@/store/wallet'
 
 export default function ProposalDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const address = useWallet((state) => state.address)
+  /** Whose vote the panel casts — the validator's, in validator mode. */
+  const active = useActiveValidator()
 
   /** Shared between the donut, the breakdown list beside it and the
    *  validator chart below — hovering one dims the rest of all three. */
@@ -257,6 +260,8 @@ export default function ProposalDetail() {
             <VotePanel
               myVote={data.myVote}
               connected={Boolean(address)}
+              canVote={actions.canVote}
+              votingAs={active?.account.moniker}
               state={actions.state}
               onVote={(option) => void actions.vote(proposal.id, option)}
             />
