@@ -1,7 +1,8 @@
-import satori from 'satori'
-import { initWasm, Resvg } from '@resvg/resvg-wasm'
+import { writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-export const config = { runtime: 'edge' }
+import { Resvg } from '@resvg/resvg-js'
 
 /**
  * Renders the PNG behind every `og:image` and `twitter:image` in the app.
@@ -16,29 +17,28 @@ export const config = { runtime: 'edge' }
  * params; this file only knows how to turn params into pixels; it has no idea
  * which page asked for them.
  *
- * `satori` (JSX-shaped tree → SVG) plus `@resvg/resvg-wasm` (SVG → PNG, a
- * WebAssembly build) directly, rather than `@vercel/og` — the package this
- * started with, and which wraps exactly this pair. Its packaged Node build
- * turned out to work only inside Next.js's own bundler: pointed at the edge
- * sandbox directly it fails to deploy at all ("referencing unsupported
- * modules", `fs` and `module`); loaded on Node as an ES module its own
- * internal harfbuzzjs loader does a dynamic `require("fs")` Node refuses;
- * forced to CommonJS, Node then refuses to `require()` the file at all,
- * because the same build is itself written with ESM `export` syntax — broken
- * in every direction, inside one dependency this project does not control.
- * Both replacements are what `@vercel/og` is built from, used directly:
- * satori ships a genuine, separate ESM build (`import satori from 'satori'`,
- * no CJS/ESM ambiguity), and resvg's WebAssembly build needs no native
- * binding and no dynamic `require` — a `.wasm` file fetched once and cached
- * per warm instance, same as the fonts below.
+ * Plain SVG, built by hand, rendered to PNG by `@resvg/resvg-js` — not
+ * `@vercel/og`, and not `satori` either, which is what `@vercel/og` itself
+ * renders through. Both were tried first and both turned out to depend on
+ * `harfbuzzjs` for text shaping, which does a conditional `require("fs")`
+ * to load its own `.wasm` binary relative to `__dirname` — a reference
+ * Vercel's edge bundler flags and refuses regardless of whether the branch
+ * that touches it would ever run there, and which behaved unreliably even
+ * on the Node runtime, where `fs` is allowed. A card this simple — one or
+ * two lines of Latin text, a handful of shapes — has no real use for
+ * harfbuzz's complex-script shaping in the first place, so this writes the
+ * SVG directly instead of asking a flexbox-layout engine to produce one.
+ * `@resvg/resvg-js` alone has none of that: a native binding, not a wasm
+ * module, with no dynamic `require` to trip over. It is Node-only as a
+ * result — not a meaningful cost, since a link-preview bot's one request
+ * per share is not latency-sensitive the way `middleware.ts` treats a real
+ * visitor's page load.
  *
- * Back on the Edge runtime as a result — `@resvg/resvg-js`, the native-binding
- * sibling of `@resvg/resvg-wasm` tried in between, cannot run there, which is
- * what forced the detour through Node and its own dead ends above. Edge also
- * means the plain `.ts` extension is unambiguous again: no `api/package.json`
- * override, no CommonJS — this is the same edge sandbox `middleware.ts` runs
- * in, just for a request a crawler makes rather than a real visitor's page
- * load.
+ * The trade against `satori` is real, not just packaging: no automatic text
+ * wrapping. Long titles are truncated to a single line (see `MAX_TITLE`)
+ * rather than flowed across two, which satori's flexbox layout could do
+ * without knowing the font's metrics in advance — this doesn't, so it
+ * settles for shorter instead of guessing where a line would break.
  *
  * Self-contained otherwise. This bundles by itself, separately from Vite —
  * the `@/` path aliases the rest of the app uses do not resolve here, so the
@@ -48,16 +48,9 @@ export const config = { runtime: 'edge' }
  * if either ever drifts.
  */
 
-interface VNode {
-  type: string
-  props: Record<string, unknown>
-}
-
-/** Builds the same `{ type, props: { children, ... } }` shape JSX compiles to. */
-function h(type: string, props: Record<string, unknown> = {}, ...children: unknown[]): VNode {
-  const flat = children.flat(Infinity as 1).filter((child) => child !== null && child !== undefined && child !== false)
-  return { type, props: { ...props, children: flat.length === 1 ? flat[0] : flat } }
-}
+const WIDTH = 1200
+const HEIGHT = 630
+const PAD = 72
 
 const BG = '#080808'
 const TEXT = '#ffffff'
@@ -65,6 +58,12 @@ const TEXT_MUTED = 'rgba(255,255,255,0.62)'
 const TEXT_FAINT = 'rgba(255,255,255,0.4)'
 const BORDER = 'rgba(255,255,255,0.08)'
 const ACCENT = '#ff3912'
+
+/** The title's font size, and a character budget conservative enough that
+ * even an all-caps, wide-glyph title fits in one line at that size within
+ * the canvas — there is no text measurement here to check with. */
+const TITLE_FONT_SIZE = 52
+const MAX_TITLE = 36
 
 /** Mirrors `STATUS_LABELS` and the tone table in `StatusBadge.tsx`. */
 const STATUS: Record<string, { label: string; color: string }> = {
@@ -91,20 +90,30 @@ function shorten(address: string, head = 10, tail = 6): string {
   return address.length <= head + tail + 1 ? address : `${address.slice(0, head)}…${address.slice(-tail)}`
 }
 
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
 /**
- * Satori (what `@vercel/og` renders through) needs real font bytes — it has
- * no notion of a system font. Fetching Google's own CSS with an old-browser
- * user agent is the standard trick for getting a `.ttf` back instead of the
- * `.woff2` modern browsers ask for; satori cannot parse `.woff2`.
- *
- * Not self-hosted, unlike the app's own type — this is a server rendering a
- * PNG for a crawler, not a visitor's browser making a request Google can see,
- * so the privacy reasoning in `styles/tokens.css` does not apply here.
+ * A font file resvg can point at by path — `@resvg/resvg-js` only accepts
+ * fonts as local files or system fonts, not raw buffers, so the bytes this
+ * fetches have to land on disk before the render call. `/tmp` is writable
+ * and, on a warm instance, already has the file from the previous request.
  */
-async function loadGoogleFont(weight: 400 | 700): Promise<ArrayBuffer> {
+async function ensureFont(weight: 400 | 700): Promise<string> {
+  const path = join(tmpdir(), `secret-dashboard-inter-${weight}.ttf`)
   const css = await fetch(`https://fonts.googleapis.com/css2?family=Inter:wght@${weight}`, {
     headers: {
-      // A UA old enough that Google's CSS API replies with `.ttf` sources.
+      // A UA old enough that Google's CSS API replies with `.ttf` sources —
+      // resvg-js needs a real font file, and it cannot parse `.woff2`.
       'user-agent':
         'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/534.34 (KHTML, like Gecko) PhantomJS/1.9.7 Safari/534.34'
     }
@@ -112,25 +121,16 @@ async function loadGoogleFont(weight: 400 | 700): Promise<ArrayBuffer> {
 
   const match = /src: url\(([^)]+)\) format\('(?:opentype|truetype)'\)/.exec(css)
   if (!match) throw new Error('Google Fonts did not return a usable font URL')
-  return fetch(match[1]).then((res) => res.arrayBuffer())
-}
-
-/**
- * `initWasm` may only be called once per instance — a second call throws.
- * Caching the promise (not just the result) means concurrent requests on a
- * warm instance await the same initialisation instead of racing it.
- */
-let wasmReady: Promise<void> | undefined
-function ensureWasm(): Promise<void> {
-  wasmReady ??= initWasm(fetch(new URL('@resvg/resvg-wasm/index_bg.wasm', import.meta.url)))
-  return wasmReady
+  const bytes = await fetch(match[1]).then((res) => res.arrayBuffer())
+  writeFileSync(path, Buffer.from(bytes))
+  return path
 }
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const kind = url.searchParams.get('kind') ?? 'site'
 
-  const [regular, bold] = await Promise.all([loadGoogleFont(400), loadGoogleFont(700), ensureWasm()])
+  const [regularPath, boldPath] = await Promise.all([ensureFont(400), ensureFont(700)])
 
   let eyebrow: { label: string; color: string } | undefined
   let title: string
@@ -142,7 +142,7 @@ export async function GET(request: Request) {
     const statusKey = url.searchParams.get('status') ?? 'PROPOSAL_STATUS_UNSPECIFIED'
     const status = STATUS[statusKey] ?? STATUS.PROPOSAL_STATUS_UNSPECIFIED
     const rawTitle = url.searchParams.get('title') ?? `Proposal #${id}`
-    title = rawTitle.length > 110 ? `${rawTitle.slice(0, 109)}…` : rawTitle
+    title = truncate(rawTitle, MAX_TITLE)
     eyebrow = { label: id ? `#${id} · ${status.label}` : status.label, color: status.color }
     subtitle = 'Secret Network governance'
   } else if (kind === 'profile') {
@@ -155,161 +155,75 @@ export async function GET(request: Request) {
     subtitle = 'Wallet, bridge, staking and the Secret dApp ecosystem'
   }
 
-  const tree = h(
-    'div',
-    {
-      style: {
-        height: '100%',
-        width: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        backgroundColor: BG,
-        fontFamily: 'Inter',
-        padding: '72px',
-        position: 'relative'
-      }
-    },
-    // A quiet wash of brand colour in the corner — the one flourish, kept
-    // behind everything else so it reads as light rather than a shape.
-    h('div', {
-      style: {
-        position: 'absolute',
-        top: -260,
-        right: -220,
-        width: 640,
-        height: 640,
-        borderRadius: 9999,
-        display: 'flex',
-        background: `radial-gradient(circle, ${ACCENT}33 0%, ${ACCENT}00 70%)`
-      }
-    }),
+  // Vertical anchors for the content block. Fixed rather than computed —
+  // there are only three layouts (site, proposal, profile) and each reads
+  // fine at these numbers on a 630px canvas; no layout engine needed for
+  // three fixed cases.
+  const titleY = eyebrow || avatar ? 348 : 336
+  const subtitleY = titleY + 42
 
-    h(
-      'div',
-      { style: { display: 'flex', alignItems: 'center', gap: 16 } },
-      h(
-        'svg',
-        { width: '34', height: '35', viewBox: '0 0 48.2143 50', fill: 'none' },
-        h('path', { d: LOGO_PATH, fill: ACCENT })
-      ),
-      h(
-        'span',
-        { style: { fontSize: 26, fontWeight: 700, color: TEXT, letterSpacing: -0.5 } },
-        'Secret Dashboard'
-      )
-    ),
+  const eyebrowSvg = eyebrow
+    ? (() => {
+        const width = 40 + eyebrow.label.length * 16
+        return `<rect x="${PAD}" y="266" width="${width}" height="44" rx="22" fill="${eyebrow.color}" fill-opacity="0.16" />
+       <text x="${PAD + width / 2}" y="294" text-anchor="middle" font-family="Inter" font-weight="700" font-size="22" fill="${eyebrow.color}">${escapeXml(eyebrow.label)}</text>`
+      })()
+    : ''
 
-    h('div', { style: { display: 'flex', flex: 1 } }),
+  const avatarSvg = avatar
+    ? `<defs>
+         <linearGradient id="avatar" x1="0" y1="0" x2="1" y2="1">
+           <stop offset="0%" stop-color="hsl(${avatar.hue}, 62%, 38%)" />
+           <stop offset="100%" stop-color="hsl(${(avatar.hue + 40) % 360}, 58%, 22%)" />
+         </linearGradient>
+       </defs>
+       <circle cx="${PAD + 48}" cy="264" r="48" fill="url(#avatar)" />
+       <text x="${PAD + 48}" y="280" text-anchor="middle" font-family="Inter" font-weight="700" font-size="42" fill="${TEXT}">${escapeXml(avatar.initial)}</text>`
+    : ''
 
-    avatar
-      ? h(
-          'div',
-          {
-            style: {
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 96,
-              height: 96,
-              borderRadius: 9999,
-              marginBottom: 28,
-              fontSize: 42,
-              fontWeight: 700,
-              color: TEXT,
-              background: `linear-gradient(140deg, hsl(${avatar.hue} 62% 38%), hsl(${(avatar.hue + 40) % 360} 58% 22%))`
-            }
-          },
-          avatar.initial
-        )
-      : null,
+  const svg = `<svg width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="${ACCENT}" stop-opacity="0.2" />
+        <stop offset="100%" stop-color="${ACCENT}" stop-opacity="0" />
+      </radialGradient>
+    </defs>
 
-    eyebrow
-      ? h(
-          'div',
-          { style: { display: 'flex', marginBottom: 22 } },
-          h(
-            'span',
-            {
-              style: {
-                display: 'flex',
-                alignItems: 'center',
-                fontSize: 22,
-                fontWeight: 700,
-                color: eyebrow.color,
-                backgroundColor: `${eyebrow.color}29`,
-                padding: '8px 20px',
-                borderRadius: 9999
-              }
-            },
-            eyebrow.label
-          )
-        )
-      : null,
+    <rect width="${WIDTH}" height="${HEIGHT}" fill="${BG}" />
+    <circle cx="${WIDTH - 220}" cy="-260" r="320" fill="url(#glow)" />
 
-    h(
-      'div',
-      {
-        style: {
-          display: 'flex',
-          fontSize: kind === 'profile' ? 56 : 58,
-          fontWeight: 700,
-          lineHeight: 1.15,
-          letterSpacing: -1.5,
-          color: TEXT,
-          maxWidth: 1000,
-          // Would read better in a monospace face for an address, but satori
-          // only knows the families handed to it in `fonts` below — asking
-          // for one that isn't there risks the whole image failing to
-          // render, which is a worse outcome than a proportional font.
-          fontFamily: 'Inter'
-        }
-      },
-      title
-    ),
+    <g transform="translate(${PAD}, ${PAD})">
+      <path d="${LOGO_PATH}" fill="${ACCENT}" transform="scale(0.7)" />
+      <text x="50" y="26" font-family="Inter" font-weight="700" font-size="26" fill="${TEXT}">Secret Dashboard</text>
+    </g>
 
-    h(
-      'div',
-      { style: { display: 'flex', marginTop: 20, fontSize: 26, color: TEXT_MUTED, maxWidth: 920 } },
-      subtitle
-    ),
+    ${eyebrowSvg}
+    ${avatarSvg}
 
-    h('div', { style: { display: 'flex', flex: 1 } }),
+    <text x="${PAD}" y="${titleY}" font-family="Inter" font-weight="700" font-size="${TITLE_FONT_SIZE}" fill="${TEXT}">${escapeXml(title)}</text>
+    <text x="${PAD}" y="${subtitleY}" font-family="Inter" font-weight="400" font-size="26" fill="${TEXT_MUTED}">${escapeXml(subtitle)}</text>
 
-    h('div', { style: { display: 'flex', height: 1, backgroundColor: BORDER, marginBottom: 28 } }),
+    <line x1="${PAD}" y1="${HEIGHT - PAD - 30}" x2="${WIDTH - PAD}" y2="${HEIGHT - PAD - 30}" stroke="${BORDER}" stroke-width="1" />
+    <text x="${PAD}" y="${HEIGHT - PAD}" font-family="Inter" font-weight="400" font-size="20" fill="${TEXT_FAINT}">${escapeXml(url.hostname)}</text>
+    <text x="${WIDTH - PAD}" y="${HEIGHT - PAD}" text-anchor="end" font-family="Inter" font-weight="400" font-size="20" fill="${TEXT_FAINT}">Secret Network</text>
+  </svg>`
 
-    h(
-      'div',
-      { style: { display: 'flex', justifyContent: 'space-between', fontSize: 20, color: TEXT_FAINT } },
-      // The real host of whatever domain this is being served from — never a
-      // hardcoded guess, so a custom domain later needs no change here.
-      h('span', { style: { display: 'flex' } }, url.hostname),
-      h('span', { style: { display: 'flex' } }, 'Secret Network')
-    )
-  )
-
-  // satori's own types expect a real React element; the plain object tree
-  // `h()` builds has the identical `{ type, props }` shape satori actually
-  // walks, so this is a type-level fiction rather than a runtime one.
-  const svg = await satori(tree as Parameters<typeof satori>[0], {
-    width: 1200,
-    height: 630,
-    fonts: [
-      { name: 'Inter', data: regular, weight: 400, style: 'normal' },
-      { name: 'Inter', data: bold, weight: 700, style: 'normal' }
-    ]
+  const png = new Resvg(svg, {
+    font: {
+      loadSystemFonts: false,
+      fontFiles: [regularPath, boldPath],
+      defaultFontFamily: 'Inter'
+    }
   })
+    .render()
+    .asPng()
 
-  const png = new Resvg(svg, { fitTo: { mode: 'width', value: 1200 } }).render().asPng()
-
-  // `Uint8Array` is always a valid fetch body at runtime; the mismatch here
-  // is TypeScript's own DOM lib wanting an `ArrayBuffer`-backed view
-  // specifically, which a plain `Uint8Array` return type doesn't pin down.
-  return new Response(png as unknown as BodyInit, {
+  return new Response(new Uint8Array(png), {
     headers: {
       'content-type': 'image/png',
       // A share's card is drawn once and then linked from everywhere that
-      // share reaches — safe to cache hard rather than re-rendering (a font
-      // fetch plus a native SVG rasterisation) on every crawler hit.
+      // share reaches — safe to cache hard rather than re-rendering on
+      // every crawler hit.
       'cache-control': 'public, max-age=86400, immutable'
     }
   })

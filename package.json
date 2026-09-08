@@ -1,6 +1,6 @@
 {
   "name": "secret-dashboard",
-  "description": "Secret Dashboard 1.9 \u2014 an entry point into Secret Network",
+  "description": "Secret Dashboard 1.9 — an entry point into Secret Network",
   "version": "1.9.0",
   "private": true,
   "type": "module",
@@ -18,15 +18,14 @@
   },
   "dependencies": {
     "@cosmjs/stargate": "^0.39.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@solar-republic/neutrino": "^1.9.0",
-    "@resvg/resvg-wasm": "^2.6.2",
     "@vercel/edge": "^1.3.3",
     "lucide-react": "^0.460.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.1",
-    "satori": "^0.33.4",
     "secretjs": "1.21.2",
     "zustand": "^5.0.2"
   },
