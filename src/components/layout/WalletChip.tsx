@@ -5,9 +5,10 @@ import { useNavigate } from 'react-router-dom'
 import AddAccountModal from '@/components/accounts/AddAccountModal'
 import AddValidatorModal from '@/components/accounts/AddValidatorModal'
 import Menu, { MenuItem } from '@/components/ui/Menu'
+import { useValidatorProfile } from '@/hooks/useValidatorProfile'
 import { shortenAddress } from '@/lib/format'
 import ValidatorAvatar from '@/pages/staking/components/ValidatorAvatar'
-import { useAccounts, useActiveValidator } from '@/store/accounts'
+import { useAccounts, useActiveValidator, type LinkedAccount } from '@/store/accounts'
 import { useWallet } from '@/store/wallet'
 
 interface Props {
@@ -57,7 +58,7 @@ export default function WalletChip({ onOpenSettings }: Props) {
         trigger={
           active ? (
             <>
-              <ValidatorAvatar address={active.account.valoper} moniker={active.account.moniker} size={16} />
+              <AccountAvatar account={active.account} size={16} />
               <span className="max-w-[140px] truncate">{active.account.moniker}</span>
               <ChevronDown size={14} aria-hidden className="text-text-muted" />
             </>
@@ -85,7 +86,7 @@ export default function WalletChip({ onOpenSettings }: Props) {
         {accounts.map((account) => (
           <MenuItem
             key={account.valoper}
-            icon={<ValidatorAvatar address={account.valoper} moniker={account.moniker} size={16} />}
+            icon={<AccountAvatar account={account} size={16} />}
             onClick={() => switchToValidator(account.valoper)}
           >
             <span className="flex min-w-0 flex-1 flex-col">
@@ -124,5 +125,26 @@ export default function WalletChip({ onOpenSettings }: Props) {
       />
       <AddValidatorModal open={addingValidator} onClose={() => setAddingValidator(false)} />
     </>
+  )
+}
+
+/**
+ * A linked account's own picture, falling back to the generated one.
+ *
+ * Its own component because the lookup is a hook and the switcher renders one
+ * row per account. The identity was recorded when the account was added, so
+ * this costs no chain query — and the Keybase result is cached, so the same
+ * validator's row and the chip beside it fetch once between them.
+ */
+function AccountAvatar({ account, size }: { account: LinkedAccount; size: number }) {
+  const profile = useValidatorProfile(account.identity)
+
+  return (
+    <ValidatorAvatar
+      address={account.valoper}
+      moniker={account.moniker}
+      image={profile?.image}
+      size={size}
+    />
   )
 }
