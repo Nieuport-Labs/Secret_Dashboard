@@ -26,9 +26,14 @@ export interface LinkedAccount {
   moniker: string
   /**
    * Keybase identity, stored so the switcher can show the validator's own
-   * picture without first querying the chain for it. Absent for a validator
-   * that published none, and for one added before this was recorded — both of
-   * which fall back to the generated avatar.
+   * picture without first querying the chain for it.
+   *
+   * Three states, not two. A string is an identity to look up; the empty
+   * string means the chain was asked and this validator published none;
+   * `undefined` means nobody has asked yet, which is where accounts added
+   * before this was recorded start. Collapsing the last two would either
+   * re-query every render forever or leave those accounts on the generated
+   * avatar for good.
    */
   identity?: string
   /**
@@ -47,6 +52,8 @@ interface AccountsState {
 
   add: (account: LinkedAccount) => void
   remove: (valoper: string) => void
+  /** Records what the chain says, including that there is nothing to record. */
+  setIdentity: (valoper: string, identity: string) => void
   setActive: (valoper: string) => void
   clearActive: () => void
 }
@@ -67,6 +74,11 @@ export const useAccounts = create<AccountsState>()(
         set((state) => ({
           accounts: state.accounts.filter((a) => a.valoper !== valoper),
           activeValoper: state.activeValoper === valoper ? undefined : state.activeValoper
+        })),
+
+      setIdentity: (valoper, identity) =>
+        set((state) => ({
+          accounts: state.accounts.map((a) => (a.valoper === valoper ? { ...a, identity } : a))
         })),
 
       setActive: (valoper) => set({ activeValoper: valoper }),
