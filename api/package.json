@@ -1,0 +1,4 @@
+{
+  "$comment": "Overrides the root's \"type\": \"module\" for this directory only. og.ts compiles to real CommonJS require() calls as a result — see the comment at the top of that file for why that's load-bearing rather than cosmetic.",
+  "type": "commonjs"
+}
