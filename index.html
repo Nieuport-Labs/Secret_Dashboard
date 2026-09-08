@@ -11,16 +11,19 @@
     />
 
     <!--
-      Link previews. Static, and therefore the same card for every URL in the
-      app: a crawler does not run the SPA, so nothing set from React can reach
-      it. A profile link shared to Twitter or Discord will show this card rather
-      than the address it points at — naming the address would need a server
-      rendering per-URL tags, which this app deliberately does not have.
+      Link previews. `middleware.ts` rewrites everything between the OG:START
+      and OG:END markers below, per URL, for requests carrying a known
+      crawler's user agent — a proposal gets its own title and a rendered card
+      naming it, a profile shows the address it belongs to. `api/og.tsx` draws
+      the image both this static fallback and the middleware point at.
 
-      No og:image yet. The tag is omitted rather than pointed at the favicon,
-      because an SVG is not rendered by most platforms and a broken image is
-      worse than a text card.
+      What ships here is what anything else sees: a real browser (which never
+      reads these tags — its own JS sets the tab title) or an unrecognised
+      bot. Kept as a complete, valid card in its own right — same site-wide
+      image, generic copy — rather than something that only works once
+      middleware has run.
     -->
+    <!--OG:START-->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Secret Dashboard" />
     <meta property="og:title" content="Secret Dashboard" />
@@ -28,12 +31,17 @@
       property="og:description"
       content="An entry point into Secret Network — wallet, bridge, staking and the Secret dApp ecosystem."
     />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image" content="https://secret-dashboard-mocha.vercel.app/api/og" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Secret Dashboard" />
+    <meta name="twitter:image" content="https://secret-dashboard-mocha.vercel.app/api/og" />
     <meta
       name="twitter:description"
       content="An entry point into Secret Network — wallet, bridge, staking and the Secret dApp ecosystem."
     />
+    <!--OG:END-->
   </head>
   <body>
     <div id="root"></div>

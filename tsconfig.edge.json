@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  // Deliberately no `@/*` path alias. `api/og.tsx` and `middleware.ts` bundle
+  // through Vercel's own esbuild, not Vite — an `@/` import would resolve here
+  // (this config has no idea it's meant to be forbidden) but fail at deploy
+  // time. A separate project without the alias turns that into a build error
+  // instead.
+  "include": ["api", "middleware.ts"]
+}
