@@ -9,6 +9,7 @@ import {
   MSG_UNDELEGATE,
   MSG_WITHDRAW_REWARD
 } from '@/lib/msgTypes'
+import { errorMessage } from '@/lib/errors'
 import { coin, stakingMessages } from '@/lib/staking'
 import { useFeePayer } from '@/store/feePayer'
 import { useWallet } from '@/store/wallet'
@@ -54,7 +55,7 @@ export function useStakingActions(onSuccess?: () => void) {
         setState({ kind: 'done', hash: tx.transactionHash })
         onSuccess?.()
       } catch (error) {
-        setState({ kind: 'failed', message: error instanceof Error ? error.message : String(error) })
+        setState({ kind: 'failed', message: errorMessage(error) })
       }
     },
     [client, address, granterFor, onSuccess]

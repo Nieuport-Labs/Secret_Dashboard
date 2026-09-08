@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { collectTags, fetchDapps, WHERE_TO_BUY, type Dapp } from '@/lib/dapps'
 import { cn } from '@/lib/cn'
+import { errorMessage } from '@/lib/errors'
 
 /** Secret dApps, and where to get SCRT if you have none. */
 export default function Ecosystem() {
@@ -21,7 +22,7 @@ export default function Ecosystem() {
         if (!cancelled) setDapps(list)
       })
       .catch((caught: unknown) => {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught))
+        if (!cancelled) setError(errorMessage(caught))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)

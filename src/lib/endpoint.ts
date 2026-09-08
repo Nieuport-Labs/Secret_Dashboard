@@ -13,6 +13,7 @@
  */
 
 import { CHAIN_ID, DEFAULT_LCD_URLS, DEFAULT_RPC_URLS } from '@/chains/secret4'
+import { errorMessage } from '@/lib/errors'
 
 const PROBE_TIMEOUT_MS = 8000
 
@@ -146,7 +147,10 @@ export function websocketUrlFor(rpcUrl: string): string {
  * parsers and internal frames rather than the thing that went wrong.
  */
 export function describeNetworkError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
+  // Through the helper, so a secretjs failure is matched on its actual text
+  // rather than on "[object Object]" — which fell past every branch below and
+  // out through the generic one, defeating the point of this function.
+  const message = errorMessage(error)
 
   if (/Unexpected token '<'|is not valid JSON|not JSON/i.test(message)) {
     return 'The node returned a web page instead of data — it is probably down or misconfigured.'

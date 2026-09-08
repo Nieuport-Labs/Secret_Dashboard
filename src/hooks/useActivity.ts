@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { summarisePublicTransfers, type ActivityEntry } from '@/lib/activity'
 import { mapWithLimit } from '@/lib/concurrency'
 import { resolveLcdUrl } from '@/lib/endpoint'
+import { errorMessage } from '@/lib/errors'
 import type { Permit } from '@/lib/permit'
 import { queryPublicTransfers } from '@/lib/publicHistory'
 import { queryTransferHistory } from '@/lib/snip20'
@@ -101,7 +102,9 @@ export function useActivity(permit: Permit | undefined, pageSize = 12) {
     const run = async () => {
       const [privateResult, publicResult] = await Promise.all([
         readPrivate(),
-        readPublic().catch((caught: unknown) => caught as Error)
+        // A real Error, not a cast: anything that is merely shaped like one
+        // fails the `instanceof` below and gets spread into the merged list.
+        readPublic().catch((caught: unknown) => new Error(errorMessage(caught)))
       ])
 
       if (cancelled) return

@@ -1,6 +1,6 @@
 {
   "name": "secret-dashboard",
-  "description": "Secret Dashboard 1.9 — an entry point into Secret Network",
+  "description": "Secret Dashboard 1.9 \u2014 an entry point into Secret Network",
   "version": "1.9.0",
   "private": true,
   "type": "module",
@@ -13,7 +13,8 @@
     "format": "prettier --write --ignore-unknown .",
     "verify:chain": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/verify-chain.ts",
     "test:bridge": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-bridge.ts",
-    "test:activity": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-activity.ts"
+    "test:activity": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-activity.ts",
+    "test:errors": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-errors.ts"
   },
   "dependencies": {
     "@cosmjs/stargate": "^0.39.0",

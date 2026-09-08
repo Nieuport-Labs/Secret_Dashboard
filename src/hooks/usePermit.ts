@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { errorMessage } from '@/lib/errors'
 import { forgetPermit, loadPermit, missingTokens, savePermit, signPermit, type Permit } from '@/lib/permit'
 import { allTokenAddresses } from '@/tokens/registry'
 import { getProvider } from '@/lib/wallet'
@@ -41,7 +42,7 @@ export function usePermit() {
       savePermit(address, signed)
       setPermit(signed)
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : String(caught)
+      const message = errorMessage(caught)
       // Declining the signature is a choice, not a fault. Saying "Request
       // rejected" as an error implies something broke.
       setError(/reject|denied|cancell?ed/i.test(message) ? undefined : message)

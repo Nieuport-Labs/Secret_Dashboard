@@ -6,6 +6,7 @@ import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import Picker from '@/components/ui/Picker'
 import { DENOM, explorerTxUrl, GAS_PRICE_USCRT } from '@/chains/secret4'
+import { errorMessage } from '@/lib/errors'
 import { MESSAGE_TEMPLATES } from '@/lib/messageTemplates'
 import { useFeePayer } from '@/store/feePayer'
 import { useWallet } from '@/store/wallet'
@@ -145,7 +146,7 @@ export default function MessageComposer() {
       }
       setState({ kind: 'done', hash: tx.transactionHash })
     } catch (caught) {
-      setState({ kind: 'failed', message: caught instanceof Error ? caught.message : String(caught) })
+      setState({ kind: 'failed', message: errorMessage(caught) })
     }
   }
 

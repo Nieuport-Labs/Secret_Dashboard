@@ -16,6 +16,7 @@ import {
   type Unbonding,
   type Validator
 } from '@/lib/staking'
+import { errorMessage } from '@/lib/errors'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 
@@ -138,7 +139,7 @@ export function useStaking(): StakingData {
         setLoading(false)
       } catch (caught) {
         if (cancelled) return
-        setError(caught instanceof Error ? caught.message : String(caught))
+        setError(errorMessage(caught))
         setLoading(false)
       }
     }

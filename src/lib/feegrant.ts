@@ -7,6 +7,7 @@ import {
 } from 'secretjs'
 
 import { DENOM, GAS_GRANT, GAS_PRICE_USCRT, GAS_REVOKE } from '@/chains/secret4'
+import { errorMessage } from '@/lib/errors'
 import { availableFee, isUsable, parseFeeGrant, type FeeGrant } from '@/lib/feegrant-sdk'
 import { toBaseUnits as toMicroUnits } from '@/lib/format'
 
@@ -79,7 +80,11 @@ export async function queryGrantsByGranter(
       .map((grant) => parseFeeGrant(grant))
       .filter((grant): grant is FeeGrant => grant !== undefined)
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    // Read through the helper, not `String(error)`: secretjs throws the node's
+    // JSON body rather than an Error, which stringifies to "[object Object]"
+    // and matches none of these — so an unsupported query looked like an
+    // ordinary failure and the fallback path was never taken.
+    const message = errorMessage(error)
     if (/501|not implemented|unknown|unimplemented/i.test(message)) {
       throw new GranterQueryUnsupported(error)
     }

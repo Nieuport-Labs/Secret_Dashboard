@@ -12,6 +12,7 @@ import {
   type ProbeResult
 } from '@/lib/endpoint'
 import { usePermit } from '@/hooks/usePermit'
+import { errorMessage } from '@/lib/errors'
 import { availableFee, type FeeGrant } from '@/lib/feegrant-sdk'
 import { formatAmount, shortenAddress } from '@/lib/format'
 import { queryTokenInfo } from '@/lib/snip20'
@@ -353,7 +354,10 @@ function CustomTokensSection() {
       if (address) rememberTokens(address, [contractAddress])
       setInput('')
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not read that contract.')
+      // The node says why — "contract: not found", say — and that is more use
+      // than a generic sentence, which is all this could show before, since a
+      // secretjs failure is not an Error and fell through to the fallback.
+      setError(errorMessage(caught))
     } finally {
       setChecking(false)
     }

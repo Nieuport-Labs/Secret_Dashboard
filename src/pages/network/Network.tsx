@@ -6,6 +6,7 @@ import Sparkline, { type SeriesPoint } from '@/components/ui/Sparkline'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { cn } from '@/lib/cn'
 import { resolveLcdUrl } from '@/lib/endpoint'
+import { errorMessage } from '@/lib/errors'
 import { formatDisplayAmount, formatFiat } from '@/lib/format'
 import {
   fetchChainStats,
@@ -94,7 +95,7 @@ export default function Network() {
         setStats(chain)
         setTvl(llama)
       } catch (caught) {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught))
+        if (!cancelled) setError(errorMessage(caught))
       }
     }
 

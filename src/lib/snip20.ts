@@ -1,6 +1,7 @@
 import type { SecretNetworkClient } from 'secretjs'
 
 import { codeHashFor } from '@/lib/codeHash'
+import { errorMessage } from '@/lib/errors'
 import { covers, withPermit, type Permit } from '@/lib/permit'
 
 /**
@@ -81,7 +82,10 @@ export async function queryBalance(
 
     return { status: 'ok', amount }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    // Via the helper: a contract rejecting the permit comes back as secretjs's
+    // thrown JSON body, which "[object Object]" hid — classifying a permit
+    // problem as a generic error, so the screen never offered to re-sign.
+    const message = errorMessage(error)
     if (/unauthorized|permit|signature/i.test(message)) return { status: 'unauthorized', message }
     return { status: 'error', message }
   }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { errorMessage } from '@/lib/errors'
 import { clearProfileImage, loadProfileImage, saveProfileImage } from '@/lib/profileImage'
 import { useWallet } from '@/store/wallet'
 
@@ -50,7 +51,7 @@ export function useProfileImage() {
       try {
         show(await saveProfileImage(address, file))
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : String(caught))
+        setError(errorMessage(caught))
       } finally {
         setSaving(false)
       }

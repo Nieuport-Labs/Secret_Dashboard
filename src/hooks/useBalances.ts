@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { queryAllBalances } from '@/lib/bank'
 import { mapWithLimit } from '@/lib/concurrency'
+import { errorMessage } from '@/lib/errors'
 import { fiatValue } from '@/lib/format'
 import type { Permit } from '@/lib/permit'
 import { fetchPrices } from '@/lib/prices'
@@ -150,7 +151,14 @@ export function useBalances(permit: Permit | undefined): Balances {
         //
         // Caught by hand rather than with allSettled, so the reason survives
         // into a message instead of becoming an opaque rejected slot.
-        queryAllBalances(client, address).catch((caught: unknown) => caught as Error),
+        //
+        // Normalised into a real Error rather than cast to one. secretjs throws
+        // the node's JSON body, which is not an Error — so `caught as Error`
+        // was a lie the `instanceof` check below then believed, sending the
+        // error object down the success path to have `.get()` called on it.
+        queryAllBalances(client, address).catch(
+          (caught: unknown) => new Error(errorMessage(caught))
+        ),
         // Prices are decoration; a failure must not cost anyone their balances.
         fetchPrices(priceIds, currency.toLowerCase()).catch(() => new Map<string, number>())
       ])

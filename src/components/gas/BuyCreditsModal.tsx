@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { DISPLAY_DENOM, GAS, GAS_VAULT_ADDRESS, explorerTxUrl } from '@/chains/secret4'
+import { errorMessage } from '@/lib/errors'
 import { formatAmount, toBaseUnits } from '@/lib/format'
 import { buyGasCredit, queryVaultStatus } from '@/lib/gasVault'
 import { MSG_EXECUTE_CONTRACT } from '@/lib/msgTypes'
@@ -90,7 +91,7 @@ export default function BuyCreditsModal({ open, onClose }: Props) {
       setStatus({ kind: 'done', hash: tx.transactionHash })
       await refreshGrants()
     } catch (error) {
-      setStatus({ kind: 'failed', message: error instanceof Error ? error.message : String(error) })
+      setStatus({ kind: 'failed', message: errorMessage(error) })
     }
   }
 

@@ -20,6 +20,7 @@ import { SOURCE_CHAINS, chainImageUrl, type SourceChain } from '@/chains/sources
 import { depositGasLimit, sendDeposit, sendWithdraw, type Leg } from '@/lib/bridge'
 import { queryAllBalances } from '@/lib/bank'
 import { codeHashFor } from '@/lib/codeHash'
+import { errorMessage } from '@/lib/errors'
 import { fittingGasSliceUsd, quoteGasSlice, shouldOfferGas } from '@/lib/getGas'
 import { formatAmount, fromBaseUnits, toBaseUnits } from '@/lib/format'
 import { plainTransfer, wrapDepositMemo } from '@/lib/ibcMemo'
@@ -397,7 +398,7 @@ export default function Bridge() {
         source.refresh()
       }
     } catch (error) {
-      setStatus({ kind: 'failed', message: error instanceof Error ? error.message : String(error) })
+      setStatus({ kind: 'failed', message: errorMessage(error) })
     }
   }
 

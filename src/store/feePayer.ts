@@ -10,6 +10,7 @@ import {
   type FeeGrant,
   type Selection
 } from '@/lib/feegrant-sdk'
+import { errorMessage } from '@/lib/errors'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 
@@ -65,7 +66,7 @@ export const useFeePayer = create<FeePayerState>()((set, get) => ({
       set({
         grants: [],
         loading: false,
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       })
     }
   },
