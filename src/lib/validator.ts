@@ -86,6 +86,27 @@ export async function queryValidatorDetail(
   }
 }
 
+/**
+ * Every validator the chain knows, bonded or not.
+ *
+ * `queryValidators` in `lib/staking.ts` asks only for the bonded set, which is
+ * the right answer for a delegator shopping for somewhere to stake — a jailed
+ * validator earns them nothing. It is the wrong answer for an operator looking
+ * for their own: on secret-4 most validators are jailed or unbonded, and being
+ * unable to find yours is worst exactly when something has gone wrong with it.
+ *
+ * Sorted by voting power, which puts the active set first without needing to
+ * group by status.
+ */
+export async function queryAllValidators(client: SecretNetworkClient): Promise<Validator[]> {
+  const response = await client.query.staking.validators({ pagination: { limit: '500' } })
+
+  return (response.validators ?? [])
+    .map(toValidator)
+    .filter((v) => v.address)
+    .sort((a, b) => (BigInt(b.tokens) > BigInt(a.tokens) ? 1 : -1))
+}
+
 export interface SigningRecord {
   /** Blocks missed inside the window the chain judges downtime over. */
   missedBlocks: number

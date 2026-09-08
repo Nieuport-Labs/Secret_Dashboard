@@ -6,8 +6,8 @@ import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { errorMessage } from '@/lib/errors'
 import { shortenAddress } from '@/lib/format'
-import { queryValidator, queryValidators, type Validator } from '@/lib/staking'
-import { toValoper } from '@/lib/validator'
+import { queryValidator, type Validator } from '@/lib/staking'
+import { queryAllValidators, toValoper } from '@/lib/validator'
 import ValidatorAvatar from '@/pages/staking/components/ValidatorAvatar'
 import { useAccounts } from '@/store/accounts'
 import { useWallet } from '@/store/wallet'
@@ -51,7 +51,7 @@ export default function AddValidatorModal({ open, onClose }: Props) {
       const valoper = address ? toValoper(address) : undefined
       const [mine, all] = await Promise.all([
         valoper ? queryValidator(client, valoper) : Promise.resolve(undefined),
-        queryValidators(client)
+        queryAllValidators(client)
       ])
       if (cancelled) return
       setOwned(mine)
@@ -145,6 +145,7 @@ export default function AddValidatorModal({ open, onClose }: Props) {
                         {shortenAddress(validator.address, 14, 6)}
                       </span>
                     </span>
+                    <StatusLabel validator={validator} />
                     {added ? <Check size={16} aria-hidden className="shrink-0 text-accent" /> : null}
                   </button>
                 </li>
@@ -154,9 +155,30 @@ export default function AddValidatorModal({ open, onClose }: Props) {
         </ul>
 
         <p className="text-label text-text-faint">
-          Adding one you do not operate is a bookmark — you can watch it, but not sign for it.
+          Every validator on the chain is here, jailed and unbonded ones included — an operator’s
+          reason to come looking is often that theirs has stopped signing. Adding one you do not
+          operate is a bookmark: you can watch it, but not sign for it.
         </p>
       </div>
     </Modal>
   )
+}
+
+/**
+ * Said on every row rather than only the troubled ones.
+ *
+ * Most of the list is jailed or unbonded, so a badge that appeared only there
+ * would read as a warning attached to the exception; marking all four states
+ * makes it a fact about each row instead.
+ */
+function StatusLabel({ validator }: { validator: Validator }) {
+  const [text, tone] = validator.jailed
+    ? ['Jailed', 'text-negative']
+    : validator.status === 'BOND_STATUS_BONDED'
+      ? ['Active', 'text-accent']
+      : validator.status === 'BOND_STATUS_UNBONDING'
+        ? ['Unbonding', 'text-text-muted']
+        : ['Inactive', 'text-text-faint']
+
+  return <span className={`shrink-0 text-label ${tone}`}>{text}</span>
 }
