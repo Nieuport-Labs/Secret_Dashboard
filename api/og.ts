@@ -1,12 +1,7 @@
-import * as satoriModule from 'satori'
-import { Resvg } from '@resvg/resvg-js'
+import satori from 'satori'
+import { initWasm, Resvg } from '@resvg/resvg-wasm'
 
-type SatoriFn = (node: unknown, options: Record<string, unknown>) => Promise<string>
-
-// `satori`'s CJS build exports its function as `.default`; a namespace
-// import sidesteps needing `esModuleInterop` in whatever tsconfig Vercel's
-// builder applies to this directory.
-const satori = (satoriModule as unknown as { default: SatoriFn }).default
+export const config = { runtime: 'edge' }
 
 /**
  * Renders the PNG behind every `og:image` and `twitter:image` in the app.
@@ -21,36 +16,29 @@ const satori = (satoriModule as unknown as { default: SatoriFn }).default
  * params; this file only knows how to turn params into pixels; it has no idea
  * which page asked for them.
  *
- * `satori` (JSX-shaped tree → SVG) plus `@resvg/resvg-js` (SVG → PNG,
- * a native binding) directly, rather than `@vercel/og` — the package this
- * started with. `@vercel/og` wraps exactly this pair, but its packaged
- * Node build turned out to be broken outside Next.js's own bundler: it
- * resolves to a build that imports `fs` and `module` unless something
- * (Next.js's own build step) tells it otherwise, so pointed at the edge
- * sandbox it fails outright ("referencing unsupported modules"); moved to
- * Node, its internal CJS-interop shim does a dynamic `require("fs")` to
- * lazy-load harfbuzzjs that Node refuses once the file executes as an ES
- * module; forced to CommonJS instead, Node refuses to `require()` the
- * package at all, because that same build is itself written with ESM
- * `export` syntax — broken in both directions, all inside one dependency
- * this project does not control. `satori` and `@resvg/resvg-js` are the two
- * libraries `@vercel/og` is built from, used the ordinary way, with neither
- * problem — a native binding needs no dynamic `require`, and satori ships
- * real, separate `import`/`require` builds rather than one file trying to
- * answer to both.
+ * `satori` (JSX-shaped tree → SVG) plus `@resvg/resvg-wasm` (SVG → PNG, a
+ * WebAssembly build) directly, rather than `@vercel/og` — the package this
+ * started with, and which wraps exactly this pair. Its packaged Node build
+ * turned out to work only inside Next.js's own bundler: pointed at the edge
+ * sandbox directly it fails to deploy at all ("referencing unsupported
+ * modules", `fs` and `module`); loaded on Node as an ES module its own
+ * internal harfbuzzjs loader does a dynamic `require("fs")` Node refuses;
+ * forced to CommonJS, Node then refuses to `require()` the file at all,
+ * because the same build is itself written with ESM `export` syntax — broken
+ * in every direction, inside one dependency this project does not control.
+ * Both replacements are what `@vercel/og` is built from, used directly:
+ * satori ships a genuine, separate ESM build (`import satori from 'satori'`,
+ * no CJS/ESM ambiguity), and resvg's WebAssembly build needs no native
+ * binding and no dynamic `require` — a `.wasm` file fetched once and cached
+ * per warm instance, same as the fonts below.
  *
- * A Node.js Function, not an Edge one — `@resvg/resvg-js` is a native
- * binding, which the edge sandbox cannot run. Not a meaningful cost: a
- * link-preview bot's one request per share is not latency-sensitive the way
- * `middleware.ts` treats a real visitor's page load.
- *
- * `.ts`, compiled to CommonJS by `api/package.json` (`{ "type": "commonjs"
- * }`, overriding the root's `"type": "module"` for just this directory).
- * `.ts` is the extension actually recognised as a Function entrypoint by
- * Vercel's zero-config builder — `.mts` and `.cjs` are not; requests to
- * either fell straight through to the SPA's catch-all rewrite instead of
- * reaching a function at all, a 200 with nothing to say it was the wrong
- * page.
+ * Back on the Edge runtime as a result — `@resvg/resvg-js`, the native-binding
+ * sibling of `@resvg/resvg-wasm` tried in between, cannot run there, which is
+ * what forced the detour through Node and its own dead ends above. Edge also
+ * means the plain `.ts` extension is unambiguous again: no `api/package.json`
+ * override, no CommonJS — this is the same edge sandbox `middleware.ts` runs
+ * in, just for a request a crawler makes rather than a real visitor's page
+ * load.
  *
  * Self-contained otherwise. This bundles by itself, separately from Vite —
  * the `@/` path aliases the rest of the app uses do not resolve here, so the
@@ -127,11 +115,22 @@ async function loadGoogleFont(weight: 400 | 700): Promise<ArrayBuffer> {
   return fetch(match[1]).then((res) => res.arrayBuffer())
 }
 
+/**
+ * `initWasm` may only be called once per instance — a second call throws.
+ * Caching the promise (not just the result) means concurrent requests on a
+ * warm instance await the same initialisation instead of racing it.
+ */
+let wasmReady: Promise<void> | undefined
+function ensureWasm(): Promise<void> {
+  wasmReady ??= initWasm(fetch(new URL('@resvg/resvg-wasm/index_bg.wasm', import.meta.url)))
+  return wasmReady
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const kind = url.searchParams.get('kind') ?? 'site'
 
-  const [regular, bold] = await Promise.all([loadGoogleFont(400), loadGoogleFont(700)])
+  const [regular, bold] = await Promise.all([loadGoogleFont(400), loadGoogleFont(700), ensureWasm()])
 
   let eyebrow: { label: string; color: string } | undefined
   let title: string
@@ -288,7 +287,10 @@ export async function GET(request: Request) {
     )
   )
 
-  const svg = await satori(tree, {
+  // satori's own types expect a real React element; the plain object tree
+  // `h()` builds has the identical `{ type, props }` shape satori actually
+  // walks, so this is a type-level fiction rather than a runtime one.
+  const svg = await satori(tree as Parameters<typeof satori>[0], {
     width: 1200,
     height: 630,
     fonts: [
@@ -299,10 +301,10 @@ export async function GET(request: Request) {
 
   const png = new Resvg(svg, { fitTo: { mode: 'width', value: 1200 } }).render().asPng()
 
-  // `Buffer` satisfies `BodyInit` at runtime (it is a `Uint8Array`) but not
-  // structurally under `lib: dom`'s types, which know nothing of Node's
-  // Buffer generic — a plain view over the same bytes clears that up.
-  return new Response(new Uint8Array(png), {
+  // `Uint8Array` is always a valid fetch body at runtime; the mismatch here
+  // is TypeScript's own DOM lib wanting an `ArrayBuffer`-backed view
+  // specifically, which a plain `Uint8Array` return type doesn't pin down.
+  return new Response(png as unknown as BodyInit, {
     headers: {
       'content-type': 'image/png',
       // A share's card is drawn once and then linked from everywhere that
