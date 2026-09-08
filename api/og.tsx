@@ -13,15 +13,23 @@ import { ImageResponse } from '@vercel/og'
  * params; this file only knows how to turn params into pixels; it has no idea
  * which page asked for them.
  *
- * Self-contained on purpose. This runs as its own Edge Function, bundled by
- * Vercel's own esbuild rather than Vite — the `@/` path aliases the rest of
- * the app uses do not resolve here, so the handful of constants this needs
- * (status colours, the hue formula) are copied rather than imported. They are
- * small and stable; see `src/lib/governance.ts` and `src/lib/identicon.ts`
- * for the source of truth if either ever drifts.
+ * A Node.js Function, not an Edge one — deliberately. `@vercel/og`'s package
+ * resolves to a build that imports `fs` and `module` unless something
+ * (Next.js's own build step) tells it otherwise, and outside Next.js there is
+ * nothing to do that telling; pointed at the edge sandbox it fails to deploy
+ * with "referencing unsupported modules". The Node.js runtime is what
+ * Vercel's own docs use for `@vercel/og` outside Next.js, and it is not a
+ * meaningful cost here: a link-preview bot's one request per share is not
+ * latency-sensitive the way `middleware.ts` treats a real visitor's page
+ * load.
+ *
+ * Self-contained otherwise. This bundles by itself, separately from Vite —
+ * the `@/` path aliases the rest of the app uses do not resolve here, so the
+ * handful of constants this needs (status colours, the hue formula) are
+ * copied rather than imported. They are small and stable; see
+ * `src/lib/governance.ts` and `src/lib/identicon.ts` for the source of truth
+ * if either ever drifts.
  */
-
-export const config = { runtime: 'edge' }
 
 const BG = '#080808'
 const TEXT = '#ffffff'
