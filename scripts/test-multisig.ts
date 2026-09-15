@@ -31,6 +31,7 @@
  * The keys are throwaway and hold nothing; only their public halves are here.
  */
 
+import { Secp256k1, sha256 } from '@cosmjs/crypto'
 import { fromBase64, toBase64 } from '@cosmjs/encoding'
 import { MsgSend } from 'cosmjs-types/cosmos/bank/v1beta1/tx.js'
 import { AuthInfo, TxBody, TxRaw } from 'cosmjs-types/cosmos/tx/v1beta1/tx.js'
@@ -64,9 +65,12 @@ import {
   utilsForSeed,
   verifyCiphertext
 } from '../src/lib/multisig/encryption.ts'
+import { composeProposal, rebuildProposal } from '../src/lib/multisig/flow.ts'
+import { verifyCollected, verifyProposal, verifySignature } from '../src/lib/multisig/verify.ts'
 import {
   addressForPubkey,
   createConfig,
+  fingerprintOf,
   deriveMultisig,
   fingerprint,
   parseConfig,
@@ -93,6 +97,16 @@ function check(name: string, condition: boolean, detail?: unknown): void {
   failed += 1
   console.log(`FAIL  ${name}`)
   if (detail !== undefined) console.log(`      ${JSON.stringify(detail)}`)
+}
+
+async function refusesAsync(name: string, run: () => Promise<unknown>, expected: RegExp): Promise<void> {
+  try {
+    await run()
+    check(name, false, 'it was accepted')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    check(name, expected.test(message), message)
+  }
 }
 
 function refuses(name: string, run: () => unknown, expected: RegExp): void {
@@ -951,6 +965,234 @@ function testBundle(): void {
 }
 
 /* -------------------------------------------------------------------------- */
+/* The whole path, against the chain                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Compose, rebuild, verify, sign and assemble — the member's side end to end.
+ *
+ * The proposer's half is simulated by encrypting a real message against
+ * sSCRT's real code hash, because composing for real needs a funded multisig
+ * account and this test has none. Everything after that is the genuine path a
+ * member's machine takes.
+ */
+async function testFlow(): Promise<void> {
+  const { SecretNetworkClient } = await import('secretjs')
+  const url = process.env.LCD_URL ?? DEFAULT_LCD_URLS[0]!
+  const client = new SecretNetworkClient({ url, chainId: CHAIN_ID })
+
+  let codeHash: string
+  try {
+    codeHash = (await client.query.compute.codeHashByContractAddress({ contract_address: SSCRT_ADDRESS }))
+      .code_hash!
+  } catch {
+    console.log('SKIP  the chain is unreachable')
+    return
+  }
+
+  const config = sampleConfig()
+  const seed = newSeed()
+  const utils = await utilsForSeed(url, seed)
+  const inner = { set_viewing_key: { key: 'api_key_dGVzdCBvbmx5' } }
+  const ciphertext = await utils.encrypt(codeHash, inner)
+
+  const proposal: Proposal = {
+    ...sampleProposal(),
+    title: 'Set a viewing key on sSCRT',
+    seed: toBase64(seed),
+    msgs: [
+      {
+        template: 'MsgExecuteContract',
+        content: {
+          sender: MULTISIG_2OF3,
+          contract_address: SSCRT_ADDRESS,
+          code_hash: codeHash,
+          msg: inner,
+          sent_funds: ''
+        },
+        ciphertext: toBase64(ciphertext)
+      }
+    ]
+  }
+
+  const rebuilt = await rebuildProposal(url, proposal)
+  const again = await rebuildProposal(url, proposal)
+  check('rebuilding a proposal twice gives the same document', docsEqual(rebuilt.doc, again.doc))
+  check(
+    'the rebuilt message carries the proposer’s own ciphertext',
+    (rebuilt.doc.msgs[0].value as { msg?: string }).msg === proposal.msgs[0].ciphertext
+  )
+  check('the rebuilt body is messages and memo only', rebuilt.bodyBytes.length > 0)
+
+  // The attack the whole scheme exists to stop: a proposal that shows one
+  // message and carries the ciphertext of another. The shim refuses to hand
+  // over bytes for a message the proposal does not declare, so the transaction
+  // cannot even be built, let alone signed.
+  const tampered: Proposal = {
+    ...proposal,
+    msgs: [
+      {
+        ...proposal.msgs[0],
+        content: { ...proposal.msgs[0].content, msg: { set_viewing_key: { key: 'the attacker’s key' } } }
+      }
+    ]
+  }
+  await refusesAsync(
+    'a proposal showing one message and carrying another cannot be rebuilt',
+    () => rebuildProposal(url, tampered),
+    /does not contain/
+  )
+
+  // And the checklist says so in words, before anyone gets that far.
+  const verdict = await verifyProposal({ config, proposal: tampered, client, lcdUrl: url })
+  const ciphertextCheck = verdict.checks.find((entry) => entry.id.startsWith('ciphertext-'))
+  check('the checklist refuses the tampered proposal', ciphertextCheck?.status === 'fail', ciphertextCheck)
+  check('and it is not signable', !verdict.signable)
+
+  const sound = await verifyProposal({ config, proposal, client, lcdUrl: url, doc: rebuilt.doc })
+  check(
+    'a sound proposal passes the ciphertext check',
+    sound.checks.find((entry) => entry.id.startsWith('ciphertext-'))?.status === 'pass',
+    sound.checks.find((entry) => entry.id.startsWith('ciphertext-'))
+  )
+  check(
+    'a sound proposal passes the code-hash check',
+    sound.checks.find((entry) => entry.id.startsWith('code-hash-'))?.status === 'pass'
+  )
+  check(
+    'the account is checked against the chain',
+    sound.checks.some((entry) => entry.id === 'sequence')
+  )
+  check(
+    'an account the chain has never seen is reported plainly',
+    sound.checks.some((entry) => /never been funded/.test(entry.detail ?? '')),
+    sound.checks.filter((entry) => entry.status === 'fail')
+  )
+  check('which makes it unsignable', !sound.signable)
+
+  // Composing for that same account refuses for the same reason, rather than
+  // building a proposal that could never be broadcast.
+  await refusesAsync(
+    'composing for an account the chain has never seen is refused',
+    () =>
+      composeProposal({
+        client,
+        lcdUrl: url,
+        config,
+        proposer: ADDRESS_A,
+        title: 'Anything',
+        messages: [
+          {
+            template: 'MsgSend',
+            content: { from_address: MULTISIG_2OF3, to_address: ADDRESS_A, amount: '1uscrt' }
+          }
+        ]
+      }),
+    /no account on chain/
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Signatures, with a real key                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A signature is trusted because it verifies, never because it arrived.
+ *
+ * Signed here with a throwaway private key so the checks can be exercised in
+ * both directions — a good signature accepted, and every way of being wrong
+ * refused.
+ */
+async function testSignatures(): Promise<void> {
+  const privkey = new Uint8Array(32).fill(7)
+  const keypair = await Secp256k1.makeKeypair(privkey)
+  const pubkey = Secp256k1.compressPubkey(keypair.pubkey)
+  const member = addressForPubkey(toBase64(pubkey))
+
+  const config = createConfig({
+    label: 'Signing test',
+    threshold: 2,
+    members: [{ pubkey: toBase64(pubkey) }, { pubkey: KEY_A }, { pubkey: KEY_B }],
+    roomKey: 'a'.repeat(64)
+  })
+
+  const doc = buildSignDoc({
+    ...BASE_DOC,
+    msgs: [
+      {
+        type: 'cosmos-sdk/MsgSend',
+        value: {
+          from_address: config.address,
+          to_address: ADDRESS_A,
+          amount: [{ denom: 'uscrt', amount: '1000' }]
+        }
+      }
+    ]
+  })
+
+  const raw = await Secp256k1.createSignature(sha256(signBytes(doc)), privkey)
+  const fixedLength = new Uint8Array([...raw.r(32), ...raw.s(32)])
+
+  const bundle: SignatureBundle = {
+    v: 1,
+    kind: 'signature',
+    proposalId: 'proposal-0001',
+    fingerprint: fingerprintOf(config),
+    pubkey: toBase64(pubkey),
+    signature: toBase64(fixedLength),
+    signBytesHash: signBytesHash(doc),
+    signedAt: Date.now()
+  }
+
+  const good = await verifySignature({ config, doc, bundle })
+  check('a real signature verifies', good.status === 'pass', good)
+  check('and it is attributed to the member who made it', good.label.includes(member), good.label)
+
+  const otherDoc = buildSignDoc({ ...BASE_DOC, memo: 'something else' })
+  const wrongDoc = await verifySignature({ config, doc: otherDoc, bundle })
+  check('a signature over another document is refused', wrongDoc.status === 'fail', wrongDoc)
+  check(
+    'and it says which problem it is',
+    wrongDoc.status === 'fail' && /different transaction/.test(wrongDoc.detail ?? ''),
+    wrongDoc.detail
+  )
+
+  const outsider = createConfig({
+    label: 'Without that member',
+    threshold: 2,
+    members: [{ pubkey: KEY_A }, { pubkey: KEY_B }, { pubkey: KEY_C }],
+    roomKey: 'a'.repeat(64)
+  })
+  const notMember = await verifySignature({ config: outsider, doc, bundle })
+  check('a signature from outside the account is refused', notMember.status === 'fail', notMember)
+  check(
+    'and it says the signer is not a member',
+    notMember.status === 'fail' && /not a member/.test(notMember.detail ?? '')
+  )
+
+  // A single bit, flipped.
+  const damaged = new Uint8Array(fixedLength)
+  damaged[10] ^= 0x01
+  const broken = await verifySignature({
+    config,
+    doc,
+    bundle: { ...bundle, signature: toBase64(damaged) }
+  })
+  check('a damaged signature is refused', broken.status === 'fail', broken)
+
+  // The tray: duplicates from one member must not count twice, or one person
+  // could satisfy a 2-of-3 on their own.
+  const collected = await verifyCollected({
+    config,
+    doc,
+    bundles: [bundle, { ...bundle, signedAt: Date.now() }]
+  })
+  check('one member signing twice counts once', collected.byMember.size === 1, collected.byMember.size)
+  check('and a 2-of-3 is not satisfied by it', !collected.enough)
+  check('only verified signatures are kept', collected.usable.length === 1)
+}
+
+/* -------------------------------------------------------------------------- */
 
 async function main(): Promise<void> {
   console.log('Multisig\n')
@@ -962,6 +1204,8 @@ async function main(): Promise<void> {
   testMessages()
   testBundle()
   await testEncryption()
+  await testSignatures()
+  await testFlow()
 
   console.log(`\n${passed} passed, ${failed} failed`)
   if (failed > 0) process.exitCode = 1
