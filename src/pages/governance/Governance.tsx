@@ -1,5 +1,6 @@
-import { Search } from 'lucide-react'
+import { Plus, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import ProposalCard from '@/pages/governance/components/ProposalCard'
@@ -83,11 +84,23 @@ export default function Governance() {
     <div className="mx-auto flex max-w-[1100px] flex-col gap-7">
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <h1 className="text-display">Governance</h1>
-        {openCount > 0 ? (
-          <p className="text-base text-text-muted">
-            <span className="font-medium text-accent">{openCount}</span> open for voting
-          </p>
-        ) : null}
+        <div className="flex items-center gap-4">
+          {openCount > 0 ? (
+            <p className="text-base text-text-muted">
+              <span className="font-medium text-accent">{openCount}</span> open for voting
+            </p>
+          ) : null}
+          {/*
+            Offered to everyone rather than only to a connected wallet: the form
+            is worth reading before committing to a deposit, and it says what a
+            proposal costs better than a disabled button here could.
+          */}
+          <Link to="/governance/new">
+            <Button variant="soft" shape="control" size="sm" icon={<Plus size={16} aria-hidden />}>
+              New proposal
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
