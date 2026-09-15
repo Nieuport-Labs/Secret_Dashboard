@@ -122,6 +122,96 @@ await refuses(
 await refuses('a bare string is not a message', '"hello"', /must be a JSON object/)
 
 /* -------------------------------------------------------------------------- */
+/* Governance parameters                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The message secretjs's own registry does not list, and the durations it
+ * mangles.
+ *
+ * Both gaps are silent by nature — an unregistered type reads as "unknown
+ * message type" and a mangled duration as nothing at all — so both are pinned
+ * here. The figures are the live ones with the two deposits raised, which is
+ * what a parameter change actually looks like.
+ */
+const UPDATE_PARAMS = {
+  '@type': '/cosmos.gov.v1.MsgUpdateParams',
+  authority: GOV_AUTHORITY,
+  params: {
+    min_deposit: [{ denom: DENOM, amount: '5000000000' }],
+    max_deposit_period: '604800s',
+    voting_period: '604800s',
+    quorum: '0.334000000000000000',
+    threshold: '0.500000000000000000',
+    veto_threshold: '0.334000000000000000',
+    min_initial_deposit_ratio: '0.000000000000000000',
+    proposal_cancel_ratio: '0.500000000000000000',
+    proposal_cancel_dest: '',
+    expedited_voting_period: '86400s',
+    expedited_threshold: '0.666666666666666667',
+    expedited_min_deposit: [{ denom: DENOM, amount: '12500000000' }],
+    burn_vote_quorum: false,
+    burn_proposal_deposit_prevote: false,
+    burn_vote_veto: true,
+    min_deposit_ratio: '0.010000000000000000'
+  }
+}
+
+const updateParams = await encodeProposalMessages(JSON.stringify(UPDATE_PARAMS))
+const written = (updateParams[0]?.decoded.params ?? {}) as Record<string, unknown>
+const seconds = (field: string) => String((written[field] as { seconds?: string })?.seconds ?? '')
+
+check('MsgUpdateParams encodes at all', updateParams.length === 1)
+check(
+  'the voting period survives as seven days, not as zero',
+  seconds('voting_period') === '604800',
+  written.voting_period
+)
+check('the deposit period survives', seconds('max_deposit_period') === '604800', written.max_deposit_period)
+check(
+  'so does the expedited one, at a day',
+  seconds('expedited_voting_period') === '86400',
+  written.expedited_voting_period
+)
+check(
+  'the raised deposits are carried verbatim',
+  JSON.stringify(written.min_deposit) === JSON.stringify(UPDATE_PARAMS.params.min_deposit) &&
+    JSON.stringify(written.expedited_min_deposit) ===
+      JSON.stringify(UPDATE_PARAMS.params.expedited_min_deposit),
+  [written.min_deposit, written.expedited_min_deposit]
+)
+/*
+ * An empty `proposal_cancel_dest` means "burn it", and proto3 writes a default
+ * as nothing at all — so it is absent from the round trip rather than blank.
+ * What matters is that nothing put an address there.
+ */
+check(
+  'an empty cancel destination stays empty rather than acquiring an address',
+  !written.proposal_cancel_dest,
+  written.proposal_cancel_dest
+)
+check(
+  'a false flag stays false and a true one stays true',
+  written.burn_vote_veto === true && !written.burn_vote_quorum,
+  [written.burn_vote_veto, written.burn_vote_quorum]
+)
+
+/* A duration-shaped string in a field that is really a string must survive as
+   one, which is what the fallback in `encodeProposalMessages` is for. */
+const memo = await encodeProposalMessages(
+  JSON.stringify({
+    '@type': '/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade',
+    authority: GOV_AUTHORITY,
+    plan: { name: '600s', height: '1', info: '' }
+  })
+)
+check(
+  'a string that merely looks like a duration is left alone',
+  (memo[0]?.decoded.plan as { name?: string } | undefined)?.name === '600s',
+  memo[0]?.decoded
+)
+
+/* -------------------------------------------------------------------------- */
 /* The chain                                                                   */
 /* -------------------------------------------------------------------------- */
 
@@ -180,7 +270,19 @@ if (!borrowed || !base?.pub_key?.key) {
       title: 'Simulated, never submitted',
       summary: 'Written by scripts/test-proposal.ts to check that the encoding is accepted.',
       metadata: '',
-      messages: pair.map((m) => m.msg),
+      /*
+       * The parameter change, because it is the message this whole path exists
+       * for: unregistered in secretjs and full of durations.
+       *
+       * What this proves is narrower than it looks, and the difference matters.
+       * A node was asked the same question with the durations deliberately
+       * mangled and accepted that too: gov does not validate a proposal's
+       * messages when it stores them, only when it executes them after the
+       * vote. So the simulation says the transaction is well-formed and the
+       * chain will take the proposal — the assertions above, made against the
+       * bytes themselves, are what say it carries what was written.
+       */
+      messages: updateParams.map((m) => m.msg),
       initialDeposit: minimumInitialDeposit(params, false).toString(),
       expedited: false
     },
@@ -227,7 +329,7 @@ if (!borrowed || !base?.pub_key?.key) {
   }
   const used = Number(result.gas_info?.gas_used ?? 0)
 
-  check('the chain accepts a proposal built by this code', used > 0, result.message ?? result)
+  check('the chain accepts a proposal carrying it', used > 0, result.message ?? result)
   if (used > 0) {
     console.log(`  simulated submission ${used} gas\n`)
     check('and the app’s 400k gas limit covers it', used < 400_000, used)

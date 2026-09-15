@@ -175,10 +175,7 @@ export async function queryAllProposals(client: SecretNetworkClient): Promise<Pr
   return (response.proposals ?? []).map(toProposal).filter((p) => p.id)
 }
 
-export async function queryProposal(
-  client: SecretNetworkClient,
-  id: string
-): Promise<Proposal | undefined> {
+export async function queryProposal(client: SecretNetworkClient, id: string): Promise<Proposal | undefined> {
   const response = await client.query.gov.proposal({ proposal_id: id })
   return response.proposal ? toProposal(response.proposal) : undefined
 }
@@ -289,6 +286,23 @@ export async function queryGovParams(client: SecretNetworkClient): Promise<GovPa
     votingPeriod: seconds(params?.voting_period),
     expeditedVotingPeriod: seconds(params?.expedited_voting_period) || seconds(params?.voting_period)
   }
+}
+
+/**
+ * The governance parameters exactly as the chain prints them.
+ *
+ * The typed `GovParams` above is what the app reasons with; this is what a
+ * proposal has to *carry*. `MsgUpdateParams` overwrites the whole `Params`
+ * struct rather than merging into it, so a proposal that names only the field
+ * being changed silently zeroes the other fifteen — which is how a chain ends
+ * up with a voting period of nothing. Handing the author the current set
+ * verbatim, to edit one line of, is the only safe way to offer that message.
+ */
+export async function queryGovParamsJson(
+  client: SecretNetworkClient
+): Promise<Record<string, unknown> | undefined> {
+  const response = await client.query.gov.params({ params_type: 'tallying' })
+  return response.params as Record<string, unknown> | undefined
 }
 
 /** Base units of SCRT in a coin list, ignoring any other denomination. */
@@ -562,9 +576,7 @@ export async function submitProposalMessage(draft: ProposalDraft, proposer: stri
     // A deposit of zero is omitted rather than sent as a zero coin, which the
     // chain reads as a malformed amount rather than as no deposit.
     initial_deposit:
-      BigInt(draft.initialDeposit || '0') > 0n
-        ? [{ denom: DENOM, amount: draft.initialDeposit }]
-        : [],
+      BigInt(draft.initialDeposit || '0') > 0n ? [{ denom: DENOM, amount: draft.initialDeposit }] : [],
     proposer,
     metadata: draft.metadata,
     title: draft.title,

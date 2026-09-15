@@ -52,6 +52,76 @@ interface Codec {
 }
 
 /**
+ * Codecs the chain serves that secretjs's registry does not list.
+ *
+ * `MsgRegistry` is assembled by hand in secretjs from six messages of
+ * `cosmos/gov/v1/tx`, and `MsgUpdateParams` — the only way to change a
+ * governance parameter on an SDK 0.50 chain — is not among them. The generated
+ * codec for it ships in the same package and works; only the registry entry is
+ * missing, so this supplements the lookup rather than reimplementing anything.
+ * The deep import is safe: secretjs declares no `exports` map, so its `dist`
+ * tree is importable by both Vite and Node.
+ *
+ * Every other module's `MsgUpdateParams` is missing from that registry too.
+ * They are a line each when one is actually needed; guessing at which ones will
+ * be would be inventing work.
+ */
+async function extraCodecs(): Promise<Map<string, Codec>> {
+  // The `.js` is not decoration: Node's ESM resolver refuses the
+  // extensionless path, and Vite resolves either.
+  const gov = await import('secretjs/dist/protobuf/cosmos/gov/v1/tx.js')
+  return new Map<string, Codec>([['/cosmos.gov.v1.MsgUpdateParams', gov.MsgUpdateParams as unknown as Codec]])
+}
+
+/**
+ * `"604800s"` → `{ seconds: "604800", nanos: 0 }`, everywhere it appears.
+ *
+ * The chain writes a protobuf `Duration` as the string the JSON mapping calls
+ * for, and it is how the chain prints its own parameters back — but secretjs's
+ * generated `Duration.fromJSON` reads only the `{ seconds, nanos }` form and
+ * answers a string with a *zero duration*. Left alone, a gov parameter change
+ * pasted from the chain's own output encodes a voting period of nothing.
+ *
+ * Recognised by shape rather than by field name, because nothing here knows the
+ * schema of the message being written. A string field whose value happens to
+ * read like a duration would be turned into an object it cannot hold, so the
+ * caller checks for that and falls back to the untouched JSON.
+ */
+const DURATION = /^-?\d+(\.\d+)?s$/
+
+function withDurations(value: unknown): unknown {
+  if (typeof value === 'string' && DURATION.test(value)) {
+    const seconds = value.slice(0, -1)
+    const [whole, fraction = ''] = seconds.split('.')
+    return {
+      seconds: whole,
+      // Nanoseconds are whatever the fraction carried, padded out to nine
+      // digits — "1.5s" is half a second, not five.
+      nanos: fraction ? Number(fraction.padEnd(9, '0').slice(0, 9)) : 0
+    }
+  }
+  if (Array.isArray(value)) return value.map(withDurations)
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, withDurations(entry)])
+    )
+  }
+  return value
+}
+
+/** What a ts-proto codec prints when an object was handed to a string field. */
+const MANGLED = '[object Object]'
+
+function mangled(value: unknown): boolean {
+  if (typeof value === 'string') return value.includes(MANGLED)
+  if (Array.isArray(value)) return value.some(mangled)
+  if (typeof value === 'object' && value !== null) {
+    return Object.values(value as Record<string, unknown>).some(mangled)
+  }
+  return false
+}
+
+/**
  * Parse and encode the messages a proposal should execute.
  *
  * Accepts either a bare message object or an array of them, and both spellings
@@ -78,6 +148,7 @@ export async function encodeProposalMessages(source: string): Promise<EncodedPro
   if (list.length === 0) return []
 
   const { MsgRegistry } = await import('secretjs')
+  const extra = await extraCodecs()
 
   return list.map((entry, index) => {
     const where = list.length > 1 ? ` (message ${index + 1})` : ''
@@ -104,7 +175,7 @@ export async function encodeProposalMessages(source: string): Promise<EncodedPro
       )
     }
 
-    const codec = MsgRegistry.get(typeUrl) as unknown as Codec | undefined
+    const codec = (MsgRegistry.get(typeUrl) as unknown as Codec | undefined) ?? extra.get(typeUrl)
     if (!codec) {
       throw new ProposalMessageError(`Unknown message type ${typeUrl}${where}.`)
     }
@@ -113,9 +184,24 @@ export async function encodeProposalMessages(source: string): Promise<EncodedPro
     let bytes: Uint8Array
     let decoded: Record<string, unknown>
     try {
-      value = codec.fromJSON(fields)
-      bytes = codec.encode(value).finish()
-      decoded = codec.toJSON(codec.decode(bytes)) as Record<string, unknown>
+      const encode = (from: unknown) => {
+        const built = codec.fromJSON(from)
+        const written = codec.encode(built).finish()
+        return { built, written, read: codec.toJSON(codec.decode(written)) as Record<string, unknown> }
+      }
+
+      let attempt = encode(withDurations(fields))
+      /*
+       * A string field that merely looked like a duration was handed an object
+       * and printed back as "[object Object]". The conversion was wrong for
+       * this message, so it is taken back — the durations in it, if any, then
+       * show as zero in the round trip the author is looking at.
+       */
+      if (mangled(attempt.read)) attempt = encode(fields)
+
+      value = attempt.built
+      bytes = attempt.written
+      decoded = attempt.read
     } catch (error) {
       throw new ProposalMessageError(
         `${typeUrl} could not be encoded${where}: ` + (error instanceof Error ? error.message : String(error))
