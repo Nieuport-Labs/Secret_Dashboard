@@ -50,6 +50,13 @@ export const GAS = {
   ibcTransfer: 150_000,
   /** A vote writes one record and re-reads the voter's delegations to weight it. */
   vote: 120_000,
+  /**
+   * Submitting a proposal: the proposal record, its deposit, and whatever
+   * messages it carries stored as bytes. Generous on purpose — the messages are
+   * the author's and their size is not knowable in advance, and a proposal that
+   * runs out of gas costs the fee and leaves nothing on chain.
+   */
+  submitProposal: 400_000,
   /** Validator operations. Each rewrites one record the staking module owns. */
   editValidator: 150_000,
   withdrawCommission: 150_000,

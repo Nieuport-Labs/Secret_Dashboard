@@ -19,6 +19,7 @@ const Bridge = lazy(() => import('@/pages/bridge/Bridge'))
 const Staking = lazy(() => import('@/pages/staking/Staking'))
 const Governance = lazy(() => import('@/pages/governance/Governance'))
 const ProposalDetail = lazy(() => import('@/pages/governance/ProposalDetail'))
+const NewProposal = lazy(() => import('@/pages/governance/NewProposal'))
 const Ecosystem = lazy(() => import('@/pages/ecosystem/Ecosystem'))
 const Network = lazy(() => import('@/pages/network/Network'))
 const Powertools = lazy(() => import('@/pages/powertools/Powertools'))
@@ -108,6 +109,17 @@ export default function App() {
           element={
             <Suspense fallback={<p className="text-base text-text-muted">Loading governance…</p>}>
               <Governance />
+            </Suspense>
+          }
+        />
+        {/* Ahead of `/governance/:id`, which would otherwise read "new" as a
+            proposal number. React Router ranks the static path first regardless
+            of order, but the order says so too. */}
+        <Route
+          path="/governance/new"
+          element={
+            <Suspense fallback={<p className="text-base text-text-muted">Loading…</p>}>
+              <NewProposal />
             </Suspense>
           }
         />

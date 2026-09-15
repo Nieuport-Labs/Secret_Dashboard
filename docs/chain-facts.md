@@ -337,3 +337,45 @@ Nothing was rebuilt against another indexer. The Network page reads Secret's own
 Sampled 2026-09-06: 360,181,634 of 1,446,381,398 SCRT bonded (24.90%), inflation 5.00%, height
 27,026,411, 26 active validators. Only price and value locked still come from outside, and both
 show as unavailable rather than as zero when they cannot be fetched.
+
+## Governance — what a proposal costs and what it may carry
+
+Read from `cosmos/gov/v1/params` on **2026-09-15**, and re-read on every load of the submission
+form rather than baked into it:
+
+| Parameter               | secret-4                             |
+| ----------------------- | ------------------------------------ |
+| `min_deposit`           | 1 000 SCRT                           |
+| `expedited_min_deposit` | 2 500 SCRT                           |
+| `min_deposit_ratio`     | 0.01                                 |
+| `min_initial_deposit_ratio` | 0                                |
+| `max_deposit_period`    | 7 days                               |
+| `voting_period`         | 7 days (expedited: 24 hours)         |
+| `expedited_threshold`   | 0.666…                               |
+| `burn_vote_veto`        | true — a vetoed proposal's deposit is burned |
+
+`min_deposit_ratio` is the one that surprises. It is not the total: it is a floor under **each
+individual deposit**, so the smallest submission this chain accepts is 10 SCRT (25 on the
+expedited track) — a proposal cannot be opened with a token amount and topped up in dribs.
+
+The submission form does not offer the choice at all. It deposits the whole minimum for the
+track, because the only thing a partial deposit buys is a proposal parked in the deposit period
+waiting on a stranger, and this app has no way to top one up. So the track is the decision and
+the price follows from it: 1 000 SCRT for the standard one, 2 500 for expedited.
+
+The gov module's own account, which nearly every executable message has to name as its authority,
+is `secret10d07y265gmmuvt4z0w9aw880jnsr700jc88vt0`. Read off secret-4's own recent proposals, not
+derived.
+
+**Writing a proposal's messages by hand works, with one exception.** `MsgRegistry` in secretjs
+maps every type URL it knows to the generated codec for it, which is what turns hand-written JSON
+into the `Any` a proposal carries — `scripts/test-proposal.ts` builds a two-message
+`MsgSubmitProposal` that way and a node simulates it at ~35k gas. The exception is
+`/secret.compute.*`: those carry a payload encrypted to the consensus key, and the encryption
+lives inside secretjs's own message classes rather than in the codec, so encoding one generically
+would put plain text where a contract expects ciphertext. Those are refused rather than mangled,
+and still belong in `secretcli`.
+
+Protobuf has no notion of an unexpected field, so a misspelled key is dropped in silence. The form
+encodes and then decodes back what it will sign and shows the author that, which is the only
+honest account of what the chain understood.

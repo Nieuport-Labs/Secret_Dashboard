@@ -20,6 +20,7 @@ export const MSG_WITHDRAW_COMMISSION = '/cosmos.distribution.v1beta1.MsgWithdraw
 export const MSG_UNJAIL = '/cosmos.slashing.v1beta1.MsgUnjail'
 /** Governance runs on x/gov **v1** here, not v1beta1 — see lib/governance.ts. */
 export const MSG_VOTE = '/cosmos.gov.v1.MsgVote'
+export const MSG_SUBMIT_PROPOSAL = '/cosmos.gov.v1.MsgSubmitProposal'
 export const MSG_GRANT_ALLOWANCE = '/cosmos.feegrant.v1beta1.MsgGrantAllowance'
 export const MSG_REVOKE_ALLOWANCE = '/cosmos.feegrant.v1beta1.MsgRevokeAllowance'
 /**

@@ -1,4 +1,4 @@
-import type { SecretNetworkClient } from 'secretjs'
+import type { Msg, SecretNetworkClient } from 'secretjs'
 
 import { DENOM } from '@/chains/secret4'
 import { parseTimestamp } from '@/lib/feegrant-sdk'
@@ -82,6 +82,23 @@ export interface GovParams {
   expeditedThreshold: number
   /** Base units of SCRT a proposal needs before it reaches a vote. */
   minDeposit: string
+  /** The same floor for the expedited track, which is higher. */
+  expeditedMinDeposit: string
+  /**
+   * The fraction of the minimum deposit that a *single* deposit has to be.
+   *
+   * Not the same rule as `minDeposit`, and the one that actually rejects a
+   * submission: secret-4 asks 1000 SCRT in total but refuses any one deposit
+   * under 1% of it, so a proposal cannot be opened with a token amount and
+   * topped up later.
+   */
+  minDepositRatio: number
+  /** Seconds a proposal has to reach `minDeposit` before it is dropped. */
+  maxDepositPeriod: number
+  /** Seconds of voting once it does. */
+  votingPeriod: number
+  /** The shorter period an expedited proposal gets instead. */
+  expeditedVotingPeriod: number
 }
 
 /* -------------------------------------------------------------------------- */
@@ -262,9 +279,52 @@ export async function queryGovParams(client: SecretNetworkClient): Promise<GovPa
     // Falls back to the ordinary threshold rather than to a guess: treating a
     // proposal as needing a bar the chain never stated would misreport it.
     expeditedThreshold: asFraction(params?.expedited_threshold, asFraction(params?.threshold, 0.5)),
-    minDeposit:
-      (params?.min_deposit ?? []).find((c) => c.denom === DENOM)?.amount ?? '0'
+    minDeposit: scrtAmount(params?.min_deposit),
+    // Falls back to the ordinary floor rather than to zero: a submission form
+    // that understates what the expedited track costs sends a transaction the
+    // chain refuses after the fee is paid.
+    expeditedMinDeposit: scrtAmount(params?.expedited_min_deposit) || scrtAmount(params?.min_deposit),
+    minDepositRatio: Number(params?.min_deposit_ratio) || 0,
+    maxDepositPeriod: seconds(params?.max_deposit_period),
+    votingPeriod: seconds(params?.voting_period),
+    expeditedVotingPeriod: seconds(params?.expedited_voting_period) || seconds(params?.voting_period)
   }
+}
+
+/** Base units of SCRT in a coin list, ignoring any other denomination. */
+function scrtAmount(coins: Array<{ denom?: string; amount?: string }> | undefined): string {
+  return (coins ?? []).find((c) => c.denom === DENOM)?.amount ?? '0'
+}
+
+/**
+ * `"604800s"` → 604800. The chain writes durations with the unit attached.
+ *
+ * Typed `unknown` because secretjs declares these fields as a protobuf
+ * `Duration` object while the REST gateway actually sends the string form.
+ */
+function seconds(duration: unknown): number {
+  const parsed = Number(String(duration ?? '').replace(/s$/, ''))
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+/**
+ * The smallest deposit that can open a proposal, in base units.
+ *
+ * Not `minDeposit`: that is the total a proposal needs before it reaches a
+ * vote, and anyone may contribute to it. This is the floor the chain puts under
+ * each individual deposit — `min_deposit_ratio` of the minimum for the track
+ * being used — which is what a submission is actually measured against.
+ */
+export function minimumInitialDeposit(params: GovParams, expedited: boolean): bigint {
+  const floor = BigInt(expedited ? params.expeditedMinDeposit : params.minDeposit)
+  if (params.minDepositRatio <= 0) return 0n
+
+  // Rounded up, so the figure offered is never a hair under what the chain
+  // compares against.
+  const scale = 1_000_000n
+  const ratio = BigInt(Math.round(params.minDepositRatio * Number(scale)))
+  const product = floor * ratio
+  return product / scale + (product % scale === 0n ? 0n : 1n)
 }
 
 /** Everything currently staked — the denominator quorum is measured against. */
@@ -444,4 +504,84 @@ export async function voteMessage(proposalId: string, voter: string, option: Vot
     // has nothing to put in it.
     metadata: ''
   })
+}
+
+/**
+ * Field limits the chain enforces on a proposal, from the SDK's gov module.
+ *
+ * Checked in the form rather than left to the chain: every one of these
+ * rejects the transaction *after* the fee is spent, and a proposal is the most
+ * expensive thing this app sends.
+ */
+export const PROPOSAL_LIMITS = {
+  title: 255,
+  summary: 10_200,
+  metadata: 255
+} as const
+
+/**
+ * What each track cost on secret-4 when this was written, in base units.
+ *
+ * A fallback, never the first answer: `queryGovParams` is what the form quotes
+ * and spends. These exist so that a node failing to answer leaves the page
+ * usable with a figure that was true rather than with nothing at all — and if
+ * governance has since voted the deposit up, the chain refuses the submission
+ * instead of quietly taking the wrong amount.
+ */
+export const DEPOSIT_FALLBACK = {
+  standard: '1000000000',
+  expedited: '2500000000'
+} as const
+
+export interface ProposalDraft {
+  title: string
+  summary: string
+  /** Free-form, and stored verbatim. Conventionally a link to the full text. */
+  metadata: string
+  /** What passing would execute. Empty is a text proposal, which is normal. */
+  messages: Msg[]
+  /** Base units of SCRT put up at submission. */
+  initialDeposit: string
+  expedited: boolean
+}
+
+/**
+ * Submitting a proposal, built here for the same reason `voteMessage` is.
+ *
+ * gov **v1**, so the proposal carries its own title and summary rather than a
+ * legacy `content` object, and the messages are executed directly if it passes.
+ * secretjs cannot amino-encode this message at all — `toAmino` throws — which
+ * is no obstacle here only because this app signs with the direct signer
+ * throughout. A Ledger-backed, amino-only wallet cannot submit a proposal.
+ */
+export async function submitProposalMessage(draft: ProposalDraft, proposer: string) {
+  const { MsgSubmitProposal } = await import('secretjs')
+
+  return new MsgSubmitProposal({
+    messages: draft.messages,
+    // A deposit of zero is omitted rather than sent as a zero coin, which the
+    // chain reads as a malformed amount rather than as no deposit.
+    initial_deposit:
+      BigInt(draft.initialDeposit || '0') > 0n
+        ? [{ denom: DENOM, amount: draft.initialDeposit }]
+        : [],
+    proposer,
+    metadata: draft.metadata,
+    title: draft.title,
+    summary: draft.summary,
+    expedited: draft.expedited
+  })
+}
+
+/**
+ * The number the chain gave the proposal that was just submitted.
+ *
+ * Read out of the transaction's own log rather than by re-reading the list: a
+ * query right after the broadcast can still land on a node that has not caught
+ * up, and the id is what the receipt links to.
+ */
+export function submittedProposalId(
+  log: Array<{ type: string; key: string; value: string }> | undefined
+): string | undefined {
+  return log?.find((entry) => entry.type === 'submit_proposal' && entry.key === 'proposal_id')?.value
 }
