@@ -343,16 +343,16 @@ show as unavailable rather than as zero when they cannot be fetched.
 Read from `cosmos/gov/v1/params` on **2026-09-15**, and re-read on every load of the submission
 form rather than baked into it:
 
-| Parameter               | secret-4                             |
-| ----------------------- | ------------------------------------ |
-| `min_deposit`           | 1 000 SCRT                           |
-| `expedited_min_deposit` | 2 500 SCRT                           |
-| `min_deposit_ratio`     | 0.01                                 |
-| `min_initial_deposit_ratio` | 0                                |
-| `max_deposit_period`    | 7 days                               |
-| `voting_period`         | 7 days (expedited: 24 hours)         |
-| `expedited_threshold`   | 0.666…                               |
-| `burn_vote_veto`        | true — a vetoed proposal's deposit is burned |
+| Parameter                   | secret-4                                     |
+| --------------------------- | -------------------------------------------- |
+| `min_deposit`               | 1 000 SCRT                                   |
+| `expedited_min_deposit`     | 2 500 SCRT                                   |
+| `min_deposit_ratio`         | 0.01                                         |
+| `min_initial_deposit_ratio` | 0                                            |
+| `max_deposit_period`        | 7 days                                       |
+| `voting_period`             | 7 days (expedited: 24 hours)                 |
+| `expedited_threshold`       | 0.666…                                       |
+| `burn_vote_veto`            | true — a vetoed proposal's deposit is burned |
 
 `min_deposit_ratio` is the one that surprises. It is not the total: it is a floor under **each
 individual deposit**, so the smallest submission this chain accepts is 10 SCRT (25 on the
@@ -379,3 +379,30 @@ and still belong in `secretcli`.
 Protobuf has no notion of an unexpected field, so a misspelled key is dropped in silence. The form
 encodes and then decodes back what it will sign and shows the author that, which is the only
 honest account of what the chain understood.
+
+## Two silent gaps between secretjs and gov v1 — found 2026-09-15
+
+**`/cosmos.gov.v1.MsgUpdateParams` is not in `MsgRegistry`.** secretjs assembles that map by hand
+from six messages of `cosmos/gov/v1/tx`, and the one that changes a governance parameter on an SDK
+0.50 chain is not among them — nor is any other module's `MsgUpdateParams`. The generated codec
+ships in the same package and works; only the registry entry is missing, so `proposalMessages.ts`
+supplements the lookup with a deep import. secretjs declares no `exports` map, so `dist` is
+importable by Vite and Node alike — no patch-package, no fork.
+
+**ts-proto answers a duration string with a zero duration.** The chain writes a `Duration` as
+`"604800s"` and prints its own parameters back that way, but the generated `Duration.fromJSON`
+reads only `{ seconds, nanos }` and silently yields zero for anything else. A parameter change
+pasted from the chain's own output therefore encoded a voting period of **nothing**. Duration-
+shaped strings are now converted before encoding, with a fallback for the case where the field was
+really a string (`"[object Object]"` in the round trip gives that away).
+
+**And gov does not validate a proposal's messages until it executes them.** A node was asked to
+simulate the same proposal with the durations deliberately mangled and accepted it at 28,745 gas —
+`ValidateBasic` on the inner message runs after the vote, not at submission. So a rehearsal proves
+the transaction is well-formed and the chain will take the proposal; it does **not** prove the
+proposal says what was meant. That is what the round trip in the form is for, and what
+`scripts/test-proposal.ts` asserts against the bytes themselves.
+
+Note that proto3 writes a default as nothing at all, so `proposal_cancel_dest: ""` — which means
+"burn the deposit" — and the two `false` burn flags are absent from the decoded view rather than
+shown as empty. They are still exactly what was asked for.

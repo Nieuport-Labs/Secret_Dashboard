@@ -13,6 +13,7 @@ import {
   PROPOSAL_LIMITS,
   messageTypeLabel,
   queryGovParams,
+  queryGovParamsJson,
   type GovParams
 } from '@/lib/governance'
 import {
@@ -21,6 +22,7 @@ import {
   encodeProposalMessages,
   type EncodedProposalMessage
 } from '@/lib/proposalMessages'
+import { PROPOSAL_TEMPLATES } from '@/lib/proposalTemplates'
 import { useBalances } from '@/hooks/useBalances'
 import { useSubmitProposal } from '@/hooks/useSubmitProposal'
 import { useWallet } from '@/store/wallet'
@@ -61,6 +63,9 @@ export default function NewProposal() {
   const messagesId = useId()
 
   const [params, setParams] = useState<GovParams | undefined>()
+  /** The same parameters unparsed, which is what a parameter-change template
+   *  has to carry — see `queryGovParamsJson`. */
+  const [rawParams, setRawParams] = useState<Record<string, unknown> | undefined>()
   const [title, setTitle] = useState('')
   const [summary, setSummary] = useState('')
   const [metadata, setMetadata] = useState('')
@@ -81,6 +86,11 @@ export default function NewProposal() {
     void queryGovParams(queryClient)
       .then((read) => {
         if (live) setParams(read)
+      })
+      .catch(() => undefined)
+    void queryGovParamsJson(queryClient)
+      .then((read) => {
+        if (live) setRawParams(read)
       })
       .catch(() => undefined)
     return () => {
@@ -273,6 +283,29 @@ export default function NewProposal() {
 
               {carriesMessages ? (
                 <>
+                  {/*
+                    Templates before the editor, because the field names are the
+                    part nobody remembers. Each is a starting point that still
+                    has to be edited — the treasury one has no recipient, the
+                    upgrade no height — so none of them is signable as it lands.
+                  */}
+                  <div className="flex flex-col gap-2">
+                    <span className="text-label text-text-muted">Start from</span>
+                    <div className="flex flex-wrap gap-2">
+                      {PROPOSAL_TEMPLATES.map((template) => (
+                        <button
+                          key={template.id}
+                          type="button"
+                          title={template.detail}
+                          onClick={() => setMessagesJson(template.json(rawParams))}
+                          className="state-layer rounded-pill border border-border px-3 py-1.5 text-sm font-medium text-text-muted transition-colors duration-[var(--duration-short)] ease-[var(--ease-standard)] hover:text-text"
+                        >
+                          {template.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <Field
                     label="Messages"
                     id={messagesId}
@@ -289,24 +322,14 @@ export default function NewProposal() {
                     />
                   </Field>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      variant="text"
-                      shape="control"
-                      size="sm"
-                      onClick={() => setMessagesJson(EXAMPLE_MESSAGE)}
-                    >
-                      Insert an example
-                    </Button>
-                    {/*
-                      Compute messages are the one gap, and saying so here is
-                      cheaper than letting someone write one out and then be
-                      refused with no idea why.
-                    */}
-                    <span className="text-label text-text-faint">
-                      Contract messages cannot be written here — their payload has to be encrypted.
-                    </span>
-                  </div>
+                  {/*
+                    Compute messages are the one gap, and saying so here is
+                    cheaper than letting someone write one out and then be
+                    refused with no idea why.
+                  */}
+                  <span className="text-label text-text-faint">
+                    Contract messages cannot be written here — their payload has to be encrypted.
+                  </span>
 
                   {messagesError ? (
                     <p className="break-words text-base text-negative" role="alert">
@@ -459,22 +482,6 @@ export default function NewProposal() {
     </div>
   )
 }
-
-/**
- * A community pool spend, as the starting point.
- *
- * Chosen because it is the type most likely to be written by hand, and because
- * every field in it has to be changed before it means anything — nothing here
- * can be submitted by accident.
- */
-const EXAMPLE_MESSAGE = `[
-  {
-    "@type": "/cosmos.distribution.v1beta1.MsgCommunityPoolSpend",
-    "authority": "${GOV_AUTHORITY}",
-    "recipient": "secret1…",
-    "amount": [{ "denom": "uscrt", "amount": "1000000" }]
-  }
-]`
 
 /** `604800` → `7 days`, for a chain parameter written in seconds. */
 function duration(seconds: number | undefined): string {
