@@ -17,7 +17,20 @@ export interface AminoSignDoc {
   chain_id: string
   account_number: string
   sequence: string
-  fee: { amount: Array<{ denom: string; amount: string }>; gas: string }
+  fee: {
+    amount: Array<{ denom: string; amount: string }>
+    gas: string
+    /**
+     * Who pays, when it is not the signer.
+     *
+     * Optional here and load-bearing for multisig: the granter is part of the
+     * document that gets signed, so a transaction assembled without it no
+     * longer matches any of the signatures collected for it. See
+     * `src/lib/multisig/assemble.ts`.
+     */
+    granter?: string
+    payer?: string
+  }
   msgs: Array<{ type: string; value: unknown }>
   memo: string
 }
