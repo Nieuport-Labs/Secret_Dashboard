@@ -35,7 +35,17 @@ import { fromBase64, toBase64 } from '@cosmjs/encoding'
 import { MsgSend } from 'cosmjs-types/cosmos/bank/v1beta1/tx.js'
 import { AuthInfo, TxBody, TxRaw } from 'cosmjs-types/cosmos/tx/v1beta1/tx.js'
 
+import { CHAIN_ID, DEFAULT_LCD_URLS } from '../src/chains/secret4.ts'
+import { SSCRT_ADDRESS } from '../src/tokens/registry.ts'
 import { assembleTx, buildBodyBytes, compactBitArray } from '../src/lib/multisig/assemble.ts'
+import {
+  fixedCiphertextUtils,
+  newSeed,
+  seedPubkey,
+  senderPubkeyOf,
+  utilsForSeed,
+  verifyCiphertext
+} from '../src/lib/multisig/encryption.ts'
 import {
   addressForPubkey,
   createConfig,
@@ -432,17 +442,130 @@ function testAssembly(): void {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Encrypted messages, against the chain                                       */
+/* -------------------------------------------------------------------------- */
 
-function main(): void {
+/**
+ * The assertion this whole feature rests on: a member who did not encrypt a
+ * message can tell what it says, and can tell when it says something else.
+ *
+ * Needs the chain, because decryption derives its key from the consensus IO
+ * public key the node publishes. Nothing is signed or sent — one contract
+ * query for a code hash, and arithmetic.
+ */
+async function testEncryption(): Promise<void> {
+  const { SecretNetworkClient } = await import('secretjs')
+  const url = process.env.LCD_URL ?? DEFAULT_LCD_URLS[0]!
+  const client = new SecretNetworkClient({ url, chainId: CHAIN_ID })
+
+  let codeHash: string
+  try {
+    codeHash = (await client.query.compute.codeHashByContractAddress({ contract_address: SSCRT_ADDRESS })).code_hash!
+  } catch (error) {
+    console.log(`SKIP  the chain is unreachable (${error instanceof Error ? error.message : String(error)})`)
+    return
+  }
+
+  const seed = newSeed()
+  const message = { set_viewing_key: { key: 'api_key_ZmFrZSBrZXkgZm9yIGEgdGVzdA==' } }
+  const utils = await utilsForSeed(url, seed)
+  const ciphertext = await utils.encrypt(codeHash, message)
+
+  check('a ciphertext carries its nonce and sender key', ciphertext.length > 64, ciphertext.length)
+  check(
+    'the sender key in the ciphertext is the one the seed produces',
+    toBase64(senderPubkeyOf(ciphertext)) === toBase64(await seedPubkey(seed))
+  )
+
+  const verdict = await verifyCiphertext({
+    lcdUrl: url,
+    seed,
+    ciphertext,
+    declaredCodeHash: codeHash,
+    declaredMsg: message
+  })
+  check('a member can verify the message a proposal declares', verdict.status === 'exact', verdict)
+
+  // The three ways a proposal can lie about what it is asking for.
+  const wrongMsg = await verifyCiphertext({
+    lcdUrl: url,
+    seed,
+    ciphertext,
+    declaredCodeHash: codeHash,
+    declaredMsg: { set_viewing_key: { key: 'something else entirely' } }
+  })
+  check('a message that is not what it claims is refused', wrongMsg.status === 'mismatch', wrongMsg)
+
+  const wrongCodeHash = await verifyCiphertext({
+    lcdUrl: url,
+    seed,
+    ciphertext,
+    declaredCodeHash: 'f'.repeat(64),
+    declaredMsg: message
+  })
+  check('a message encrypted to another contract is refused', wrongCodeHash.status === 'mismatch', wrongCodeHash)
+
+  const wrongSeed = await verifyCiphertext({
+    lcdUrl: url,
+    seed: newSeed(),
+    ciphertext,
+    declaredCodeHash: codeHash,
+    declaredMsg: message
+  })
+  check('a decoy seed is caught before anything is decrypted', wrongSeed.status === 'mismatch', wrongSeed)
+  check(
+    'and it is caught for the right reason',
+    wrongSeed.status === 'mismatch' && /not encrypted with the key/.test(wrongSeed.reason),
+    wrongSeed
+  )
+
+  // Same meaning, different spelling: allowed, but reported rather than waved
+  // through, because a proposal this app built would never produce it.
+  const reordered = await verifyCiphertext({
+    lcdUrl: url,
+    seed,
+    ciphertext: await utils.encrypt(codeHash, { b: 2, a: 1 } as unknown as object),
+    declaredCodeHash: codeHash,
+    declaredMsg: { a: 1, b: 2 }
+  })
+  check('a differently serialised message is flagged, not refused', reordered.status === 'equivalent', reordered)
+
+  // The shim that lets a member re-encode the proposer's exact bytes.
+  const fixed = fixedCiphertextUtils(utils, [{ codeHash, msg: message, ciphertext }])
+  const handedBack = await fixed.encrypt(codeHash, message)
+  check('the shim hands back the proposer’s ciphertext', toBase64(handedBack) === toBase64(ciphertext))
+
+  try {
+    await fixed.encrypt(codeHash, { transfer: { recipient: ADDRESS_A, amount: '1' } })
+    check('the shim refuses a message the proposal does not contain', false, 'it was accepted')
+  } catch (error) {
+    check(
+      'the shim refuses a message the proposal does not contain',
+      /does not contain/.test(error instanceof Error ? error.message : '')
+    )
+  }
+
+  try {
+    await fixed.encrypt(codeHash, message)
+    check('the shim will not reuse one ciphertext twice', false, 'it was accepted')
+  } catch {
+    check('the shim will not reuse one ciphertext twice', true)
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+
+async function main(): Promise<void> {
   console.log('Multisig\n')
   testDerivation()
   testFingerprint()
   testConfig()
   testSignDoc()
   testAssembly()
+  await testEncryption()
 
   console.log(`\n${passed} passed, ${failed} failed`)
   if (failed > 0) process.exitCode = 1
 }
 
-main()
+await main()
