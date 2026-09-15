@@ -103,6 +103,9 @@ export const EXPLORER_TX_TEMPLATE = 'https://secretnodes.com/transactions/{hash}
 export const EXPLORER_ACCOUNT_TEMPLATE = 'https://secretnodes.com/accounts/{address}'
 export const EXPLORER_VALIDATOR_TEMPLATE = 'https://secretnodes.com/nodes/{address}'
 
+/** Contracts get their own page: code ID, admin, label. `/accounts` only hints at them. */
+export const EXPLORER_CONTRACT_TEMPLATE = 'https://secretnodes.com/contracts/{address}'
+
 /**
  * Gas vault contract (`contracts/gas-vault` in jirkacepelka/fee-granter). Pay
  * SCRT in with a grantee address and the contract issues that address a fee
@@ -128,6 +131,10 @@ export function explorerAccountUrl(address: string): string {
 
 export function explorerValidatorUrl(address: string): string {
   return EXPLORER_VALIDATOR_TEMPLATE.replace('{address}', address)
+}
+
+export function explorerContractUrl(address: string): string {
+  return EXPLORER_CONTRACT_TEMPLATE.replace('{address}', address)
 }
 
 /** Named separately because the copied fee-grant modules expect these spellings. */

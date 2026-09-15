@@ -21,7 +21,7 @@ import UnbondingBranches from '@/components/wallet/UnbondingBranches'
 import type { Balances, TokenBalance } from '@/hooks/useBalances'
 import type { Derivative } from '@/hooks/useDerivative'
 import type { NativeUnbondings } from '@/hooks/useNativeUnbondings'
-import { DECIMALS, DENOM, DISPLAY_DENOM, explorerAccountUrl } from '@/chains/secret4'
+import { DECIMALS, DENOM, DISPLAY_DENOM, explorerContractUrl } from '@/chains/secret4'
 import { cn } from '@/lib/cn'
 import { dismissQueueOffer, queueOfferDismissed } from '@/lib/derivative'
 import { formatDisplayAmount, formatFiat, shortenAddress } from '@/lib/format'
@@ -469,7 +469,7 @@ export default function BalanceList({
                       <MenuItem
                         icon={<ExternalLink size={16} aria-hidden />}
                         onClick={() =>
-                          window.open(explorerAccountUrl(row.contract!), '_blank', 'noreferrer,noopener')
+                          window.open(explorerContractUrl(row.contract!), '_blank', 'noreferrer,noopener')
                         }
                       >
                         View contract
