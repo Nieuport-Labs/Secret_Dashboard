@@ -1,10 +1,12 @@
-import { Check, ChevronDown, LogOut, Plus, Settings as SettingsIcon } from 'lucide-react'
+import { Check, ChevronDown, LogOut, Plus, Settings as SettingsIcon, UserRound } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import AddAccountModal from '@/components/accounts/AddAccountModal'
 import AddValidatorModal from '@/components/accounts/AddValidatorModal'
 import Menu, { MenuItem } from '@/components/ui/Menu'
+import ProfileModal from '@/components/wallet/ProfileModal'
+import { useProfileIdentity } from '@/hooks/useProfileIdentity'
 import { useValidatorProfile } from '@/hooks/useValidatorProfile'
 import { shortenAddress } from '@/lib/format'
 import { queryValidator } from '@/lib/staking'
@@ -24,6 +26,12 @@ interface Props {
  * not a second key — so switching never disconnects anything. What it does
  * change is the whole shell around it, which is why the switch lives on the
  * identity in the header rather than somewhere in settings.
+ *
+ * The chip is two controls in one border, and the split is the point. Pressing
+ * the identity opens the profile, which is what someone pointing at their own
+ * name and picture is reaching for; the menu is behind the chevron, which is
+ * what a chevron has always promised. One button doing both meant the common
+ * intention — "let me look at me" — had no way of being expressed at all.
  */
 export default function WalletChip({ onOpenSettings }: Props) {
   const navigate = useNavigate()
@@ -38,6 +46,12 @@ export default function WalletChip({ onOpenSettings }: Props) {
 
   const [choosingKind, setChoosingKind] = useState(false)
   const [addingValidator, setAddingValidator] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+
+  // The published picture, not the local one: the header should show what
+  // everybody else sees, so a profile that looks right here looks right to the
+  // person who was sent the link.
+  const identity = useProfileIdentity(address ?? '')
 
   if (!address) return null
 
@@ -53,75 +67,93 @@ export default function WalletChip({ onOpenSettings }: Props) {
 
   return (
     <>
-      <Menu
-        label="Account menu"
-        triggerClassName="flex items-center gap-2 rounded-control border border-border py-1.5 pl-2.5 pr-2 text-base font-medium"
-        /*
+      <div className="flex items-stretch rounded-control border border-border">
+        {/*
           Name over address, the same two lines the menu shows for this account.
           The chip used to show one or the other — the wallet's address with no
           name, a validator's moniker with no address — so the strip never quite
           answered "which account is this, and is it the one I meant". Both
           lines cost one row of header height and settle it.
-        */
-        trigger={
-          active ? (
+        */}
+        <button
+          type="button"
+          onClick={() => setProfileOpen(true)}
+          className="state-layer flex items-center gap-2 rounded-l-control py-1.5 pl-2.5 pr-2 text-base font-medium"
+        >
+          {active ? (
             <>
               <AccountAvatar account={active.account} size={22} />
               <Identity name={active.account.moniker} address={active.account.valoper} />
-              <ChevronDown size={14} aria-hidden className="shrink-0 text-text-muted" />
             </>
           ) : (
             <>
-              <img src="/img/secret-mark.svg" alt="" className="h-[22px] w-[22px] shrink-0" />
-              <Identity name={accountName ?? 'Wallet'} address={address} />
-              <ChevronDown size={14} aria-hidden className="shrink-0 text-text-muted" />
+              <ChipAvatar url={identity.avatarUrl} />
+              {/* The published name wins over the one the wallet extension
+                  calls this key: the profile is the account's own answer to
+                  "who is this", and the extension's label is a local nickname
+                  nobody else can see. */}
+              <Identity name={identity.name ?? accountName ?? 'Wallet'} address={address} />
             </>
-          )
-        }
-        className="min-w-[240px]"
-      >
-        <MenuItem
-          icon={<img src="/img/secret-mark.svg" alt="" className="h-4 w-4 shrink-0" />}
-          onClick={switchToWallet}
-        >
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate">{accountName ?? 'Wallet'}</span>
-            <span className="text-label text-text-faint">{shortenAddress(address)}</span>
-          </span>
-          {active ? null : <Check size={15} aria-hidden className="ml-2 shrink-0 text-accent" />}
-        </MenuItem>
+          )}
+        </button>
 
-        {accounts.map((account) => (
+        <Menu
+          label="Account menu"
+          triggerClassName="flex h-full items-center rounded-r-control px-1.5 text-text-muted"
+          trigger={<ChevronDown size={14} aria-hidden />}
+          className="min-w-[240px]"
+        >
           <MenuItem
-            key={account.valoper}
-            icon={<AccountAvatar account={account} size={16} />}
-            onClick={() => switchToValidator(account.valoper)}
+            icon={<img src="/img/secret-mark.svg" alt="" className="h-4 w-4 shrink-0" />}
+            onClick={switchToWallet}
           >
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="max-w-[150px] truncate">{account.moniker}</span>
-              <span className="text-label text-text-faint">
-                {account.operator ? 'Validator' : 'Validator · watching'}
-              </span>
+              <span className="truncate">{accountName ?? 'Wallet'}</span>
+              <span className="text-label text-text-faint">{shortenAddress(address)}</span>
             </span>
-            {active?.account.valoper === account.valoper ? (
-              <Check size={15} aria-hidden className="ml-2 shrink-0 text-accent" />
-            ) : null}
+            {active ? null : <Check size={15} aria-hidden className="ml-2 shrink-0 text-accent" />}
           </MenuItem>
-        ))}
 
-        <MenuItem icon={<Plus size={16} aria-hidden />} onClick={() => setChoosingKind(true)}>
-          Add
-        </MenuItem>
+          {accounts.map((account) => (
+            <MenuItem
+              key={account.valoper}
+              icon={<AccountAvatar account={account} size={16} />}
+              onClick={() => switchToValidator(account.valoper)}
+            >
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="max-w-[150px] truncate">{account.moniker}</span>
+                <span className="text-label text-text-faint">
+                  {account.operator ? 'Validator' : 'Validator · watching'}
+                </span>
+              </span>
+              {active?.account.valoper === account.valoper ? (
+                <Check size={15} aria-hidden className="ml-2 shrink-0 text-accent" />
+              ) : null}
+            </MenuItem>
+          ))}
 
-        <hr className="my-1 border-border" />
+          <MenuItem icon={<Plus size={16} aria-hidden />} onClick={() => setChoosingKind(true)}>
+            Add
+          </MenuItem>
 
-        <MenuItem icon={<SettingsIcon size={16} aria-hidden />} onClick={onOpenSettings}>
-          Settings
-        </MenuItem>
-        <MenuItem icon={<LogOut size={16} aria-hidden />} onClick={disconnect}>
-          Disconnect
-        </MenuItem>
-      </Menu>
+          <hr className="my-1 border-border" />
+
+          {/* Also in the menu, not only behind the identity. The split trigger is
+            worth having and still has to be discovered, and a profile that can
+            only be reached by guessing might as well not be there. */}
+          <MenuItem icon={<UserRound size={16} aria-hidden />} onClick={() => setProfileOpen(true)}>
+            Profile
+          </MenuItem>
+          <MenuItem icon={<SettingsIcon size={16} aria-hidden />} onClick={onOpenSettings}>
+            Settings
+          </MenuItem>
+          <MenuItem icon={<LogOut size={16} aria-hidden />} onClick={disconnect}>
+            Disconnect
+          </MenuItem>
+        </Menu>
+      </div>
+
+      <ProfileModal open={profileOpen} onClose={() => setProfileOpen(false)} address={address} />
 
       <AddAccountModal
         open={choosingKind}
@@ -153,6 +185,21 @@ function Identity({ name, address }: { name: string; address: string }) {
       </span>
     </span>
   )
+}
+
+/**
+ * The wallet's face in the header: its published avatar, or the Secret mark
+ * when it has none.
+ *
+ * The mark rather than the generated identicon the profile page falls back to.
+ * This chip is the app's own furniture and there is exactly one of it, so a
+ * coloured blob would read as a broken image rather than as an identity — the
+ * identicon earns its place in a list, where it tells rows apart.
+ */
+function ChipAvatar({ url }: { url?: string }) {
+  if (!url) return <img src="/img/secret-mark.svg" alt="" className="h-[22px] w-[22px] shrink-0" />
+
+  return <img src={url} alt="" className="h-[22px] w-[22px] shrink-0 rounded-pill object-cover" />
 }
 
 /**
