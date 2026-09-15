@@ -11,7 +11,7 @@ import {
   probeRpc,
   type ProbeResult
 } from '@/lib/endpoint'
-import { usePermit } from '@/hooks/usePermit'
+import { STAKING_SCOPE, usePermit } from '@/hooks/usePermit'
 import { errorMessage } from '@/lib/errors'
 import { availableFee, type FeeGrant } from '@/lib/feegrant-sdk'
 import { formatAmount, shortenAddress } from '@/lib/format'
@@ -408,7 +408,9 @@ function CustomTokensSection() {
                 >
                   <span className="min-w-0">
                     <span className="block font-medium">{token.symbol}</span>
-                    <span className="break-address block text-text-faint">{shortenAddress(token.address)}</span>
+                    <span className="break-address block text-text-faint">
+                      {shortenAddress(token.address)}
+                    </span>
                   </span>
                   <button
                     type="button"
@@ -430,6 +432,9 @@ function CustomTokensSection() {
 
 function PermitSection() {
   const { permit, staleTokens, signing, sign, forget } = usePermit()
+  // The derivative's permit is a separate signature — see `STAKING_SCOPE` — so
+  // it is a separate thing to be told about and a separate thing to forget.
+  const staking = usePermit(STAKING_SCOPE)
 
   return (
     <section className="flex flex-col gap-3">
@@ -453,6 +458,21 @@ function PermitSection() {
             Forgetting removes the local copy only. It stays valid on chain until revoked, which is a
             transaction and cannot be undone under the same permit name.
           </p>
+
+          {staking.permit ? (
+            <p className="text-sm text-text-faint">
+              A second permit covers stkd-SCRT&rsquo;s unbonding queue, which asks for a permission no other
+              token understands.{' '}
+              <button
+                type="button"
+                onClick={staking.forget}
+                className="text-accent underline underline-offset-4"
+              >
+                Forget that one too
+              </button>
+              .
+            </p>
+          ) : null}
         </>
       ) : (
         <>

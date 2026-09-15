@@ -106,15 +106,25 @@ export function useBalances(permit: Permit | undefined): Balances {
   const [error, setError] = useState<string | undefined>()
   const [scanning, setScanning] = useState(false)
   const [scanProgress, setScanProgress] = useState<[number, number]>([0, 0])
-  const [nonce, setNonce] = useState(0)
-  const [sweep, setSweep] = useState(false)
+  /*
+   * One read request: which turn it is, and whether that turn sweeps.
+   *
+   * Both in the same piece of state because they have to move together. While
+   * the sweep was a separate latch it stayed on once set, so every periodic
+   * refresh afterwards re-read all 96 contracts and the list sat at "Scanning"
+   * every other minute. A sweep is a one-off; the request that asked for it
+   * carries the flag, and the next request does not.
+   *
+   * The first request sweeps. Opening the app is exactly when the watchlist is
+   * least trustworthy — a token may have arrived since the tab was last open,
+   * and nothing else on screen would ever say so.
+   */
+  const [request, setRequest] = useState({ nonce: 0, sweep: true })
+  const { sweep } = request
 
-  const refresh = useCallback(() => setNonce((n) => n + 1), [])
+  const refresh = useCallback(() => setRequest((r) => ({ nonce: r.nonce + 1, sweep: false })), [])
 
-  const scanAll = useCallback(() => {
-    setSweep(true)
-    setNonce((n) => n + 1)
-  }, [])
+  const scanAll = useCallback(() => setRequest((r) => ({ nonce: r.nonce + 1, sweep: true })), [])
 
   useEffect(() => {
     if (!address) return
@@ -128,6 +138,7 @@ export function useBalances(permit: Permit | undefined): Balances {
       setBank(new Map())
       setPublicBalances([])
       setTokens([])
+      setScanning(false)
       return
     }
 
@@ -141,7 +152,12 @@ export function useBalances(permit: Permit | undefined): Balances {
 
     const run = async () => {
       const contracts = permit ? (sweep ? allTokenAddresses() : loadWatchlist(address)) : []
-      const priceIds = [SCRT_PRICE_ID, ...allTokens().map((t) => t.coingeckoId).filter(Boolean)] as string[]
+      const priceIds = [
+        SCRT_PRICE_ID,
+        ...allTokens()
+          .map((t) => t.coingeckoId)
+          .filter(Boolean)
+      ] as string[]
 
       const [bankResult, prices] = await Promise.all([
         // Every denomination in one read rather than `uscrt` alone: the public
@@ -156,9 +172,7 @@ export function useBalances(permit: Permit | undefined): Balances {
         // the node's JSON body, which is not an Error — so `caught as Error`
         // was a lie the `instanceof` check below then believed, sending the
         // error object down the success path to have `.get()` called on it.
-        queryAllBalances(client, address).catch(
-          (caught: unknown) => new Error(errorMessage(caught))
-        ),
+        queryAllBalances(client, address).catch((caught: unknown) => new Error(errorMessage(caught))),
         // Prices are decoration; a failure must not cost anyone their balances.
         fetchPrices(priceIds, currency.toLowerCase()).catch(() => new Map<string, number>())
       ])
@@ -238,8 +252,8 @@ export function useBalances(permit: Permit | undefined): Balances {
     return () => {
       cancelled = true
     }
-    // `nonce` is the manual refresh trigger.
-  }, [address, client, permit, currency, nonce, sweep])
+    // `request` is the refresh trigger, and says whether this one sweeps.
+  }, [address, client, permit, currency, request, sweep])
 
   return {
     native,

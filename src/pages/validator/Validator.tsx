@@ -3,7 +3,7 @@ import { useState } from 'react'
 
 import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
-import { DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
+import { DECIMALS, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import { useValidatorAccount } from '@/hooks/useValidatorAccount'
 import { useValidatorAdmin } from '@/hooks/useValidatorAdmin'
 import { useValidatorAuthority } from '@/hooks/useValidatorAuthority'
@@ -62,7 +62,7 @@ export default function Validator() {
       <div className="card grid divide-y divide-border overflow-hidden sm:grid-cols-2 sm:divide-x lg:grid-cols-3 [&>*:nth-child(-n+2)]:sm:border-t-0">
         <Stat
           label="Voting power"
-          value={`${formatDisplayAmount(detail.tokens)} ${DISPLAY_DENOM}`}
+          value={`${formatDisplayAmount(detail.tokens, DECIMALS, { reveal: true })} ${DISPLAY_DENOM}`}
           note={share === undefined ? 'not in the bonded set' : `${(share * 100).toFixed(2)}% of bonded`}
         />
         <Stat
@@ -72,8 +72,8 @@ export default function Validator() {
         />
         <Stat
           label="Self-bonded"
-          value={`${formatDisplayAmount(data.selfDelegation)} ${DISPLAY_DENOM}`}
-          note={`minimum ${formatDisplayAmount(detail.minSelfDelegation)} ${DISPLAY_DENOM}`}
+          value={`${formatDisplayAmount(data.selfDelegation, DECIMALS, { reveal: true })} ${DISPLAY_DENOM}`}
+          note={`minimum ${formatDisplayAmount(detail.minSelfDelegation, DECIMALS, { reveal: true })} ${DISPLAY_DENOM}`}
         />
         <Stat
           label="Delegators"
@@ -81,7 +81,7 @@ export default function Validator() {
         />
         <Stat
           label="Unclaimed commission"
-          value={`${formatDisplayAmount(commission)} ${DISPLAY_DENOM}`}
+          value={`${formatDisplayAmount(commission, DECIMALS, { reveal: true })} ${DISPLAY_DENOM}`}
           note="SCRT only"
         />
         <Stat
@@ -109,7 +109,7 @@ export default function Validator() {
             {!address
               ? 'Connect a wallet to act on this validator.'
               : authority.direct
-                ? `Signed by ${shortenAddress(authority.operator ?? '')}, the account that operates this validator.`
+                ? `Signed by ${shortenAddress(authority.operator ?? '', 9, 4, { reveal: true })}, the account that operates this validator.`
                 : 'Sent by this wallet on the validator’s behalf, under the permissions its operator granted.'}
           </p>
         </div>
@@ -152,7 +152,7 @@ export default function Validator() {
             }
             onClick={() => void admin.withdrawCommission()}
           >
-            Withdraw {formatDisplayAmount(commission)} {DISPLAY_DENOM}
+            Withdraw {formatDisplayAmount(commission, DECIMALS, { reveal: true })} {DISPLAY_DENOM}
           </Button>
           {detail.jailed ? (
             <Button

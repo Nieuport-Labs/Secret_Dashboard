@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 
 import Toaster from '@/components/notifications/Toaster'
+import ConnectWalletModal from '@/components/wallet/ConnectWalletModal'
+import WalletDataProvider from '@/components/wallet/WalletDataProvider'
 import Header from './Header'
 import Sidebar from './Sidebar'
 
@@ -19,30 +21,40 @@ import Sidebar from './Sidebar'
  */
 export default function AppShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-dvh">
-      <Sidebar />
+    <WalletDataProvider>
+      <div className="min-h-dvh">
+        <Sidebar />
 
-      {/* pb clears the mobile bottom bar; from lg the rail takes the left edge. */}
-      <div className="flex min-h-dvh flex-col pb-16 lg:pb-0 lg:pl-[var(--sidebar-width)] lg:pr-[var(--sidebar-width)]">
-        {/* The strip reaches the screen edge; only the content column is inset.
-            Chips parked 256px short of the corner read as a mistake. */}
-        <div className="lg:-mr-[var(--sidebar-width)]">
+        {/* The gutters, and the padding that clears the mobile bottom bar.
+            In CSS rather than in utilities because the right-hand one is a
+            clamp against the content floor and not a width a breakpoint can
+            name — see `.app-frame` in index.css. */}
+        <div className="app-frame flex min-h-dvh flex-col">
+          {/* The strip reaches the screen edge; only the content column is inset.
+            Chips parked 256px short of the corner read as a mistake. The pull
+            is on the header itself rather than on a wrapper: a wrapper is only
+            as tall as the header, and a sticky element cannot travel outside
+            its own parent, so one would pin the strip to nothing and let it
+            scroll away. */}
           <Header />
+
+          <main id="content" className="flex-1 px-4 pb-10 pt-7 lg:px-8 lg:pb-14">
+            {children}
+          </main>
+
+          {/* Chrome, so it is sized like chrome. The attribution has to be there;
+            it does not have to be the loudest thing above the fold. */}
+          <footer className="flex items-center justify-center gap-2 px-5 py-6 text-text-faint">
+            <span className="text-label">Powered by Secret Network</span>
+            <img src="/img/secret-mark.svg" alt="" className="h-4 w-[15px] opacity-70" />
+          </footer>
         </div>
 
-        <main id="content" className="flex-1 px-4 pb-10 pt-7 lg:px-8 lg:pb-14">
-          {children}
-        </main>
-
-        {/* Chrome, so it is sized like chrome. The attribution has to be there;
-            it does not have to be the loudest thing above the fold. */}
-        <footer className="flex items-center justify-center gap-2 px-5 py-6 text-text-faint">
-          <span className="text-label">Powered by Secret Network</span>
-          <img src="/img/secret-mark.svg" alt="" className="h-4 w-[15px] opacity-70" />
-        </footer>
+        {/* One picker for the whole app, opened from the header and from every
+            empty state that needs an account. */}
+        <ConnectWalletModal />
+        <Toaster />
       </div>
-
-      <Toaster />
-    </div>
+    </WalletDataProvider>
   )
 }

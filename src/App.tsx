@@ -4,8 +4,8 @@ import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import AppShell from '@/components/layout/AppShell'
 import { onAccountChange } from '@/lib/wallet'
 import Wallet from '@/pages/wallet/Wallet'
-import Welcome from '@/pages/welcome/Welcome'
 import { useActiveValidator } from '@/store/accounts'
+import { usePrivacy } from '@/store/privacy'
 import { applyTheme, useSettings } from '@/store/settings'
 import { handleAccountChange, lastUsedWallet, useWallet } from '@/store/wallet'
 
@@ -30,11 +30,22 @@ const ValidatorStats = lazy(() => import('@/pages/validator/ValidatorStats'))
 
 export default function App() {
   const theme = useSettings((state) => state.theme)
-  const status = useWallet((state) => state.status)
   const connectWallet = useWallet((state) => state.connectWallet)
   const initQueryClient = useWallet((state) => state.initQueryClient)
 
   useEffect(() => applyTheme(theme), [theme])
+
+  /*
+   * Read here and nowhere else, on purpose.
+   *
+   * The masking itself lives in `format.ts`, which is plain functions called
+   * mid-render — they can read the flag but cannot ask React to run again. This
+   * subscription is what makes flipping the eye repaint the app: every screen
+   * is a child of this component, and nothing between here and them is
+   * memoised. Anything that wraps a page in `memo` will strand a stale balance
+   * on screen after the toggle, so put it somewhere else.
+   */
+  usePrivacy((state) => state.hidden)
 
   // A read-only client, so prices, validators and chain stats work before
   // anyone connects. Endpoint probing means this can fail; the pages that need
@@ -55,7 +66,6 @@ export default function App() {
   // thing on screen at once.
   useEffect(() => onAccountChange(handleAccountChange), [])
 
-  const connected = status === 'connected'
   // Acting as a validator moves the home of the app: the wallet screen is not
   // where someone in that mode expects to land, and its rail no longer offers
   // a way back to it.
@@ -87,7 +97,10 @@ export default function App() {
 
       <Route element={<Shell />}>
         <Route path="/" element={<Navigate to={home} replace />} />
-        <Route path="/wallet" element={connected ? <Wallet /> : <Welcome />} />
+        {/* One element either way. The wallet screen shows its own empty state
+            without an account, like every other screen does; connecting is a
+            dialog now rather than a page standing in for this one. */}
+        <Route path="/wallet" element={<Wallet />} />
         <Route
           path="/bridge"
           element={

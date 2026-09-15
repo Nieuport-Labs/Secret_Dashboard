@@ -41,6 +41,7 @@ import {
 } from '@/tokens/routes'
 import { SSCRT_ADDRESS, tokenByAddress, tokenImageUrl } from '@/tokens/registry'
 import { transactionsCovered, useFeePayer } from '@/store/feePayer'
+import { useConnectDialog } from '@/store/connectDialog'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 
@@ -64,6 +65,7 @@ type Direction = 'deposit' | 'withdraw'
  */
 export default function Bridge() {
   const navigate = useNavigate()
+  const openConnect = useConnectDialog((state) => state.show)
   const secretAddress = useWallet((state) => state.address)
   const queryClient = useWallet((state) => state.queryClient)
   const signingClient = useWallet((state) => state.client)
@@ -172,7 +174,9 @@ export default function Bridge() {
    * public by default (see `isScrtToken` above), so its available amount is
    * the bank balance it has always been.
    */
-  const privateOutcome = tokenAddress ? balances.tokens.find((b) => b.token.address === tokenAddress)?.outcome : undefined
+  const privateOutcome = tokenAddress
+    ? balances.tokens.find((b) => b.token.address === tokenAddress)?.outcome
+    : undefined
   const privateBalance = privateOutcome?.status === 'ok' ? privateOutcome.amount : undefined
 
   const available = depositing
@@ -408,7 +412,7 @@ export default function Bridge() {
         icon={ArrowLeftRight}
         title="Bridge tokens onto Secret"
         description="Move assets in from Cosmos Hub, Osmosis, Injective and the rest of IBC — wrapped on arrival if you want them private."
-        action={<Button onClick={() => navigate('/wallet')}>Connect a wallet</Button>}
+        action={<Button onClick={openConnect}>Connect a wallet</Button>}
       />
     )
   }

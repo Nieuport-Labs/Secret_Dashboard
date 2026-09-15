@@ -3,7 +3,7 @@ import { useState } from 'react'
 
 import Menu, { MenuItem } from '@/components/ui/Menu'
 import ValidatorAvatar from '@/pages/staking/components/ValidatorAvatar'
-import { DISPLAY_DENOM, explorerValidatorUrl } from '@/chains/secret4'
+import { DECIMALS, DISPLAY_DENOM, explorerValidatorUrl } from '@/chains/secret4'
 import { formatDisplayAmount } from '@/lib/format'
 import type { Delegation, Reward, Validator } from '@/lib/staking'
 
@@ -151,13 +151,11 @@ export default function ValidatorRow({
 
           {staked > 0n ? (
             <MenuItem
-              icon={
-                <Repeat size={16} aria-hidden className={restaking ? 'text-accent' : undefined} />
-              }
+              icon={<Repeat size={16} aria-hidden className={restaking ? 'text-accent' : undefined} />}
               disabled={!canRestake}
               title={
                 belowThreshold
-                  ? `Needs at least ${formatDisplayAmount(restakeThreshold!)} ${DISPLAY_DENOM} staked here. The chain accepts the setting below that but does not act on it.`
+                  ? `Needs at least ${formatDisplayAmount(restakeThreshold!, DECIMALS, { reveal: true })} ${DISPLAY_DENOM} staked here. The chain accepts the setting below that but does not act on it.`
                   : undefined
               }
               onClick={onToggleRestake}
@@ -173,7 +171,9 @@ export default function ValidatorRow({
 
           <MenuItem
             icon={<ExternalLink size={16} aria-hidden />}
-            onClick={() => window.open(explorerValidatorUrl(validator.address), '_blank', 'noreferrer,noopener')}
+            onClick={() =>
+              window.open(explorerValidatorUrl(validator.address), '_blank', 'noreferrer,noopener')
+            }
           >
             View on explorer
           </MenuItem>

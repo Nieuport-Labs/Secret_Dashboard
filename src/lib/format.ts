@@ -8,6 +8,36 @@
  */
 
 import { DECIMALS, DISPLAY_DENOM } from '@/chains/secret4'
+import { privacyHidden } from '@/store/privacy'
+
+/**
+ * What a hidden figure looks like — see `src/store/privacy.ts`.
+ *
+ * Masking happens here, in the four functions every balance and every address
+ * on screen already goes through, rather than at the ninety-odd places that
+ * call them. A privacy mode that has to be remembered at each new call site is
+ * a privacy mode that leaks the first time someone adds a screen, and a leak
+ * here is the user's balance in a screenshot they thought was safe.
+ *
+ * Only the *display* helpers mask. `toBaseUnits` and `fromBaseUnits` do not:
+ * they also feed the amount fields and the transactions, and masking those
+ * would put dots into a message bound for the chain.
+ *
+ * Masking is the default and `reveal` is the exception, because the cost of the
+ * two mistakes is not symmetric: a figure wrongly hidden is an inconvenience, a
+ * figure wrongly shown is the thing this mode exists to prevent. Pass `reveal`
+ * for what is already public on chain — a proposal's deposit and tally, who
+ * proposed it, a validator's voting power, the chain's own totals. Hiding those
+ * protects nobody: they are on every explorer, and blanking them only makes a
+ * governance page unreadable while the screenshot it was meant to make safe is
+ * no safer.
+ */
+export const MASK = '••••'
+
+/** Public on chain: show it even in privacy mode. */
+export interface Reveal {
+  reveal?: boolean
+}
 
 /**
  * Parse a human-typed decimal into base units, without ever making a Number of
@@ -52,8 +82,13 @@ export function fromBaseUnits(value: string | bigint, decimals = DECIMALS): stri
  */
 export function formatAmount(
   value: string | bigint,
-  { decimals = DECIMALS, maxFractionDigits = 6 }: { decimals?: number; maxFractionDigits?: number } = {}
+  {
+    decimals = DECIMALS,
+    maxFractionDigits = 6,
+    reveal = false
+  }: { decimals?: number; maxFractionDigits?: number } & Reveal = {}
 ): string {
+  if (!reveal && privacyHidden()) return MASK
   const plain = fromBaseUnits(value, decimals)
   const [whole, fraction = ''] = plain.split('.')
 
@@ -67,7 +102,7 @@ export function formatAmount(
 export function formatWithDenom(
   value: string | bigint,
   denom: string = DISPLAY_DENOM,
-  options?: { decimals?: number; maxFractionDigits?: number }
+  options?: { decimals?: number; maxFractionDigits?: number } & Reveal
 ): string {
   return `${formatAmount(value, options)} ${denom}`
 }
@@ -84,7 +119,14 @@ export function estimateFee(gasLimit: number, gasPrice: number): string {
 }
 
 /** `secret1abc…xyz` — the form the design uses in chips and lists. */
-export function shortenAddress(address: string, lead = 9, tail = 4): string {
+export function shortenAddress(address: string, lead = 9, tail = 4, { reveal = false }: Reveal = {}): string {
+  // The human-readable prefix is kept: every address on this chain starts with
+  // it, so it gives nothing away, and the shape stays an address rather than
+  // becoming a row of dots nobody can place.
+  if (!reveal && privacyHidden()) {
+    const prefix = address.slice(0, address.indexOf('1') + 1)
+    return `${prefix}${'•'.repeat(6)}…${'•'.repeat(4)}`
+  }
   if (address.length <= lead + tail + 1) return address
   return `${address.slice(0, lead)}…${address.slice(-tail)}`
 }
@@ -106,8 +148,13 @@ export function fiatValue(
   return Number(fromBaseUnits(value, decimals)) * unitPrice
 }
 
-export function formatFiat(amount: number | undefined, currency = 'USD'): string {
+export function formatFiat(
+  amount: number | undefined,
+  currency = 'USD',
+  { reveal = false }: Reveal = {}
+): string {
   if (amount === undefined) return 'No price'
+  if (!reveal && privacyHidden()) return MASK
   return new Intl.NumberFormat(undefined, {
     style: 'currency',
     currency,
@@ -127,13 +174,18 @@ export function formatFiat(amount: number | undefined, currency = 'USD'): string
  * amounts keep their detail, because for a token worth a fraction of a cent the
  * detail is the whole figure.
  */
-export function formatDisplayAmount(value: string | bigint, decimals = DECIMALS): string {
+export function formatDisplayAmount(
+  value: string | bigint,
+  decimals = DECIMALS,
+  { reveal = false }: Reveal = {}
+): string {
+  if (!reveal && privacyHidden()) return MASK
   const exact = Number(fromBaseUnits(value, decimals))
 
   if (exact === 0) return '0'
-  if (exact >= 1_000_000) return formatAmount(value, { decimals, maxFractionDigits: 0 })
-  if (exact >= 1000) return formatAmount(value, { decimals, maxFractionDigits: 1 })
-  if (exact >= 1) return formatAmount(value, { decimals, maxFractionDigits: 2 })
-  if (exact >= 0.01) return formatAmount(value, { decimals, maxFractionDigits: 4 })
-  return formatAmount(value, { decimals, maxFractionDigits: 6 })
+  if (exact >= 1_000_000) return formatAmount(value, { decimals, maxFractionDigits: 0, reveal })
+  if (exact >= 1000) return formatAmount(value, { decimals, maxFractionDigits: 1, reveal })
+  if (exact >= 1) return formatAmount(value, { decimals, maxFractionDigits: 2, reveal })
+  if (exact >= 0.01) return formatAmount(value, { decimals, maxFractionDigits: 4, reveal })
+  return formatAmount(value, { decimals, maxFractionDigits: 6, reveal })
 }

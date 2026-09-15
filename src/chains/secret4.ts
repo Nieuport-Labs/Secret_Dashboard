@@ -45,6 +45,13 @@ export const GAS = {
   undelegate: 250_000,
   redelegate: 300_000,
   claimRewards: 90_000,
+  /**
+   * Shade's staking derivative. `unbond` burns, queues the request and may
+   * rebalance the validator set behind it; `claim` walks the queue. Both do
+   * more work than a SNIP-20 message, so neither takes a SNIP-20 gas limit.
+   */
+  derivativeUnbond: 500_000,
+  derivativeClaim: 300_000,
   /** Per validator, added on top of a base. */
   setAutoRestake: 60_000,
   ibcTransfer: 150_000,

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 
 import BarChart from '@/components/ui/BarChart'
 import Sparkline, { type SeriesPoint } from '@/components/ui/Sparkline'
-import { DISPLAY_DENOM } from '@/chains/secret4'
+import { DECIMALS, DISPLAY_DENOM } from '@/chains/secret4'
 import { cn } from '@/lib/cn'
 import { resolveLcdUrl } from '@/lib/endpoint'
 import { errorMessage } from '@/lib/errors'
@@ -179,7 +179,8 @@ export default function Network() {
   }
 
   const marketCap = price !== undefined ? (Number(stats.totalSupply) / 1e6) * price : undefined
-  const usd = (value: number | undefined) => formatFiat(value, 'USD')
+  // Chain-wide figures, public on every explorer — see `Reveal` in format.ts.
+  const usd = (value: number | undefined) => formatFiat(value, 'USD', { reveal: true })
 
   // TVL history is always the full record; the range control trims it so both
   // charts are talking about the same window.
@@ -252,7 +253,7 @@ export default function Network() {
         <Stat
           label="Staked"
           value={`${(stats.bondedRatio * 100).toFixed(1)}%`}
-          note={`${formatDisplayAmount(stats.bonded)} of ${formatDisplayAmount(stats.totalSupply)} ${DISPLAY_DENOM}`}
+          note={`${formatDisplayAmount(stats.bonded, DECIMALS, { reveal: true })} of ${formatDisplayAmount(stats.totalSupply, DECIMALS, { reveal: true })} ${DISPLAY_DENOM}`}
         />
         <Stat
           label="Inflation"
@@ -270,7 +271,7 @@ export default function Network() {
           value={
             stats.communityPool === undefined
               ? 'Unavailable'
-              : `${formatDisplayAmount(stats.communityPool)} ${DISPLAY_DENOM}`
+              : `${formatDisplayAmount(stats.communityPool, DECIMALS, { reveal: true })} ${DISPLAY_DENOM}`
           }
         />
       </div>

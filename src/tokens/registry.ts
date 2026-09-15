@@ -595,6 +595,15 @@ export const TOKENS: TokenInfo[] = [
 /** sSCRT — wrapped SCRT, and the token most of this app's flows touch. */
 export const SSCRT_ADDRESS = 'secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek'
 
+/**
+ * stkd-SCRT — Shade's SCRT staking derivative.
+ *
+ * A SNIP-20 like the rest, and the only one in this registry that is also a
+ * staking position: it can be unbonded back into SCRT rather than only sold.
+ * See `src/lib/derivative.ts`.
+ */
+export const STKD_SCRT_ADDRESS = 'secret1k6u0cy4feepm6pehnz804zmwakuwdapm69tuc4'
+
 const BY_ADDRESS = new Map(TOKENS.map((token) => [token.address, token]))
 
 /**

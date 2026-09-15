@@ -166,7 +166,7 @@ export default function AddValidatorModal({ open, onClose }: Props) {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-base">{validator.moniker}</span>
                       <span className="text-label text-text-faint">
-                        {shortenAddress(validator.address, 14, 6)}
+                        {shortenAddress(validator.address, 14, 6, { reveal: true })}
                       </span>
                     </span>
                     <StatusLabel validator={validator} />
@@ -179,9 +179,9 @@ export default function AddValidatorModal({ open, onClose }: Props) {
         </ul>
 
         <p className="text-label text-text-faint">
-          Every validator on the chain is here, jailed and unbonded ones included — an operator’s
-          reason to come looking is often that theirs has stopped signing. Adding one you do not
-          operate is a bookmark: you can watch it, but not sign for it.
+          Every validator on the chain is here, jailed and unbonded ones included — an operator’s reason to
+          come looking is often that theirs has stopped signing. Adding one you do not operate is a bookmark:
+          you can watch it, but not sign for it.
         </p>
       </div>
     </Modal>
