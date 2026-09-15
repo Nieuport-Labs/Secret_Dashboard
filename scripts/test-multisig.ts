@@ -39,6 +39,24 @@ import { CHAIN_ID, DEFAULT_LCD_URLS } from '../src/chains/secret4.ts'
 import { SSCRT_ADDRESS } from '../src/tokens/registry.ts'
 import { assembleTx, buildBodyBytes, compactBitArray } from '../src/lib/multisig/assemble.ts'
 import {
+  decodeJson,
+  decodeText,
+  encodeJson,
+  encodeText,
+  parseEnvelope,
+  type Proposal,
+  type SignatureBundle
+} from '../src/lib/multisig/bundle.ts'
+import {
+  CHAIN_REFUSES,
+  computeEntries,
+  defaultGasFor,
+  foreignSigners,
+  signersOf,
+  typeUrlsFor,
+  type DeclaredMsg
+} from '../src/lib/multisig/messages.ts'
+import {
   fixedCiphertextUtils,
   newSeed,
   seedPubkey,
@@ -124,7 +142,11 @@ function testDerivation(): void {
 
   const derived = deriveMultisig([KEY_A, KEY_B, KEY_C], 2)
   check('2-of-3 address matches secretcli', derived.address === MULTISIG_2OF3, derived.address)
-  check('members are sorted the way the SDK sorts them', derived.order.join() === SORTED.join(), derived.order)
+  check(
+    'members are sorted the way the SDK sorts them',
+    derived.order.join() === SORTED.join(),
+    derived.order
+  )
 
   // The sort is what makes this true, and it is the difference between a group
   // agreeing on one account and each member creating a different one.
@@ -137,7 +159,11 @@ function testDerivation(): void {
   const twoOfTwo = deriveMultisig([KEY_A, KEY_B], 2)
   check('dropping a member changes the address', twoOfTwo.address !== MULTISIG_2OF3, twoOfTwo.address)
 
-  refuses('a threshold above the member count is refused', () => deriveMultisig([KEY_A, KEY_B], 3), /cannot be met/)
+  refuses(
+    'a threshold above the member count is refused',
+    () => deriveMultisig([KEY_A, KEY_B], 3),
+    /cannot be met/
+  )
   refuses('a threshold of zero is refused', () => deriveMultisig([KEY_A], 0), /at least 1/)
   refuses('an uncompressed key is refused', () => addressForPubkey('BBBB'), /compressed secp256k1/)
   refuses('a non-base64 key is refused', () => addressForPubkey('not a key!!'), /base64|compressed/)
@@ -169,7 +195,10 @@ function testFingerprint(): void {
 function testConfig(): void {
   const config = sampleConfig()
   check('a created config carries the derived address', config.address === MULTISIG_2OF3, config.address)
-  check('a created config stores members in derivation order', config.members.map((m) => m.pubkey).join() === SORTED.join())
+  check(
+    'a created config stores members in derivation order',
+    config.members.map((m) => m.pubkey).join() === SORTED.join()
+  )
   check('member addresses are derived, not taken on trust', config.members[0].address === ADDRESS_A)
   check('a sound config has nothing to report', validateConfig(config).length === 0, validateConfig(config))
 
@@ -180,39 +209,94 @@ function testConfig(): void {
   // keys do not produce. Anything else lets an import redirect a "top up the
   // multisig" instruction to somebody else's account.
   const lying = { ...config, address: ADDRESS_A }
-  refuses('a config claiming the wrong address is refused', () => parseConfig(JSON.stringify(lying)), /Do not use it/)
+  refuses(
+    'a config claiming the wrong address is refused',
+    () => parseConfig(JSON.stringify(lying)),
+    /Do not use it/
+  )
 
   const reordered = { ...config, members: [...config.members].reverse() }
-  refuses('a config with reordered members is refused', () => parseConfig(JSON.stringify(reordered)), /Do not use it|order/)
+  refuses(
+    'a config with reordered members is refused',
+    () => parseConfig(JSON.stringify(reordered)),
+    /Do not use it|order/
+  )
 
   const swappedKey = {
     ...config,
     members: config.members.map((member, index) => (index === 0 ? { ...member, pubkey: KEY_B } : member))
   }
-  refuses('a member whose key and address disagree is refused', () => parseConfig(JSON.stringify(swappedKey)), /actually belongs to/)
+  refuses(
+    'a member whose key and address disagree is refused',
+    () => parseConfig(JSON.stringify(swappedKey)),
+    /actually belongs to/
+  )
 
-  refuses('an unknown field is refused', () => parseConfig(JSON.stringify({ ...config, extra: 1 })), /Unexpected field/)
-  refuses('another version is refused', () => parseConfig(JSON.stringify({ ...config, version: 2 })), /different version/)
-  refuses('another chain is refused', () => parseConfig(JSON.stringify({ ...config, chainId: 'pulsar-3' })), /not secret-4/)
-  refuses('a malformed transport key is refused', () => parseConfig(JSON.stringify({ ...config, roomKey: 'nope' })), /transport key/)
-  refuses('an empty member list is refused', () => parseConfig(JSON.stringify({ ...config, members: [] })), /member list/)
+  refuses(
+    'an unknown field is refused',
+    () => parseConfig(JSON.stringify({ ...config, extra: 1 })),
+    /Unexpected field/
+  )
+  refuses(
+    'another version is refused',
+    () => parseConfig(JSON.stringify({ ...config, version: 2 })),
+    /different version/
+  )
+  refuses(
+    'another chain is refused',
+    () => parseConfig(JSON.stringify({ ...config, chainId: 'pulsar-3' })),
+    /not secret-4/
+  )
+  refuses(
+    'a malformed transport key is refused',
+    () => parseConfig(JSON.stringify({ ...config, roomKey: 'nope' })),
+    /transport key/
+  )
+  refuses(
+    'an empty member list is refused',
+    () => parseConfig(JSON.stringify({ ...config, members: [] })),
+    /member list/
+  )
   refuses('a non-object is refused', () => parseConfig('[]'), /JSON object/)
   refuses('broken JSON is refused', () => parseConfig('{'), /valid JSON/)
-  refuses('an oversized document is refused', () => parseConfig(`{"padding":"${'x'.repeat(20000)}"}`), /too large/)
+  refuses(
+    'an oversized document is refused',
+    () => parseConfig(`{"padding":"${'x'.repeat(20000)}"}`),
+    /too large/
+  )
 
   // Legal, occasionally deliberate, and almost always a mistake.
-  const anyOne = createConfig({ label: '1-of-3', threshold: 1, members: [{ pubkey: KEY_A }, { pubkey: KEY_B }, { pubkey: KEY_C }] })
+  const anyOne = createConfig({
+    label: '1-of-3',
+    threshold: 1,
+    members: [{ pubkey: KEY_A }, { pubkey: KEY_B }, { pubkey: KEY_C }]
+  })
   const warnings = validateConfig(anyOne)
-  check('a threshold of 1 is warned about', warnings.some((w) => w.severity === 'warning' && /on their own/.test(w.message)), warnings)
+  check(
+    'a threshold of 1 is warned about',
+    warnings.some((w) => w.severity === 'warning' && /on their own/.test(w.message)),
+    warnings
+  )
 
-  const everyone = createConfig({ label: '3-of-3', threshold: 3, members: [{ pubkey: KEY_A }, { pubkey: KEY_B }, { pubkey: KEY_C }] })
+  const everyone = createConfig({
+    label: '3-of-3',
+    threshold: 3,
+    members: [{ pubkey: KEY_A }, { pubkey: KEY_B }, { pubkey: KEY_C }]
+  })
   check(
     'requiring every member is warned about',
     validateConfig(everyone).some((w) => /locks the account permanently/.test(w.message))
   )
 
-  const duplicate = createConfig({ label: 'dupe', threshold: 2, members: [{ pubkey: KEY_A }, { pubkey: KEY_A }] })
-  check('a duplicated member is warned about', validateConfig(duplicate).some((w) => /listed twice/.test(w.message)))
+  const duplicate = createConfig({
+    label: 'dupe',
+    threshold: 2,
+    members: [{ pubkey: KEY_A }, { pubkey: KEY_A }]
+  })
+  check(
+    'a duplicated member is warned about',
+    validateConfig(duplicate).some((w) => /listed twice/.test(w.message))
+  )
 }
 
 /* -------------------------------------------------------------------------- */
@@ -228,7 +312,11 @@ const BASE_DOC: SignDocInput = {
   msgs: [
     {
       type: 'cosmos-sdk/MsgSend',
-      value: { from_address: MULTISIG_2OF3, to_address: ADDRESS_A, amount: [{ denom: 'uscrt', amount: '1000' }] }
+      value: {
+        from_address: MULTISIG_2OF3,
+        to_address: ADDRESS_A,
+        amount: [{ denom: 'uscrt', amount: '1000' }]
+      }
     }
   ]
 }
@@ -238,7 +326,11 @@ function testSignDoc(): void {
   const bytes = new TextDecoder().decode(signBytes(doc))
 
   check('sign bytes are deterministic', signBytesHash(doc) === signBytesHash(buildSignDoc(BASE_DOC)))
-  check('keys are sorted', bytes.startsWith('{"account_number":"12345","chain_id":"secret-4","fee":'), bytes.slice(0, 60))
+  check(
+    'keys are sorted',
+    bytes.startsWith('{"account_number":"12345","chain_id":"secret-4","fee":'),
+    bytes.slice(0, 60)
+  )
   check('a document equals itself', docsEqual(doc, buildSignDoc(BASE_DOC)))
 
   // Every field a proposal carries has to change the signature, or a collector
@@ -258,7 +350,11 @@ function testSignDoc(): void {
         msgs: [
           {
             type: 'cosmos-sdk/MsgSend',
-            value: { from_address: MULTISIG_2OF3, to_address: ADDRESS_C, amount: [{ denom: 'uscrt', amount: '1000' }] }
+            value: {
+              from_address: MULTISIG_2OF3,
+              to_address: ADDRESS_C,
+              amount: [{ denom: 'uscrt', amount: '1000' }]
+            }
           }
         ]
       }
@@ -273,13 +369,20 @@ function testSignDoc(): void {
   // The granter deserves its own assertion rather than living in the list
   // above: the transaction assembler exists because of it.
   const granted = buildSignDoc({ ...BASE_DOC, fee: { ...BASE_DOC.fee, granter: ADDRESS_B } })
-  check('the granter is inside the signed bytes', new TextDecoder().decode(signBytes(granted)).includes(`"granter":"${ADDRESS_B}"`))
+  check(
+    'the granter is inside the signed bytes',
+    new TextDecoder().decode(signBytes(granted)).includes(`"granter":"${ADDRESS_B}"`)
+  )
 
   // Amino escapes these three characters inside strings. A memo containing one
   // is not exotic — it is a URL with a query string.
   const escaped = buildSignDoc({ ...BASE_DOC, memo: 'a&b<c>d' })
   const escapedBytes = new TextDecoder().decode(signBytes(escaped))
-  check('& < > are escaped in the signed bytes', escapedBytes.includes('a\\u0026b\\u003cc\\u003ed'), escapedBytes.slice(0, 120))
+  check(
+    '& < > are escaped in the signed bytes',
+    escapedBytes.includes('a\\u0026b\\u003cc\\u003ed'),
+    escapedBytes.slice(0, 120)
+  )
 
   // Absent, not zero: a document carrying `timeout_height` is a different
   // document, and the body the assembler builds never has one.
@@ -353,15 +456,22 @@ function testAssembly(): void {
     ])
   })
 
-  check('the assembled transaction is byte-identical to secretcli tx multisign', toBase64(assembled) === CLI_SIGNED_TX, {
-    ours: toBase64(assembled).slice(0, 80),
-    cli: CLI_SIGNED_TX.slice(0, 80)
-  })
+  check(
+    'the assembled transaction is byte-identical to secretcli tx multisign',
+    toBase64(assembled) === CLI_SIGNED_TX,
+    {
+      ours: toBase64(assembled).slice(0, 80),
+      cli: CLI_SIGNED_TX.slice(0, 80)
+    }
+  )
 
   const decoded = TxRaw.decode(assembled)
   const body = TxBody.decode(decoded.bodyBytes)
   check('the body carries no timeout height', body.timeoutHeight === 0n, body.timeoutHeight)
-  check('the body carries no extension options', body.extensionOptions.length === 0 && body.nonCriticalExtensionOptions.length === 0)
+  check(
+    'the body carries no extension options',
+    body.extensionOptions.length === 0 && body.nonCriticalExtensionOptions.length === 0
+  )
   check('the body carries the memo that was signed', body.memo === 'vector', body.memo)
 
   const authInfo = AuthInfo.decode(decoded.authInfoBytes)
@@ -369,7 +479,11 @@ function testAssembly(): void {
   check('the gas limit survives assembly', authInfo.fee?.gasLimit === 25000n)
   const bits = authInfo.signerInfos[0].modeInfo?.multi?.bitarray
   check('three members are recorded in the bit array', bits?.extraBitsStored === 3, bits?.extraBitsStored)
-  check('the signing members are A and C, in member order', toBase64(bits?.elems ?? new Uint8Array()) === 'wA==', toBase64(bits?.elems ?? new Uint8Array()))
+  check(
+    'the signing members are A and C, in member order',
+    toBase64(bits?.elems ?? new Uint8Array()) === 'wA==',
+    toBase64(bits?.elems ?? new Uint8Array())
+  )
 
   // The fee granter is the reason this module exists rather than calling
   // `@cosmjs/stargate`. Assemble with one and it has to come back out.
@@ -384,7 +498,11 @@ function testAssembly(): void {
     ])
   })
   const grantedAuthInfo = AuthInfo.decode(TxRaw.decode(granted).authInfoBytes)
-  check('a fee granter survives assembly', grantedAuthInfo.fee?.granter === ADDRESS_B, grantedAuthInfo.fee?.granter)
+  check(
+    'a fee granter survives assembly',
+    grantedAuthInfo.fee?.granter === ADDRESS_B,
+    grantedAuthInfo.fee?.granter
+  )
 
   // And the same inputs through the upstream helper, so the bug this module
   // works around stays documented by a test rather than by a comment alone.
@@ -437,7 +555,10 @@ function testAssembly(): void {
 
   // The bit array is the part most likely to be got wrong by hand.
   check('an empty bit array stores no extra bits', compactBitArray([]).extraBitsStored === 0)
-  check('one set bit sits in the most significant position', toBase64(compactBitArray([true]).elems) === 'gA==')
+  check(
+    'one set bit sits in the most significant position',
+    toBase64(compactBitArray([true]).elems) === 'gA=='
+  )
   check('nine bits spill into a second byte', compactBitArray(new Array(9).fill(true)).elems.length === 2)
 }
 
@@ -460,7 +581,8 @@ async function testEncryption(): Promise<void> {
 
   let codeHash: string
   try {
-    codeHash = (await client.query.compute.codeHashByContractAddress({ contract_address: SSCRT_ADDRESS })).code_hash!
+    codeHash = (await client.query.compute.codeHashByContractAddress({ contract_address: SSCRT_ADDRESS }))
+      .code_hash!
   } catch (error) {
     console.log(`SKIP  the chain is unreachable (${error instanceof Error ? error.message : String(error)})`)
     return
@@ -503,7 +625,11 @@ async function testEncryption(): Promise<void> {
     declaredCodeHash: 'f'.repeat(64),
     declaredMsg: message
   })
-  check('a message encrypted to another contract is refused', wrongCodeHash.status === 'mismatch', wrongCodeHash)
+  check(
+    'a message encrypted to another contract is refused',
+    wrongCodeHash.status === 'mismatch',
+    wrongCodeHash
+  )
 
   const wrongSeed = await verifyCiphertext({
     lcdUrl: url,
@@ -528,7 +654,11 @@ async function testEncryption(): Promise<void> {
     declaredCodeHash: codeHash,
     declaredMsg: { a: 1, b: 2 }
   })
-  check('a differently serialised message is flagged, not refused', reordered.status === 'equivalent', reordered)
+  check(
+    'a differently serialised message is flagged, not refused',
+    reordered.status === 'equivalent',
+    reordered
+  )
 
   // The shim that lets a member re-encode the proposer's exact bytes.
   const fixed = fixedCiphertextUtils(utils, [{ codeHash, msg: message, ciphertext }])
@@ -555,6 +685,273 @@ async function testEncryption(): Promise<void> {
 
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/* What a message asks for                                                     */
+/* -------------------------------------------------------------------------- */
+
+function testMessages(): void {
+  const send: DeclaredMsg = {
+    template: 'MsgSend',
+    content: { from_address: MULTISIG_2OF3, to_address: ADDRESS_A, amount: `1000uscrt` }
+  }
+
+  check('the account that must sign a send is found', signersOf(send).join() === MULTISIG_2OF3)
+  check('a send by the account itself is not foreign', foreignSigners([send], MULTISIG_2OF3).length === 0)
+  check(
+    'a message signed by somebody else is caught',
+    foreignSigners([send], ADDRESS_B)[0]?.signer === MULTISIG_2OF3,
+    foreignSigners([send], ADDRESS_B)
+  )
+
+  // The two indirect ones: these name a validator, and the account that has to
+  // sign is the operator behind it — the same key in a different spelling.
+  const commission: DeclaredMsg = {
+    template: 'MsgWithdrawValidatorCommission',
+    content: { validator_address: 'secretvaloper1vgyaeqgmvln7755u7ly4r2dy3ljv93walnhde6' }
+  }
+  check(
+    'a validator message resolves to its operator account',
+    signersOf(commission).join() === ADDRESS_A,
+    signersOf(commission)
+  )
+
+  const multiSend: DeclaredMsg = {
+    template: 'MsgMultiSend',
+    content: { inputs: [{ address: MULTISIG_2OF3, coins: '1uscrt' }], outputs: [] }
+  }
+  check('every input of a multi-send must sign', signersOf(multiSend).join() === MULTISIG_2OF3)
+
+  // A message naming nobody, or naming a validator address that will not
+  // parse, must fail loudly: an empty signer list would otherwise read as
+  // "nobody unexpected signs this".
+  refuses(
+    'a message naming no account is refused',
+    () => signersOf({ template: 'MsgSend', content: {} }),
+    /names no account/
+  )
+  refuses(
+    'an unparseable validator address is refused',
+    () => signersOf({ template: 'MsgUnjail', content: { validator_addr: 'secretvaloper1nope' } }),
+    /not a validator address/
+  )
+
+  check('type URLs come from the template table', typeUrlsFor([send])[0] === '/cosmos.bank.v1beta1.MsgSend')
+  refuses(
+    'an unknown template has no signer',
+    () => signersOf({ template: 'MsgNope', content: {} }),
+    /cannot build or check/
+  )
+
+  const execute: DeclaredMsg = {
+    template: 'MsgExecuteContract',
+    content: {
+      sender: MULTISIG_2OF3,
+      contract_address: SSCRT_ADDRESS,
+      code_hash: 'ab'.repeat(32),
+      msg: { deposit: {} }
+    },
+    ciphertext: 'AA'
+  }
+  const entries = computeEntries([send, execute])
+  check(
+    'contract calls are picked out of a proposal',
+    entries.length === 1 && entries[0].index === 1,
+    entries
+  )
+  check('a contract call carries the code hash it is encrypted to', entries[0]?.codeHash === 'ab'.repeat(32))
+
+  // Gas has to grow with the work and with the number of keys involved, since
+  // every member's key rides along and every signature is verified.
+  const small = defaultGasFor([send], 3, 2)
+  check('gas covers the message and the account', small > 25_000, small)
+  check('more members cost more gas', defaultGasFor([send], 5, 2) > small)
+  check('a higher threshold costs more gas', defaultGasFor([send], 3, 3) > small)
+  check('a contract call is sized generously', defaultGasFor([execute], 3, 2) > defaultGasFor([send], 3, 2))
+
+  check('instantiate is known to be refused by the chain', CHAIN_REFUSES.has('MsgInstantiateContract'))
+}
+
+/* -------------------------------------------------------------------------- */
+/* The wire format                                                             */
+/* -------------------------------------------------------------------------- */
+
+function sampleProposal(): Proposal {
+  return {
+    v: 1,
+    kind: 'proposal',
+    id: 'proposal-0001',
+    chainId: CHAIN_ID,
+    multisig: MULTISIG_2OF3,
+    fingerprint: fingerprint(2, SORTED),
+    proposer: ADDRESS_A,
+    createdAt: 1_700_000_000_000,
+    title: 'Send 1 SCRT back to A',
+    accountNumber: '12345',
+    sequence: '7',
+    fee: { amount: [{ denom: 'uscrt', amount: '2500' }], gas: '25000' },
+    memo: 'vector',
+    msgs: [
+      {
+        template: 'MsgSend',
+        content: { from_address: MULTISIG_2OF3, to_address: ADDRESS_A, amount: '1000uscrt' }
+      }
+    ]
+  }
+}
+
+function sampleSignature(): SignatureBundle {
+  return {
+    v: 1,
+    kind: 'signature',
+    proposalId: 'proposal-0001',
+    fingerprint: fingerprint(2, SORTED),
+    pubkey: KEY_A,
+    signature: SIGNATURE_A,
+    signBytesHash: 'a'.repeat(64),
+    signedAt: 1_700_000_000_000
+  }
+}
+
+/** Every bundle that arrives is attacker-controlled text. These are the refusals. */
+function testBundle(): void {
+  const proposal = sampleProposal()
+
+  const throughText = parseEnvelope(JSON.parse(JSON.stringify(proposal)))
+  check('a sound proposal parses', throughText.kind === 'proposal')
+  check(
+    'a proposal survives the text form',
+    (decodeText(encodeText(proposal)) as Proposal).id === proposal.id
+  )
+  check(
+    'a proposal survives the file form',
+    (decodeJson(encodeJson(proposal)) as Proposal).id === proposal.id
+  )
+  check(
+    'a signature survives the text form',
+    (decodeText(encodeText(sampleSignature())) as SignatureBundle).pubkey === KEY_A
+  )
+
+  const mutate = (patch: Record<string, unknown>) => () => parseEnvelope({ ...proposal, ...patch })
+
+  refuses('another version is refused', mutate({ v: 2 }), /different version/)
+  refuses('an unknown kind is refused', mutate({ kind: 'instruction' }), /not a proposal/)
+  refuses('an unknown field is refused', mutate({ urgent: true }), /unexpected field/)
+  refuses('another chain is refused', mutate({ chainId: 'pulsar-3' }), /not secret-4/)
+  refuses('a malformed fingerprint is refused', mutate({ fingerprint: 'nope' }), /fingerprint/)
+  refuses(
+    'an invalid account address is refused',
+    mutate({ multisig: 'secret1notanaddress' }),
+    /invalid multisig/
+  )
+  refuses('a padded sequence is refused', mutate({ sequence: '007' }), /malformed sequence/)
+  refuses(
+    'a non-numeric account number is refused',
+    mutate({ accountNumber: 'seven' }),
+    /malformed accountNumber/
+  )
+  refuses('an over-long memo is refused', mutate({ memo: 'x'.repeat(300) }), /over-long memo/)
+  refuses('an empty message list is refused', mutate({ msgs: [] }), /no messages/)
+  refuses(
+    'too many messages are refused',
+    mutate({ msgs: new Array(21).fill(proposal.msgs[0]) }),
+    /more than 20/
+  )
+  refuses(
+    'an unknown message template is refused',
+    mutate({ msgs: [{ template: 'MsgDrainEverything', content: {} }] }),
+    /cannot build or check/
+  )
+  refuses('a fee payer is refused', mutate({ fee: { ...proposal.fee, payer: ADDRESS_B } }), /names a payer/)
+  refuses(
+    'a malformed fee is refused',
+    mutate({ fee: { amount: [{ denom: 'uscrt', amount: '-1' }], gas: '25000' } }),
+    /malformed amount/
+  )
+  refuses(
+    'a contract call with no encrypted body is refused',
+    mutate({
+      msgs: [
+        {
+          template: 'MsgExecuteContract',
+          content: {
+            sender: MULTISIG_2OF3,
+            contract_address: SSCRT_ADDRESS,
+            code_hash: 'ab'.repeat(32),
+            msg: {}
+          }
+        }
+      ]
+    }),
+    /no encrypted body/
+  )
+  refuses(
+    'an encrypted message with no key to check it is refused',
+    mutate({
+      msgs: [
+        {
+          template: 'MsgExecuteContract',
+          content: {
+            sender: MULTISIG_2OF3,
+            contract_address: SSCRT_ADDRESS,
+            code_hash: 'ab'.repeat(32),
+            msg: {}
+          },
+          ciphertext: toBase64(new Uint8Array(96))
+        }
+      ]
+    }),
+    /no key to check it/
+  )
+  refuses(
+    'an encrypted body too short to be one is refused',
+    mutate({
+      seed: toBase64(new Uint8Array(32)),
+      msgs: [
+        {
+          template: 'MsgExecuteContract',
+          content: {
+            sender: MULTISIG_2OF3,
+            contract_address: SSCRT_ADDRESS,
+            code_hash: 'ab'.repeat(32),
+            msg: {}
+          },
+          ciphertext: toBase64(new Uint8Array(40))
+        }
+      ]
+    }),
+    /too short/
+  )
+  refuses('a malformed seed is refused', mutate({ seed: toBase64(new Uint8Array(16)) }), /16 bytes, not 32/)
+
+  const signature = sampleSignature()
+  const mutateSignature = (patch: Record<string, unknown>) => () => parseEnvelope({ ...signature, ...patch })
+  refuses(
+    'a truncated signature is refused',
+    mutateSignature({ signature: toBase64(new Uint8Array(32)) }),
+    /32 bytes, not 64/
+  )
+  refuses(
+    'a malformed signing key is refused',
+    mutateSignature({ pubkey: toBase64(new Uint8Array(32)) }),
+    /32 bytes, not 33/
+  )
+  refuses('a malformed document hash is refused', mutateSignature({ signBytesHash: 'XYZ' }), /document hash/)
+
+  refuses('text from somewhere else is refused', () => decodeText('aGVsbG8='), /does not look like/)
+  refuses(
+    'truncated text is refused',
+    () => decodeText(encodeText(proposal).slice(0, 40)),
+    /damaged|not a proposal|That/
+  )
+  refuses(
+    'an over-long document is refused',
+    () => decodeJson(`{"padding":"${'x'.repeat(200_000)}"}`),
+    /too large/
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+
 async function main(): Promise<void> {
   console.log('Multisig\n')
   testDerivation()
@@ -562,6 +959,8 @@ async function main(): Promise<void> {
   testConfig()
   testSignDoc()
   testAssembly()
+  testMessages()
+  testBundle()
   await testEncryption()
 
   console.log(`\n${passed} passed, ${failed} failed`)

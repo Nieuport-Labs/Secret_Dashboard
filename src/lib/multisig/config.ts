@@ -200,7 +200,9 @@ export function thresholdPubkeyFor(config: MultisigConfig): MultisigThresholdPub
  */
 export function fingerprint(threshold: number, orderedPubkeys: string[]): string {
   const canonical = `secret-multisig:v1:${threshold}:${orderedPubkeys.join(',')}`
-  const digest = toHex(sha256(toUtf8(canonical))).slice(0, 20).toUpperCase()
+  const digest = toHex(sha256(toUtf8(canonical)))
+    .slice(0, 20)
+    .toUpperCase()
   return digest.match(/.{4}/g)!.join('-')
 }
 
