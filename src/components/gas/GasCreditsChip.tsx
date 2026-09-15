@@ -2,7 +2,7 @@ import { Fuel } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import BuyCreditsModal from '@/components/gas/BuyCreditsModal'
-import { fromBaseUnits } from '@/lib/format'
+import { formatAmount } from '@/lib/format'
 import { useFeePayer, vaultCredit } from '@/store/feePayer'
 import { useWallet } from '@/store/wallet'
 
@@ -27,14 +27,19 @@ export default function GasCreditsChip() {
 
   const credit = vaultCredit(grants)
   // No grant from the vault at all reads differently from one that is empty.
-  const label = credit === undefined ? 'Get gas credits' : `${fromBaseUnits(credit)} gas credits`
+  // `formatAmount` rather than `fromBaseUnits`: it is a balance, so it is one
+  // of the figures privacy mode hides. See `src/store/privacy.ts`.
+  const label = credit === undefined ? 'Get gas credits' : `${formatAmount(credit)} gas credits`
 
   return (
     <>
+      {/* No outline. A credit balance is a reading, not a control to be found
+          — the orange is already enough to pick it out, and a pill around it
+          made the header strip read as a row of buttons. */}
       <button
         type="button"
         onClick={() => setBuyOpen(true)}
-        className="state-layer flex items-center gap-1.5 rounded-pill border border-border px-2.5 py-1.5 text-base font-medium text-accent"
+        className="state-layer flex items-center gap-1.5 rounded-control px-2.5 py-1.5 text-base font-medium text-accent"
       >
         <Fuel size={14} aria-hidden />
         {label}

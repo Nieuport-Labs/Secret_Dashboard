@@ -3,9 +3,11 @@ import type { Msg } from 'secretjs'
 
 import { DENOM, GAS, GAS_PRICE_USCRT } from '@/chains/secret4'
 import { codeHashFor } from '@/lib/codeHash'
+import { claimMsg, unbondMsg } from '@/lib/derivative'
 import { errorMessage } from '@/lib/errors'
 import { MSG_EXECUTE_CONTRACT, MSG_SEND } from '@/lib/msgTypes'
 import { depositMsg, redeemMsg, transferMsg } from '@/lib/snip20'
+import { STKD_SCRT_ADDRESS } from '@/tokens/registry'
 import { useFeePayer } from '@/store/feePayer'
 import { useWallet } from '@/store/wallet'
 
@@ -150,7 +152,52 @@ export function useWalletActions(onSuccess?: () => void) {
     [address, queryClient, broadcast]
   )
 
+  /**
+   * Leave Shade's staking derivative: burn stkd-SCRT and join its unbonding
+   * queue. Nothing arrives now — the SCRT comes back through `claimDerivative`
+   * once the batch has left and the chain's 21 days are up.
+   */
+  const unbondDerivative = useCallback(
+    async (amount: string) => {
+      if (!address || !queryClient) return
+      const { MsgExecuteContract } = await import('secretjs')
+      await broadcast(
+        [
+          new MsgExecuteContract({
+            sender: address,
+            contract_address: STKD_SCRT_ADDRESS,
+            code_hash: await codeHashFor(queryClient, STKD_SCRT_ADDRESS),
+            msg: unbondMsg(amount),
+            sent_funds: []
+          })
+        ],
+        GAS.derivativeUnbond,
+        [MSG_EXECUTE_CONTRACT]
+      )
+    },
+    [address, queryClient, broadcast]
+  )
+
+  /** Take every matured request out of the queue. The contract picks the amount. */
+  const claimDerivative = useCallback(async () => {
+    if (!address || !queryClient) return
+    const { MsgExecuteContract } = await import('secretjs')
+    await broadcast(
+      [
+        new MsgExecuteContract({
+          sender: address,
+          contract_address: STKD_SCRT_ADDRESS,
+          code_hash: await codeHashFor(queryClient, STKD_SCRT_ADDRESS),
+          msg: claimMsg,
+          sent_funds: []
+        })
+      ],
+      GAS.derivativeClaim,
+      [MSG_EXECUTE_CONTRACT]
+    )
+  }, [address, queryClient, broadcast])
+
   const reset = useCallback(() => setState({ kind: 'idle' }), [])
 
-  return { state, reset, sendNative, sendToken, wrap, unwrap }
+  return { state, reset, sendNative, sendToken, wrap, unwrap, unbondDerivative, claimDerivative }
 }

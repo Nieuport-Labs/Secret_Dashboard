@@ -47,6 +47,29 @@ export async function fetchDapps(): Promise<Dapp[]> {
     }))
 }
 
+/**
+ * The app given the top of the ecosystem page.
+ *
+ * A name, matched against the registry, rather than a copy of an entry: the
+ * registry owns the description, the icon and the link, and a featured slot
+ * that goes stale the moment one of them changes is worse than no slot. The
+ * entry below is only the fallback for a registry that cannot be reached, so
+ * the card is still a real, working link to a real app.
+ */
+export const FEATURED_NAME = 'Shade Protocol'
+
+const FEATURED_FALLBACK: Dapp = {
+  name: FEATURED_NAME,
+  link: 'https://shadeprotocol.io/',
+  description: 'An array of connected privacy-preserving DeFi applications built on Secret Network.',
+  icon: '/img/dapps/dapp_shade_206fbe8b01_U9LBd0ib1-.webp',
+  tags: ['dApp', 'DeFi']
+}
+
+export function featuredDapp(dapps: Dapp[]): Dapp {
+  return dapps.find((dapp) => dapp.name === FEATURED_NAME) ?? FEATURED_FALLBACK
+}
+
 /** Every tag present, in the order they first appear. */
 export function collectTags(dapps: Dapp[]): string[] {
   const seen = new Set<string>()

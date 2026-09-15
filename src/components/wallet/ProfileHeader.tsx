@@ -6,6 +6,7 @@ import Avatar from '@/components/wallet/Avatar'
 import type { WalletPanel } from '@/components/wallet/panels'
 import Button from '@/components/ui/Button'
 import { useProfileImage } from '@/hooks/useProfileImage'
+import Private from '@/components/ui/Private'
 import { shortenAddress } from '@/lib/format'
 
 interface Props {
@@ -67,7 +68,9 @@ export default function ProfileHeader({ address, onOpenPanel }: Props) {
               rather than overflowing past the icon that copies it.
             */}
             <span className="block min-w-0 truncate md:hidden">{shortenAddress(address, 12, 6)}</span>
-            <span className="hidden min-w-0 truncate md:block">{address}</span>
+            <span className="hidden min-w-0 truncate md:block">
+              <Private mask={shortenAddress(address)}>{address}</Private>
+            </span>
             {copied ? (
               <Check size={15} aria-hidden className="shrink-0 text-positive" />
             ) : (
@@ -83,7 +86,16 @@ export default function ProfileHeader({ address, onOpenPanel }: Props) {
           </p>
         ) : null}
 
-        <div className="flex gap-2">
+        {/*
+          Wrapping, not one row. Four of these come to 370px and the column is
+          343px on a 375px phone, so the row used to run off the side of the
+          screen and take the page's horizontal scroll with it. Wrapping rather
+          than a width-based breakpoint because the width that matters here is
+          the column's, not the viewport's — this column also narrows when the
+          layout goes two-up beside the rail, and a phone-only rule would miss
+          that entirely.
+        */}
+        <div className="flex flex-wrap gap-2">
           {ACTIONS.map(({ panel, label, icon: Icon }) => (
             <Button
               key={panel}

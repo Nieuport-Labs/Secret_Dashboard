@@ -165,6 +165,80 @@ validator the account delegates to is fetched individually and added to the list
 Rewards and the restake threshold both arrive as 18-place decimal strings (`123.456…` uscrt) and
 are truncated, never rounded. Rounding a reward up shows a figure that cannot be claimed.
 
+## stkd-SCRT — read off the contract, not off a blog
+
+Shade's SCRT staking derivative, `secret1k6u0cy4feepm6pehnz804zmwakuwdapm69tuc4`
+(code id 432, hash `f6be719b3c6feb498d3554ca0398eb6b7e7db262acb33f84a8f12106da6bbb09`).
+There is no published schema for the deployed version, so it was taken from the contract
+itself: the query variants from its own parse errors, the field names from the strings in its
+wasm, both cross-checked against `securesecrets/shade`'s `stkd_scrt.rs`.
+
+Query variants, from the parse error for an unknown one:
+
+```
+staking_info, holdings, unbonding, admins, msg_limits, fee_info, tally_tx_cutoffs,
+tally_info, running_count_info, my_proposal_vote, my_vote_history,
+contract_vote_history, proposal_vote_count, all_running_counts, token_info,
+contract_status, allowance, balance, transfer_history, transaction_history, with_permit
+```
+
+`with_permit` accepts `allowance, balance, transfer_history, transaction_history, holdings,
+unbonding, …` — so the queue is readable with the same SNIP-24 permit everything else uses,
+with no viewing key and no transaction.
+
+| Message | Shape                                                       |
+| ------- | ----------------------------------------------------------- |
+| Unbond  | `{"unbond":{"redeem_amount":"<stkd-SCRT base units>"}}`     |
+| Claim   | `{"claim":{}}`                                              |
+| Queue   | `{"with_permit":{…,"query":{"unbonding":{"time":<unix>}}}}` |
+
+`time` is not optional in practice: without it the answer carries no `claimable_scrt` and
+cannot mark an entry mature. Entries come back as `{unbond_amount, unbonds_at, is_mature}` —
+Shade's published interface calls the first field `amount`, the deployed contract answers
+`unbond_amount`, so `src/lib/derivative.ts` reads both.
+
+### Its permissions are not SNIP-24's — one permit cannot cover both
+
+The derivative's `Permission` enum is `allowance, balance, history, voting, staking, admin`.
+The standard SNIP-20 reference implementation's is `allowance, balance, history, owner`. The two
+overlap on three words and disagree on the rest, and a permit is rejected at _parse_ time for a
+permission the contract does not know — not ignored. Probed against secret-4 on **2026-09-15**
+with a deliberately invalid signature, so the answer says how far the message got:
+
+| Contract  | Permissions                 | Result                              |
+| --------- | --------------------------- | ----------------------------------- |
+| stkd-SCRT | `balance, history, staking` | `Malformed signature` — parsed      |
+| stkd-SCRT | `balance, history, owner`   | `unknown variant \`owner\``         |
+| sSCRT     | `balance, history, owner`   | `Invalid signature format` — parsed |
+| sSCRT     | `balance, history, staking` | `unknown variant \`staking\``       |
+
+So adding `owner` to the registry-wide permit does not merely fail to help — it takes the plain
+stkd-SCRT balance read down with it, and adding `staking` there would break every other token
+the same way. The app signs **two** permits: the registry-wide one (`balance, history`) and a
+second covering stkd-SCRT alone (`balance, history, staking`, permit name
+`secret-dashboard-1.9-staking`), asked for only where the queue is shown.
+
+`staking` is what the `holdings` and `unbonding` queries want; the contract's refusal messages
+name their permissions one for one ("No permission to query staking information", "…to query
+voting information", "…to query balance").
+
+`{"staking_info":{"time":<unix>}}` is public and answered on **2026-09-15**:
+
+```
+unbonding_time             1814400   (21 days)
+unbonding_batch_interval    259200   (3 days)
+price                      2444047   (2.444047 SCRT per stkd-SCRT, 6 dp)
+```
+
+The batch interval is the part no UI usually shows. The contract may hold only a few unbonding
+delegations at once for **all** of its users, so requests are collected and sent as one batch —
+an unbond therefore waits for the next batch _and then_ the chain's 21 days, which is why the
+wallet shows an entry with no date at all until its batch has left.
+
+`{"fee_info":{}}` returns `deposit: 200, withdraw: 200` with no divisor anywhere in the reply,
+and Shade's own blog quotes percentages that no longer match those numbers. So the app quotes
+no fee percentage and says "before Shade's withdraw fee" instead of inventing one.
+
 ## IBC hooks
 
 The auto-wrap proxy the reference dashboard targets is alive and unmigrated:

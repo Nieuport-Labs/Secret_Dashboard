@@ -1,6 +1,5 @@
-import { Coins, Repeat, Search } from 'lucide-react'
+import { ChevronDown, Coins, Repeat, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
@@ -13,8 +12,12 @@ import { usePermit } from '@/hooks/usePermit'
 import { useStaking } from '@/hooks/useStaking'
 import { useStakingActions } from '@/hooks/useStakingActions'
 import { useValidatorImages } from '@/hooks/useValidatorImages'
-import { formatDisplayAmount, formatFiat, fromBaseUnits } from '@/lib/format'
+import UnbondingBranches, { type UnbondingRow } from '@/components/wallet/UnbondingBranches'
+import { useWalletData } from '@/hooks/walletData'
+import { cn } from '@/lib/cn'
+import { formatDisplayAmount, formatFiat, fromBaseUnits, shortenAddress } from '@/lib/format'
 import { shareOfBonded, type Validator } from '@/lib/staking'
+import { useConnectDialog } from '@/store/connectDialog'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 
@@ -26,7 +29,7 @@ import { useWallet } from '@/store/wallet'
  * fee no matter how many validators are involved.
  */
 export default function Staking() {
-  const navigate = useNavigate()
+  const openConnect = useConnectDialog((state) => state.show)
   const address = useWallet((state) => state.address)
   const currency = useSettings((state) => state.currency)
   const { permit } = usePermit()
@@ -39,9 +42,65 @@ export default function Staking() {
     balances.refresh()
   })
 
+  // Read once for the whole shell, so this page and the wallet cannot disagree
+  // about what is in Shade's queue.
+  const { derivative } = useWalletData()
+
   const images = useValidatorImages(staking.validators)
 
+  /*
+   * Both queues as one list. They end in the same place — SCRT in this account
+   * — and someone asking "what have I got coming back" is not asking it once
+   * per protocol. Shade's rows carry a tag, because the wait is not the same
+   * shape: a redemption waits for the contract's next batch before the chain's
+   * clock even starts.
+   *
+   * Shade's matured-but-unclaimed SCRT is deliberately left out. It is not
+   * unstaking any more, it is sitting there waiting to be collected, and the
+   * button that collects it is on the wallet screen where it belongs.
+   */
+  const unstaking = useMemo(() => {
+    const rows: UnbondingRow[] = staking.unbondings.map((u) => ({
+      amount: u.amount,
+      at: u.completesAt,
+      label:
+        staking.validators.find((v) => v.address === u.validatorAddress)?.moniker ??
+        shortenAddress(u.validatorAddress, 12, 5, { reveal: true })
+    }))
+
+    for (const entry of derivative.unbondings) {
+      if (entry.mature) continue
+      rows.push({ amount: entry.amount, at: entry.at, label: 'Shade Protocol', tag: 'stkd-SCRT' })
+    }
+
+    if (BigInt(derivative.nextBatch.amount) > 0n) {
+      rows.push({
+        amount: derivative.nextBatch.amount,
+        at: derivative.nextBatch.at,
+        label: 'Shade Protocol — next batch',
+        tag: 'stkd-SCRT'
+      })
+    }
+
+    let total = 0n
+    for (const row of rows) {
+      try {
+        total += BigInt(row.amount)
+      } catch {
+        // Reported on the row itself; a total is not the place to fail.
+      }
+    }
+
+    return { rows, total: total.toString() }
+  }, [staking.unbondings, staking.validators, derivative.unbondings, derivative.nextBatch])
+
   const [query, setQuery] = useState('')
+  /*
+   * The breakdown starts closed, like the queues in the wallet do. What this
+   * section owes you at a glance is that something is coming back and how much;
+   * the dates are for when you ask.
+   */
+  const [unstakingOpen, setUnstakingOpen] = useState(false)
   const [managing, setManaging] = useState<Validator | undefined>()
   /** The "Stake" picker, for choosing who without assuming for them. */
   const [pickingValidator, setPickingValidator] = useState(false)
@@ -71,7 +130,9 @@ export default function Staking() {
     const needle = query.trim().toLowerCase()
     // Already sorted by voting power — `queryValidators` does that once, on
     // the chain's own numbers, so there is nothing to re-sort here.
-    return needle ? staking.validators.filter((v) => v.moniker.toLowerCase().includes(needle)) : staking.validators
+    return needle
+      ? staking.validators.filter((v) => v.moniker.toLowerCase().includes(needle))
+      : staking.validators
   }, [staking.validators, query])
 
   // Only the bonded set counts toward a share of the network: a jailed or
@@ -97,7 +158,8 @@ export default function Staking() {
     balances.native && BigInt(balances.native) > 0n && balances.nativeFiat !== undefined
       ? balances.nativeFiat / Number(fromBaseUnits(balances.native))
       : undefined
-  const stakedFiat = scrtPrice !== undefined ? Number(fromBaseUnits(staking.totalStaked)) * scrtPrice : undefined
+  const stakedFiat =
+    scrtPrice !== undefined ? Number(fromBaseUnits(staking.totalStaked)) * scrtPrice : undefined
 
   const toggleRestake = (validatorAddress: string) => {
     const current = staged.get(validatorAddress) ?? staking.restaking.has(validatorAddress)
@@ -121,7 +183,7 @@ export default function Staking() {
         icon={Coins}
         title={`Stake ${DISPLAY_DENOM}`}
         description="Delegate to a validator, earn rewards, and let the chain compound them for you without signing again."
-        action={<Button onClick={() => navigate('/wallet')}>Connect a wallet</Button>}
+        action={<Button onClick={openConnect}>Connect a wallet</Button>}
       />
     )
   }
@@ -223,23 +285,46 @@ export default function Staking() {
         }}
       />
 
-      {staking.unbondings.length > 0 ? (
+      {/*
+        Everything on its way back to SCRT, from both places it can be coming
+        from: undelegations in the staking module and redemptions inside Shade's
+        derivative contract. They are different waits — one is the chain's 21
+        days, the other is a batch and then the chain's 21 days, and only the
+        second can be skipped by selling instead — so the rows say which, and
+        the total says what it all adds up to.
+
+        The rows themselves are the wallet's, from `UnbondingBranches`: the same
+        undelegations are listed there, and two components drawing one list is
+        how two screens end up disagreeing about when the money arrives.
+      */}
+      {unstaking.rows.length > 0 ? (
         <section className="card p-4">
-          <h2 className="text-base font-medium">Unstaking</h2>
-          <ul className="mt-2 flex flex-col gap-1">
-            {staking.unbondings.map((u, index) => (
-              <li key={`${u.validatorAddress}-${index}`} className="flex justify-between gap-4 text-sm">
-                <span className="text-text-muted">
-                  {staking.validators.find((v) => v.address === u.validatorAddress)?.moniker ??
-                    u.validatorAddress}
-                </span>
-                <span>
-                  {formatDisplayAmount(u.amount)} {DISPLAY_DENOM} · available{' '}
-                  {u.completesAt.toLocaleDateString()}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <button
+            type="button"
+            onClick={() => setUnstakingOpen((open) => !open)}
+            aria-expanded={unstakingOpen}
+            className="flex w-full items-center gap-3 text-left"
+          >
+            <h2 className="text-base font-medium">Unstaking</h2>
+            <span className="flex-1 text-label text-text-faint">
+              {unstaking.rows.length} {unstaking.rows.length === 1 ? 'position' : 'positions'}
+            </span>
+            <span className="tabular-nums text-base font-medium">
+              {formatDisplayAmount(unstaking.total)} {DISPLAY_DENOM}
+            </span>
+            <ChevronDown
+              size={16}
+              aria-hidden
+              className={cn(
+                'shrink-0 text-text-muted transition-transform duration-[var(--duration-short)] ease-[var(--ease-standard)]',
+                unstakingOpen && 'rotate-180'
+              )}
+            />
+          </button>
+
+          {unstakingOpen ? (
+            <UnbondingBranches seconds={staking.unbondingSeconds} rows={unstaking.rows} />
+          ) : null}
         </section>
       ) : null}
 

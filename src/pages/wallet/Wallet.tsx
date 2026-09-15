@@ -1,25 +1,23 @@
-import { KeyRound } from 'lucide-react'
+import { KeyRound, Wallet as WalletIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { useCallback } from 'react'
-
 import Button from '@/components/ui/Button'
+import EmptyState from '@/components/ui/EmptyState'
 import ActivityList from '@/components/wallet/ActivityList'
 import BalanceList from '@/components/wallet/BalanceList'
 import ProfileHeader from '@/components/wallet/ProfileHeader'
 import ReceiveDrawer from '@/components/wallet/ReceiveDrawer'
 import SendPanel from '@/components/wallet/SendPanel'
+import UnstakePanel from '@/components/wallet/UnstakePanel'
 import WrapPanel from '@/components/wallet/WrapPanel'
 import { type WalletPanel } from '@/components/wallet/panels'
 import { DISPLAY_DENOM } from '@/chains/secret4'
-import { useBalances } from '@/hooks/useBalances'
-import { usePermit } from '@/hooks/usePermit'
-import { useArrivals } from '@/hooks/useArrivals'
-import { useActivity } from '@/hooks/useActivity'
+import { useWalletData } from '@/hooks/walletData'
 import { resolveLcdUrl } from '@/lib/endpoint'
 import { formatDisplayAmount, formatFiat } from '@/lib/format'
 import { queryStakingApr } from '@/lib/staking'
+import { useConnectDialog } from '@/store/connectDialog'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 
@@ -32,11 +30,24 @@ const TWO_COLUMN = 'grid items-start gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(1
 export default function Wallet() {
   const navigate = useNavigate()
   const address = useWallet((state) => state.address)
+  const openConnect = useConnectDialog((state) => state.show)
   const currency = useSettings((state) => state.currency)
   const lcdOverride = useSettings((state) => state.lcdOverride)
-  const { permit, staleTokens, signing, error, sign } = usePermit()
-  const balances = useBalances(permit)
-  const activity = useActivity(permit)
+  // Read once for the whole shell, so the header can show what the sweep and
+  // the push subscriptions are doing from any screen. See `walletData.ts`.
+  const {
+    permit,
+    staleTokens,
+    signing,
+    permitError,
+    sign,
+    balances,
+    activity,
+    derivative,
+    nativeUnbondings,
+    stakingPermit,
+    refreshAll
+  } = useWalletData()
 
   // Decoration riding along on the Stake button, not the full staking screen's
   // own read — that also fetches every validator, delegation and reward,
@@ -57,16 +68,6 @@ export default function Wallet() {
     }
   }, [lcdOverride])
 
-  // Anything that moves money moves both lists. They are read separately and
-  // would otherwise disagree until one of them next polled.
-  const activityRefresh = activity.refresh
-  const balancesRefresh = balances.refresh
-  const refreshAll = useCallback(() => {
-    balancesRefresh()
-    activityRefresh()
-  }, [balancesRefresh, activityRefresh])
-
-  const push = useArrivals(permit, { onArrival: refreshAll })
   const [panel, setPanel] = useState<WalletPanel | null>(null)
   /** Which token the wrap panel should open on, when a toast or a row asked. */
   const [wrapToken, setWrapToken] = useState<string | undefined>()
@@ -95,7 +96,23 @@ export default function Wallet() {
     setPanel(next)
   }
 
-  if (!address) return null
+  /*
+    The same shape every other screen shows without an account — see Staking and
+    Bridge. This route used to answer an unconnected visitor with the wallet
+    picker itself, which made the one page named after what you own the one page
+    that never showed it, and left the other screens' "Connect a wallet" buttons
+    pointing here instead of at the decision. The picker is a dialog now.
+  */
+  if (!address) {
+    return (
+      <EmptyState
+        icon={WalletIcon}
+        title={`Your ${DISPLAY_DENOM} wallet`}
+        description="Hold, send and bridge — with a public half anyone can see and a private half only you can read."
+        action={<Button onClick={openConnect}>Connect a wallet</Button>}
+      />
+    )
+  }
 
   return (
     <div className="mx-auto flex max-w-[1100px] flex-col gap-10">
@@ -118,7 +135,7 @@ export default function Wallet() {
         </p>
       ) : null}
 
-      {!permit ? <PermitPrompt signing={signing} error={error} onSign={() => void sign()} /> : null}
+      {!permit ? <PermitPrompt signing={signing} error={permitError} onSign={sign} /> : null}
 
       {/*
         A permit names the tokens it covers, so one signed before a token joined
@@ -131,7 +148,7 @@ export default function Wallet() {
             {staleTokens.length} {staleTokens.length === 1 ? 'token is' : 'tokens are'} newer than your permit
             and cannot be read yet.
           </p>
-          <Button variant="soft" shape="control" size="sm" loading={signing} onClick={() => void sign()}>
+          <Button variant="soft" shape="control" size="sm" loading={signing} onClick={sign}>
             Re-sign permit
           </Button>
         </div>
@@ -153,7 +170,11 @@ export default function Wallet() {
       <div className={TWO_COLUMN}>
         <BalanceList
           balances={balances}
-          pushStatus={push.status}
+          derivative={derivative}
+          nativeUnbondings={nativeUnbondings}
+          onUnstake={() => setPanel('unstake')}
+          onSignPermit={sign}
+          stakingPermit={stakingPermit}
           onSend={(assetId) => {
             setSendAsset(assetId)
             setPanel('send')
@@ -186,6 +207,14 @@ export default function Wallet() {
         onClose={() => setPanel(null)}
         balances={balances}
         asset={sendAsset}
+        onDone={refreshAll}
+      />
+
+      <UnstakePanel
+        open={panel === 'unstake'}
+        onClose={() => setPanel(null)}
+        balances={balances}
+        derivative={derivative}
         onDone={refreshAll}
       />
 
@@ -240,7 +269,8 @@ function AvailablePanel({
               'Unavailable'
             ) : (
               <>
-                {formatDisplayAmount(native)} <span className="text-title text-text-muted">{DISPLAY_DENOM}</span>
+                {formatDisplayAmount(native)}{' '}
+                <span className="text-title text-text-muted">{DISPLAY_DENOM}</span>
               </>
             )}
           </p>

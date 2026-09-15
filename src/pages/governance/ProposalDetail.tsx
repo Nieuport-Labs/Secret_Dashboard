@@ -10,7 +10,7 @@ import ValidatorVoteMap from '@/pages/governance/components/ValidatorVoteMap'
 import VoteDonut from '@/pages/governance/components/VoteDonut'
 import VotePanel from '@/pages/governance/components/VotePanel'
 import { VOTE_COLORS, VOTE_ORDER } from '@/pages/governance/components/voteColors'
-import { DISPLAY_DENOM, explorerAccountUrl } from '@/chains/secret4'
+import { DECIMALS, DISPLAY_DENOM, explorerAccountUrl } from '@/chains/secret4'
 import { cn } from '@/lib/cn'
 import { formatDisplayAmount, shortenAddress } from '@/lib/format'
 import {
@@ -98,8 +98,7 @@ export default function ProposalDetail() {
     NO: tally.no,
     NO_WITH_VETO: tally.veto
   }
-  const share = (value: bigint) =>
-    cast <= 0n ? 0 : Number((value * 1_000_000n) / cast) / 10_000
+  const share = (value: bigint) => (cast <= 0n ? 0 : Number((value * 1_000_000n) / cast) / 10_000)
 
   const expires = timeRemaining(proposal)
 
@@ -144,7 +143,7 @@ export default function ProposalDetail() {
               <Fact label="Voting ends">{format(proposal.votingEndTime)}</Fact>
               <Fact label="Submitted">{format(proposal.submitTime)}</Fact>
               <Fact label="Deposit">
-                {formatDisplayAmount(proposal.totalDeposit)} {DISPLAY_DENOM}
+                {formatDisplayAmount(proposal.totalDeposit, DECIMALS, { reveal: true })} {DISPLAY_DENOM}
               </Fact>
             </div>
           </section>
@@ -159,9 +158,7 @@ export default function ProposalDetail() {
               exact favour not to do.
             */}
             {proposal.summary ? (
-              <p className="whitespace-pre-wrap break-words text-base text-text-muted">
-                {proposal.summary}
-              </p>
+              <p className="whitespace-pre-wrap break-words text-base text-text-muted">{proposal.summary}</p>
             ) : (
               <p className="text-base text-text-faint">This proposal has no description.</p>
             )}
@@ -249,7 +246,7 @@ export default function ProposalDetail() {
                     {share(amounts[option]).toFixed(2)}%
                   </dd>
                   <dd className="truncate text-label tabular-nums text-text-faint">
-                    {formatDisplayAmount(amounts[option])} {DISPLAY_DENOM}
+                    {formatDisplayAmount(amounts[option], DECIMALS, { reveal: true })} {DISPLAY_DENOM}
                   </dd>
                 </div>
               ))}
@@ -276,7 +273,7 @@ export default function ProposalDetail() {
                 rel="noreferrer noopener"
                 className="inline-flex w-fit items-center gap-1.5 text-base text-accent hover:underline"
               >
-                {shortenAddress(proposal.proposer, 14, 6)}
+                {shortenAddress(proposal.proposer, 14, 6, { reveal: true })}
                 <ExternalLink size={12} aria-hidden />
               </a>
             </section>
@@ -330,9 +327,7 @@ function MessageFields({ message }: { message: Record<string, unknown> }) {
               the description — this is still content a stranger wrote.
             */}
             <dd className="min-w-0 whitespace-pre-wrap break-words text-base text-text-muted">
-              {typeof value === 'object' && value !== null
-                ? JSON.stringify(value, null, 2)
-                : String(value)}
+              {typeof value === 'object' && value !== null ? JSON.stringify(value, null, 2) : String(value)}
             </dd>
           </div>
         ))}

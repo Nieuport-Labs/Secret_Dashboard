@@ -5,7 +5,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import Button from '@/components/ui/Button'
 import CollapsibleSection from '@/components/ui/CollapsibleSection'
 import Modal from '@/components/ui/Modal'
-import { DISPLAY_DENOM, GAS_PRICE_USCRT, explorerTxUrl } from '@/chains/secret4'
+import { DECIMALS, DISPLAY_DENOM, GAS_PRICE_USCRT, explorerTxUrl } from '@/chains/secret4'
 import { cn } from '@/lib/cn'
 import { estimateFee, formatDisplayAmount, shortenAddress } from '@/lib/format'
 import {
@@ -374,7 +374,7 @@ export default function NewProposal() {
           <div className="grid gap-2">
             <Choice selected={!expedited} onSelect={() => setExpedited(false)} wide>
               <span className="text-body font-medium">
-                {formatDisplayAmount(standardDeposit)} {DISPLAY_DENOM}
+                {formatDisplayAmount(standardDeposit, DECIMALS, { reveal: true })} {DISPLAY_DENOM}
               </span>
               <span className="text-label text-text-faint">
                 Standard · {duration(params?.votingPeriod)} of voting
@@ -382,7 +382,7 @@ export default function NewProposal() {
             </Choice>
             <Choice selected={expedited} onSelect={() => setExpedited(true)} wide>
               <span className="text-body font-medium">
-                {formatDisplayAmount(expeditedDeposit)} {DISPLAY_DENOM}
+                {formatDisplayAmount(expeditedDeposit, DECIMALS, { reveal: true })} {DISPLAY_DENOM}
               </span>
               <span className="text-label text-text-faint">
                 Expedited · {duration(params?.expeditedVotingPeriod)},{' '}
@@ -439,7 +439,7 @@ export default function NewProposal() {
           <p className="text-label text-text-faint">
             {problems.length > 0 && address
               ? `Still needs ${problems.join(', ')}.`
-              : `A rehearsal costs nothing and signs nothing. Submitting costs about ${formatDisplayAmount(fee)} ${DISPLAY_DENOM} in fees on top of the deposit.`}
+              : `A rehearsal costs nothing and signs nothing. Submitting costs about ${formatDisplayAmount(fee, DECIMALS, { reveal: true })} ${DISPLAY_DENOM} in fees on top of the deposit.`}
           </p>
         </section>
       </div>
@@ -461,10 +461,13 @@ export default function NewProposal() {
           {duration(expedited ? params?.expeditedVotingPeriod : params?.votingPeriod)} of voting,{' '}
           {executes ? `executing ${executes}` : 'executing nothing'}.{' '}
           <span className="text-text">
-            {formatDisplayAmount(deposit)} {DISPLAY_DENOM}
+            {formatDisplayAmount(deposit, DECIMALS, { reveal: true })} {DISPLAY_DENOM}
           </span>{' '}
-          leaves {submission.proposer ? shortenAddress(submission.proposer, 12, 6) : 'this account'} as the
-          deposit.
+          leaves{' '}
+          {submission.proposer
+            ? shortenAddress(submission.proposer, 12, 6, { reveal: true })
+            : 'this account'}{' '}
+          as the deposit.
         </p>
 
         <Button

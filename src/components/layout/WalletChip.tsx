@@ -55,19 +55,26 @@ export default function WalletChip({ onOpenSettings }: Props) {
     <>
       <Menu
         label="Account menu"
-        triggerClassName="flex items-center gap-2 rounded-pill border border-border px-2.5 py-1.5 text-base font-medium"
+        triggerClassName="flex items-center gap-2 rounded-control border border-border py-1.5 pl-2.5 pr-2 text-base font-medium"
+        /*
+          Name over address, the same two lines the menu shows for this account.
+          The chip used to show one or the other — the wallet's address with no
+          name, a validator's moniker with no address — so the strip never quite
+          answered "which account is this, and is it the one I meant". Both
+          lines cost one row of header height and settle it.
+        */
         trigger={
           active ? (
             <>
-              <AccountAvatar account={active.account} size={16} />
-              <span className="max-w-[140px] truncate">{active.account.moniker}</span>
-              <ChevronDown size={14} aria-hidden className="text-text-muted" />
+              <AccountAvatar account={active.account} size={22} />
+              <Identity name={active.account.moniker} address={active.account.valoper} />
+              <ChevronDown size={14} aria-hidden className="shrink-0 text-text-muted" />
             </>
           ) : (
             <>
-              <img src="/img/secret-mark.svg" alt="" className="h-4 w-4 shrink-0" />
-              <span className="whitespace-nowrap">{shortenAddress(address)}</span>
-              <ChevronDown size={14} aria-hidden className="text-text-muted" />
+              <img src="/img/secret-mark.svg" alt="" className="h-[22px] w-[22px] shrink-0" />
+              <Identity name={accountName ?? 'Wallet'} address={address} />
+              <ChevronDown size={14} aria-hidden className="shrink-0 text-text-muted" />
             </>
           )
         }
@@ -130,6 +137,25 @@ export default function WalletChip({ onOpenSettings }: Props) {
 }
 
 /**
+ * The two lines the chip and the menu agree on: what this account is called,
+ * and the address that call sign belongs to.
+ *
+ * The address is the smaller, quieter line on purpose. It is the part you check
+ * rather than the part you read, and it is the only one of the two that cannot
+ * be wrong.
+ */
+function Identity({ name, address }: { name: string; address: string }) {
+  return (
+    <span className="flex min-w-0 flex-col items-start leading-tight">
+      <span className="max-w-[150px] truncate">{name}</span>
+      <span className="max-w-[150px] truncate text-label font-normal text-text-faint">
+        {shortenAddress(address)}
+      </span>
+    </span>
+  )
+}
+
+/**
  * A linked account's own picture, falling back to the generated one.
  *
  * Its own component because the lookups are hooks and the switcher renders one
@@ -141,12 +167,7 @@ function AccountAvatar({ account, size }: { account: LinkedAccount; size: number
   const profile = useValidatorProfile(identity)
 
   return (
-    <ValidatorAvatar
-      address={account.valoper}
-      moniker={account.moniker}
-      image={profile?.image}
-      size={size}
-    />
+    <ValidatorAvatar address={account.valoper} moniker={account.moniker} image={profile?.image} size={size} />
   )
 }
 

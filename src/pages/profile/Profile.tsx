@@ -1,10 +1,11 @@
-import { Check, Copy, HandCoins, UserX } from 'lucide-react'
+import { Check, Copy, EyeOff, HandCoins, UserX } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useEffect, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
+import Private from '@/components/ui/Private'
 import Avatar from '@/components/wallet/Avatar'
 import SendPanel from '@/components/wallet/SendPanel'
 import { DISPLAY_DENOM } from '@/chains/secret4'
@@ -16,6 +17,7 @@ import { WALLETS, type WalletId } from '@/lib/wallet'
 import { useBalances } from '@/hooks/useBalances'
 import { usePermit } from '@/hooks/usePermit'
 import { useProfileIdentity } from '@/hooks/useProfileIdentity'
+import { usePrivacy } from '@/store/privacy'
 import { useWallet } from '@/store/wallet'
 
 /** What the QR and the copy button are pointed at. */
@@ -40,6 +42,7 @@ export default function Profile() {
   const { address = '' } = useParams<{ address: string }>()
   const navigate = useNavigate()
 
+  const hidden = usePrivacy((state) => state.hidden)
   const connected = useWallet((state) => state.address)
   const status = useWallet((state) => state.status)
   const walletId = useWallet((state) => state.walletId)
@@ -172,24 +175,35 @@ export default function Profile() {
           modules being lighter than the dark ones, and inverting a code is the
           one "dark mode everywhere" decision that stops it working.
         */}
-        <div className="w-full max-w-[260px] rounded-card bg-white p-4">
-          <QRCodeSVG
-            value={value}
-            size={300}
-            level="M"
-            bgColor="#ffffff"
-            fgColor="#000000"
-            className="h-auto w-full"
-            title={target === 'link' ? `Profile link for ${address}` : `Secret Network address ${address}`}
-          />
-        </div>
+        {hidden ? (
+          <div className="flex w-full max-w-[260px] items-center justify-center gap-2 rounded-card bg-surface px-4 py-10 text-text-muted">
+            <EyeOff size={16} aria-hidden />
+            <span className="text-base">Hidden</span>
+          </div>
+        ) : (
+          <div className="w-full max-w-[260px] rounded-card bg-white p-4">
+            <QRCodeSVG
+              value={value}
+              size={300}
+              level="M"
+              bgColor="#ffffff"
+              fgColor="#000000"
+              className="h-auto w-full"
+              title={target === 'link' ? `Profile link for ${address}` : `Secret Network address ${address}`}
+            />
+          </div>
+        )}
 
         <button
           type="button"
           onClick={() => void copy()}
           className="state-layer flex w-full min-w-0 flex-col items-center gap-1.5 rounded-control px-3 py-2 text-text-muted"
         >
-          <span className="break-address min-w-0 font-mono text-sm">{value}</span>
+          <span className="break-address min-w-0 font-mono text-sm">
+            <Private mask={target === 'link' ? profileUrl(shortenAddress(address)) : shortenAddress(address)}>
+              {value}
+            </Private>
+          </span>
           <span className="flex items-center gap-1.5 text-label">
             {copied ? (
               <>

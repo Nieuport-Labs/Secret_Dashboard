@@ -8,6 +8,24 @@
   html {
     color-scheme: dark;
     -webkit-text-size-adjust: 100%;
+
+    /*
+     * The page scrollbar, drawn by us rather than by the platform.
+     *
+     * `color-scheme` alone is not enough: it only asks the browser for its own
+     * dark scrollbar, and where the request is ignored — an embedded view, a
+     * forced light chrome, a browser that predates it — what appears down the
+     * right edge of a near-black page is a bright grey strip with arrow
+     * buttons. A hairline thumb over a transparent track is the same decision
+     * the rest of the chrome makes, and it holds everywhere.
+     *
+     * The gutter is reserved whether or not the scrollbar is showing, so a
+     * page that grows past the viewport does not shove the whole layout
+     * sideways as it appears.
+     */
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+    scrollbar-gutter: stable;
   }
 
   html.light {
@@ -64,6 +82,36 @@
   to {
     transform: translateY(0);
     opacity: 1;
+  }
+}
+
+/*
+ * The featured card's weather.
+ *
+ * Two accent-coloured clouds drifting behind a blurred pane, on a very long
+ * cycle. The point is that the card is never quite the same twice without ever
+ * being a thing that moves — anything faster than this reads as an
+ * advertisement and the eye starts refusing it. Reduced motion stops it dead,
+ * via the global rule at the bottom of this file, and what is left is a still
+ * gradient that was always the composition.
+ */
+@keyframes featured-drift-a {
+  0%,
+  100% {
+    transform: translate3d(-6%, -12%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(14%, 8%, 0) scale(1.25);
+  }
+}
+
+@keyframes featured-drift-b {
+  0%,
+  100% {
+    transform: translate3d(12%, 14%, 0) scale(1.15);
+  }
+  50% {
+    transform: translate3d(-10%, -6%, 0) scale(0.9);
   }
 }
 
@@ -195,6 +243,85 @@
     .glass-chrome {
       background: var(--color-bg);
     }
+  }
+
+  /*
+   * The column everything on a page sits in, and the two gutters around it.
+   *
+   * The rail is `position: fixed` and takes no layout space, so the left gutter
+   * is simply what keeps the page from sliding underneath it. The right one is
+   * there for a different reason: it makes the column centred on the *screen*
+   * rather than in the space left over beside the rail, which is where the eye
+   * looks for it and where the viewport-fixed dialogs already are.
+   *
+   * What it cannot be is a flat 256px. Reserving the rail's width twice costs
+   * 512px, and at 1024 — the very width this layout switches on at — that left
+   * 448px of content. The wallet's greeting printed over its balance, the
+   * network's market cap over its staked figure, and half the screen was empty
+   * while it happened.
+   *
+   * So the right gutter is only as much of itself as the screen can spare above
+   * `--content-floor`: nothing at 1024, growing with the window, and the full
+   * 256 from about 1300 up, where centring is free. Below `lg` there are no
+   * gutters at all — the rail is a bottom bar there, and `pb` clears it instead.
+   */
+  .app-frame {
+    /* Published so the header can cancel it and reach the screen edge. */
+    --frame-gutter: 0px;
+    padding-bottom: 4rem;
+  }
+
+  @media (min-width: 1024px) {
+    .app-frame {
+      --frame-gutter: clamp(
+        0px,
+        calc(100vw - var(--sidebar-width) - 4rem - var(--content-floor)),
+        var(--sidebar-width)
+      );
+      padding-bottom: 0;
+      padding-left: var(--sidebar-width);
+      padding-right: var(--frame-gutter);
+    }
+  }
+
+  /*
+   * A surface with that weather inside it. The blobs are pseudo-elements so the
+   * card's own markup stays a link with a heading in it, and `isolation`
+   * confines the whole effect to this element's stacking context — otherwise
+   * the negative z-index would put them behind the page instead.
+   */
+  .featured-surface {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+  }
+
+  .featured-surface::before,
+  .featured-surface::after {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    width: 60%;
+    padding-bottom: 60%;
+    border-radius: var(--radius-pill);
+    filter: blur(60px);
+    will-change: transform;
+  }
+
+  .featured-surface::before {
+    top: -30%;
+    left: -5%;
+    background: var(--color-accent);
+    opacity: 0.28;
+    animation: featured-drift-a 22s var(--ease-standard) infinite;
+  }
+
+  .featured-surface::after {
+    right: -10%;
+    bottom: -40%;
+    background: var(--color-accent-strong);
+    opacity: 0.2;
+    animation: featured-drift-b 28s var(--ease-standard) infinite;
   }
 
   .state-layer {

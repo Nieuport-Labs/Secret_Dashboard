@@ -18,7 +18,14 @@
 import { CHAIN_ID, DENOM } from '@/chains/secret4'
 import type { AminoSignDoc, KeplrLike } from '@/lib/wallet'
 
-export type PermitPermission = 'balance' | 'history' | 'allowance' | 'owner'
+/**
+ * SNIP-24 names the first four. The last two are Shade's staking derivative's
+ * own, and it does *not* define `owner` — its enum is
+ * `allowance, balance, history, voting, staking, admin`, so a permit listing
+ * `owner` fails to parse there and takes the plain balance read down with it.
+ * One permit cannot satisfy both vocabularies; see `STAKING_PERMISSIONS`.
+ */
+export type PermitPermission = 'balance' | 'history' | 'allowance' | 'owner' | 'voting' | 'staking'
 
 export interface PermitParams {
   permit_name: string
@@ -38,13 +45,35 @@ export interface Permit {
 /** Free-form, but it is what the user names when revoking, so make it legible. */
 export const PERMIT_NAME = 'secret-dashboard-1.9'
 
-/** Reading balances and transaction history is all this dashboard needs. */
+/** Reading balances and transaction history is all a SNIP-20 read needs. */
 export const DEFAULT_PERMISSIONS: PermitPermission[] = ['balance', 'history']
+
+/**
+ * The second permit, for Shade's staking derivative alone.
+ *
+ * `staking` is what its `holdings` and `unbonding` queries ask for ("No
+ * permission to query staking information"), and no standard SNIP-20 knows the
+ * word — a registry-wide permit carrying it would fail to parse at every other
+ * contract, exactly as a permit carrying `owner` fails at this one. So the two
+ * do not merge: this one names one token, and costs a signature only if the
+ * account actually has a position to look at.
+ */
+export const STAKING_PERMISSIONS: PermitPermission[] = ['balance', 'history', 'staking']
+
+/** Free-form, but it is what the user names when revoking, so keep them apart. */
+export const STAKING_PERMIT_NAME = `${PERMIT_NAME}-staking`
 
 const STORAGE_PREFIX = 'secret-dashboard:permit'
 
-function storageKey(address: string): string {
-  return `${STORAGE_PREFIX}:${CHAIN_ID}:${address}`
+/**
+ * One key per account per scope. The scope is absent for the registry-wide
+ * permit, so the key every existing install already wrote stays exactly as it
+ * was and nobody is asked to sign again for a change that is not theirs.
+ */
+function storageKey(address: string, scope?: string): string {
+  return scope
+    ? `${STORAGE_PREFIX}:${scope}:${CHAIN_ID}:${address}`
+    : `${STORAGE_PREFIX}:${CHAIN_ID}:${address}`
 }
 
 /* -------------------------------------------------------------------------- */
@@ -79,10 +108,11 @@ export async function signPermit(
   provider: KeplrLike,
   address: string,
   allowedTokens: string[],
-  permissions: PermitPermission[] = DEFAULT_PERMISSIONS
+  permissions: PermitPermission[] = DEFAULT_PERMISSIONS,
+  permitName: string = PERMIT_NAME
 ): Promise<Permit> {
   const params: PermitParams = {
-    permit_name: PERMIT_NAME,
+    permit_name: permitName,
     // Sorted so that two permits covering the same tokens compare equal
     // regardless of the order the registry happened to be in.
     allowed_tokens: [...allowedTokens].sort(),
@@ -108,9 +138,9 @@ export async function signPermit(
  * permit is a normal state — the user signs again — so a storage failure must
  * degrade to that, never to a broken page.
  */
-export function loadPermit(address: string): Permit | undefined {
+export function loadPermit(address: string, scope?: string): Permit | undefined {
   try {
-    const raw = localStorage.getItem(storageKey(address))
+    const raw = localStorage.getItem(storageKey(address, scope))
     if (!raw) return undefined
 
     const permit = JSON.parse(raw) as Permit
@@ -124,18 +154,18 @@ export function loadPermit(address: string): Permit | undefined {
   }
 }
 
-export function savePermit(address: string, permit: Permit): void {
+export function savePermit(address: string, permit: Permit, scope?: string): void {
   try {
-    localStorage.setItem(storageKey(address), JSON.stringify(permit))
+    localStorage.setItem(storageKey(address, scope), JSON.stringify(permit))
   } catch {
     // Not fatal: the permit stays usable for this page load, and the user is
     // asked to sign again next time rather than being blocked now.
   }
 }
 
-export function forgetPermit(address: string): void {
+export function forgetPermit(address: string, scope?: string): void {
   try {
-    localStorage.removeItem(storageKey(address))
+    localStorage.removeItem(storageKey(address, scope))
   } catch {
     /* nothing to do */
   }
@@ -166,6 +196,43 @@ export function missingTokens(permit: Permit | undefined, tokenAddresses: string
 
 export function hasPermission(permit: Permit | undefined, permission: PermitPermission): boolean {
   return permit?.params.permissions.includes(permission) ?? false
+}
+
+/**
+ * Permissions a stored permit is missing.
+ *
+ * The other half of coverage, and the half that is easy to forget: a permit is
+ * a signed document, so widening what this app reads widens what it has to ask
+ * for, and a permit signed before that change is as unusable for the new read
+ * as one signed before a token existed. Judging staleness by tokens alone let a
+ * permit look current while a screen it could not answer sat there failing.
+ */
+/**
+ * Permissions a stored permit carries that this app did not ask for.
+ *
+ * Not pedantry: a permission is rejected at *parse* time by a contract that
+ * does not define it, so one surplus word makes the permit useless at that
+ * contract rather than merely over-broad. This dashboard shipped a permit
+ * carrying `owner` for exactly one afternoon, and every account that signed one
+ * in that window holds a permit stkd-SCRT will refuse forever. Anything signed
+ * outside what the scope asks for is therefore treated as not signed at all.
+ */
+export function surplusPermissions(
+  permit: Permit | undefined,
+  allowed: PermitPermission[] = DEFAULT_PERMISSIONS
+): PermitPermission[] {
+  if (!permit) return []
+  const wanted = new Set<string>(allowed)
+  return permit.params.permissions.filter((permission) => !wanted.has(permission))
+}
+
+export function missingPermissions(
+  permit: Permit | undefined,
+  required: PermitPermission[] = DEFAULT_PERMISSIONS
+): PermitPermission[] {
+  if (!permit) return [...required]
+  const granted = new Set(permit.params.permissions)
+  return required.filter((permission) => !granted.has(permission))
 }
 
 /* -------------------------------------------------------------------------- */

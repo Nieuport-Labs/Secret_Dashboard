@@ -7,7 +7,7 @@ import { useStakingActions } from '@/hooks/useStakingActions'
 import { useValidatorImages } from '@/hooks/useValidatorImages'
 import StakeModal from '@/pages/staking/components/StakeModal'
 import ValidatorAvatar from '@/pages/staking/components/ValidatorAvatar'
-import { DISPLAY_DENOM } from '@/chains/secret4'
+import { DECIMALS, DISPLAY_DENOM } from '@/chains/secret4'
 import { formatDisplayAmount } from '@/lib/format'
 import { VOTE_LABELS, type VoteOption } from '@/lib/governance'
 import { shareOfBonded, type Validator } from '@/lib/staking'
@@ -83,7 +83,8 @@ export default function ValidatorVoteMap({ votes, bondedTokens, hoveredOption, l
     return <p className="text-label text-text-faint">No votes yet.</p>
   }
 
-  const total = bondedTokens > 0n ? Number(bondedTokens) : cast.reduce((sum, v) => sum + Number(v.validator.tokens), 0)
+  const total =
+    bondedTokens > 0n ? Number(bondedTokens) : cast.reduce((sum, v) => sum + Number(v.validator.tokens), 0)
   const share = (tokens: string) => (total > 0 ? (Number(tokens) / total) * 100 : 0)
 
   const rects = squarify(
@@ -99,7 +100,10 @@ export default function ValidatorVoteMap({ votes, bondedTokens, hoveredOption, l
         role="img"
         style={{ aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}` }}
         aria-label={`Validators that have voted so far: ${cast
-          .map(({ validator, option }) => `${validator.moniker} ${VOTE_LABELS[option!]} ${share(validator.tokens).toFixed(2)}%`)
+          .map(
+            ({ validator, option }) =>
+              `${validator.moniker} ${VOTE_LABELS[option!]} ${share(validator.tokens).toFixed(2)}%`
+          )
           .join(', ')}.`}
       >
         {cast.map(({ validator, option }, index) => {
@@ -126,7 +130,7 @@ export default function ValidatorVoteMap({ votes, bondedTokens, hoveredOption, l
                 opacity: dimmed(validator, option) ? 0.3 : 1
               }}
               className="absolute flex cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden p-1 transition-opacity duration-[var(--duration-short)] ease-[var(--ease-standard)]"
-              title={`${validator.moniker} — ${VOTE_LABELS[option!]} (${formatDisplayAmount(validator.tokens)} ${DISPLAY_DENOM}, ${share(validator.tokens).toFixed(2)}% of voting power)`}
+              title={`${validator.moniker} — ${VOTE_LABELS[option!]} (${formatDisplayAmount(validator.tokens, DECIMALS, { reveal: true })} ${DISPLAY_DENOM}, ${share(validator.tokens).toFixed(2)}% of voting power)`}
             >
               {showAvatar ? (
                 <ValidatorAvatar

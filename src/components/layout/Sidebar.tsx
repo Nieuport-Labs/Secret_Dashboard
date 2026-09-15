@@ -71,9 +71,15 @@ export default function Sidebar() {
                   */}
                   <span
                     className={cn(
-                      'flex h-7 w-14 shrink-0 items-center justify-center rounded-pill',
+                      // Wide as the cell allows, up to the 56px the indicator
+                      // wants. It used to be a flat `w-14 shrink-0`, which is
+                      // 56px whether or not there are 56px: seven of those plus
+                      // the bar's padding come to 408, and the bar ran 33px off
+                      // the side of a 375px phone, taking the page's horizontal
+                      // scroll with it.
+                      'flex h-7 w-full max-w-14 items-center justify-center rounded-pill',
                       'transition-colors duration-[var(--duration-short)] ease-[var(--ease-standard)]',
-                      'lg:h-auto lg:w-auto lg:bg-transparent',
+                      'lg:h-auto lg:w-auto lg:max-w-none lg:bg-transparent',
                       isActive ? 'bg-accent-soft' : 'bg-transparent'
                     )}
                   >

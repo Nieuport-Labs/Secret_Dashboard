@@ -2,7 +2,7 @@ import { Server } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import EmptyState from '@/components/ui/EmptyState'
-import { DISPLAY_DENOM } from '@/chains/secret4'
+import { DECIMALS, DISPLAY_DENOM } from '@/chains/secret4'
 import { useValidatorAccount } from '@/hooks/useValidatorAccount'
 import { formatDisplayAmount } from '@/lib/format'
 import { queryValidators } from '@/lib/staking'
@@ -97,7 +97,7 @@ export default function ValidatorStats() {
           <Stat
             label="Self-bond"
             value={selfBondRatio === undefined ? 'Unavailable' : percent(selfBondRatio)}
-            note={`${formatDisplayAmount(data.selfDelegation)} ${DISPLAY_DENOM} of own stake`}
+            note={`${formatDisplayAmount(data.selfDelegation, DECIMALS, { reveal: true })} ${DISPLAY_DENOM} of own stake`}
           />
         </div>
       </section>
@@ -110,14 +110,16 @@ export default function ValidatorStats() {
             value={rank === undefined ? 'Outside the set' : `#${rank}`}
             note={setSize ? `of ${setSize} bonded validators` : undefined}
           />
-          <Stat label="Voting power" value={`${formatDisplayAmount(data.detail.tokens)} ${DISPLAY_DENOM}`} />
+          <Stat
+            label="Voting power"
+            value={`${formatDisplayAmount(data.detail.tokens, DECIMALS, { reveal: true })} ${DISPLAY_DENOM}`}
+          />
           <Stat
             label="Delegators"
             value={data.delegators === undefined ? 'Unavailable' : data.delegators.toLocaleString()}
           />
         </div>
       </section>
-
     </div>
   )
 }

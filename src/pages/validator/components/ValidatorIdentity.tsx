@@ -65,7 +65,7 @@ export default function ValidatorIdentity({ detail, canOperate, onManagePermissi
           rel="noreferrer"
           className="state-layer mt-1 inline-flex items-center gap-1.5 rounded-control text-label text-text-muted"
         >
-          {shortenAddress(detail.address, 16, 6)}
+          {shortenAddress(detail.address, 16, 6, { reveal: true })}
           <ExternalLink size={12} aria-hidden />
         </a>
       </div>

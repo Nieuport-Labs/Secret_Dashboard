@@ -154,6 +154,16 @@
   /* 300px of rail against 14px labels was mostly empty. Google's own nav rails
      sit at 256. */
   --sidebar-width: 256px;
+
+  /*
+   * The narrowest the content column is allowed to get on a desktop layout.
+   *
+   * 720px is what the two-column pages need before their second column hits its
+   * own floor and starts eating the first: under it the wallet's greeting lands
+   * on top of its balance and the network's stat grid prints one figure over
+   * another. See `.app-frame` in index.css for what spends against it.
+   */
+  --content-floor: 720px;
 }
 
 /*
