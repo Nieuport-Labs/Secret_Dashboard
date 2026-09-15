@@ -12,6 +12,7 @@ import { DISPLAY_DENOM } from '@/chains/secret4'
 import { isValidBech32 } from '@/lib/bech32'
 import { cn } from '@/lib/cn'
 import { shortenAddress } from '@/lib/format'
+import { linkHref, LINK_KINDS, type ProfileLink } from '@/lib/profile'
 import { profileUrl } from '@/lib/profileLink'
 import { WALLETS, type WalletId } from '@/lib/wallet'
 import { useBalances } from '@/hooks/useBalances'
@@ -22,6 +23,41 @@ import { useWallet } from '@/store/wallet'
 
 /** What the QR and the copy button are pointed at. */
 type Target = 'link' | 'address'
+
+/**
+ * One published link.
+ *
+ * Rendered as plain text when it has no address — a Discord username is not
+ * reachable by URL — rather than as a link that goes nowhere. `linkHref` also
+ * returns nothing for a scheme that is not http(s), which is what keeps a
+ * `javascript:` URL typed into someone's website field from becoming a trap for
+ * every stranger who opens their page.
+ */
+function LinkChip({ link }: { link: ProfileLink }) {
+  const label = LINK_KINDS.find((kind) => kind.kind === link.kind)?.label ?? link.kind
+  const href = linkHref(link)
+
+  const className =
+    'flex items-center gap-1.5 rounded-pill border border-border px-3 py-1.5 text-sm text-text-muted'
+
+  if (!href) {
+    return (
+      <span className={className}>
+        {label}
+        <span className="text-text-faint">{link.value}</span>
+      </span>
+    )
+  }
+
+  return (
+    /* `noreferrer` as well as `noopener`: these destinations are chosen by the
+       profile's owner, and a visitor's referrer is not theirs to hand over. */
+    <a href={href} target="_blank" rel="noreferrer noopener" className={cn(className, 'state-layer')}>
+      {label}
+      <span className="text-text-faint">{link.value}</span>
+    </a>
+  )
+}
 
 /**
  * Someone's public profile, at `/secret1abc…`.
@@ -141,6 +177,16 @@ export default function Profile() {
         <Avatar address={address} url={identity.avatarUrl} size={88} />
 
         <h1 className="text-display">{identity.name ?? shortenAddress(address, 10, 6)}</h1>
+
+        {identity.bio ? <p className="text-balance text-base text-text-muted">{identity.bio}</p> : null}
+
+        {identity.links.length > 0 ? (
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {identity.links.map((link) => (
+              <LinkChip key={link.kind} link={link} />
+            ))}
+          </div>
+        ) : null}
 
         {/*
           Two things worth handing to someone, and they are not

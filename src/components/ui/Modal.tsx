@@ -3,12 +3,19 @@ import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 import { useFocusTrap } from '@/hooks/useFocusTrap'
+import { cn } from '@/lib/cn'
 
 interface Props {
   open: boolean
   onClose: () => void
   title: string
   description?: string
+  /**
+   * `lg` is for a dialog that is a form rather than a decision — a column of
+   * labelled fields reads badly at the width of a confirmation. Everything
+   * else stays at the narrower default, which is the width the design uses.
+   */
+  size?: 'md' | 'lg'
   /** Rendered beside the heading — a validator's avatar, say. Decorative: the
    *  accessible name still comes from `title` alone. */
   icon?: ReactNode
@@ -28,7 +35,16 @@ interface Props {
  * becomes the containing block for `position: fixed`, and a dialog opened from
  * the header would otherwise be laid out inside the header.
  */
-export default function Modal({ open, onClose, title, description, icon, onBack, children }: Props) {
+export default function Modal({
+  open,
+  onClose,
+  title,
+  description,
+  icon,
+  onBack,
+  size = 'md',
+  children
+}: Props) {
   const panel = useFocusTrap(open, onClose)
 
   if (!open) return null
@@ -61,7 +77,11 @@ export default function Modal({ open, onClose, title, description, icon, onBack,
           manage its own scrolling; one that does (a `min-h-0 flex-1` child)
           keeps this outer box from ever needing to scroll.
         */
-        className="glass-panel relative flex max-h-[calc(100dvh-2rem)] w-full max-w-[420px] flex-col gap-5 overflow-y-auto rounded-card p-5 outline-none motion-safe:animate-[modal-in_var(--duration-medium)_var(--ease-emphasised)]"
+        className={cn(
+          'glass-panel relative flex max-h-[calc(100dvh-2rem)] w-full flex-col gap-5 overflow-y-auto rounded-card p-5 outline-none',
+          'motion-safe:animate-[modal-in_var(--duration-medium)_var(--ease-emphasised)]',
+          size === 'lg' ? 'max-w-[560px]' : 'max-w-[420px]'
+        )}
       >
         {/* Never squeezed by a tall body — the heading is the dialog's label. */}
         <div className="flex shrink-0 items-start justify-between gap-4">

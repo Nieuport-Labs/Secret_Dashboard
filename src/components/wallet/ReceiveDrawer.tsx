@@ -1,4 +1,4 @@
-import { Check, Copy, EyeOff, Link as LinkIcon } from 'lucide-react'
+import { Check, Copy, EyeOff } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -8,7 +8,6 @@ import Drawer from '@/components/ui/Drawer'
 import Private from '@/components/ui/Private'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { shortenAddress } from '@/lib/format'
-import { profileUrl } from '@/lib/profileLink'
 import { usePrivacy } from '@/store/privacy'
 
 interface Props {
@@ -20,17 +19,22 @@ interface Props {
 /**
  * Receive (Figma 31:531): the address as a QR code, as text, and a way to
  * bridge in for someone who has nothing on Secret to receive yet.
+ *
+ * The shareable profile link used to sit below the QR and now lives in the
+ * profile dialog instead. It was never quite at home here: this screen answers
+ * "where do I send it", and a second address-shaped string underneath the one
+ * being scanned is the last thing that question needs.
  */
 export default function ReceiveDrawer({ open, onClose, address }: Props) {
   const navigate = useNavigate()
   const hidden = usePrivacy((state) => state.hidden)
-  const [copied, setCopied] = useState<'address' | 'link' | undefined>()
+  const [copied, setCopied] = useState(false)
 
-  const copy = async (value: string, which: 'address' | 'link') => {
+  const copy = async (value: string) => {
     try {
       await navigator.clipboard.writeText(value)
-      setCopied(which)
-      setTimeout(() => setCopied(undefined), 1600)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
     } catch {
       // Refused clipboard access is not worth an error; the address is visible.
     }
@@ -71,49 +75,16 @@ export default function ReceiveDrawer({ open, onClose, address }: Props) {
         </p>
         <button
           type="button"
-          onClick={() => void copy(address, 'address')}
+          onClick={() => void copy(address)}
           className="state-layer flex shrink-0 items-center gap-1.5 rounded-control px-2 py-1 text-base text-text-muted"
         >
-          {copied === 'address' ? (
+          {copied ? (
             <Check size={16} aria-hidden className="text-positive" />
           ) : (
             <Copy size={16} aria-hidden />
           )}
-          {copied === 'address' ? 'Copied' : 'Copy'}
+          {copied ? 'Copied' : 'Copy'}
         </button>
-      </div>
-
-      {/*
-        The profile link belongs here, because "Receive" is already the screen
-        for how people pay you — but below the QR and clearly separate, since
-        the two are not interchangeable. The code above encodes the bare
-        address for a wallet scanner; this is a web page for a human. Swapping
-        the QR to the URL would quietly break every wallet that scans it.
-      */}
-      <div className="flex flex-col gap-2 rounded-card border border-border p-3">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-label text-text-muted">Or share your profile</span>
-          <button
-            type="button"
-            onClick={() => void copy(profileUrl(address), 'link')}
-            className="state-layer flex shrink-0 items-center gap-1.5 rounded-control px-2 py-1 text-base text-text-muted"
-          >
-            {copied === 'link' ? (
-              <Check size={16} aria-hidden className="text-positive" />
-            ) : (
-              <LinkIcon size={16} aria-hidden />
-            )}
-            {copied === 'link' ? 'Copied' : 'Copy link'}
-          </button>
-        </div>
-        {/* The profile link carries the address in it, so hiding the address
-            and printing the link would hide nothing at all. */}
-        <p className="break-address text-sm text-text-faint">
-          <Private mask={profileUrl(shortenAddress(address))}>{profileUrl(address)}</Private>
-        </p>
-        <p className="text-sm text-text-muted">
-          A page anyone can open to send you something. It shows this address and nothing about what you hold.
-        </p>
       </div>
 
       <div className="flex items-center gap-2.5">

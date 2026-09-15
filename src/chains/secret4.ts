@@ -75,6 +75,15 @@ export const GAS = {
   authzExec: 50_000,
   /** Vault execute plus the grant it issues (and a revoke when topping up). */
   buyGasCredit: 400_000,
+  /**
+   * Saving a public profile. Nearly all of it is the avatar: the message
+   * carries up to 12kB of base64 and the contract writes it whole, and storage
+   * is what a wasm execution pays most dearly for. Sized for a full one, since
+   * running out of gas costs the fee and saves nothing.
+   */
+  setProfile: 450_000,
+  /** Clearing one only deletes a key. */
+  clearProfile: 80_000,
   grantAllowance: 100_000,
   revokeAllowance: 80_000
 } as const
@@ -120,6 +129,18 @@ export const GAS_VAULT_ADDRESS = 'secret1kkmu4vydkppkhzmx00glm20vn47t09544adv0g'
  * equivalent. Targeted by the `wasm` memo on an incoming transfer.
  */
 export const IBC_HOOKS_WRAPPER = 'secret198lmmh2fpj3weqhjczptkzl9pxygs23yn6dsev'
+
+/**
+ * Public profile registry (`contracts/profile`). Name, bio, avatar and links,
+ * written by the account they belong to and readable by anyone who has the
+ * address.
+ *
+ * Empty until the contract is deployed. The app checks for that rather than
+ * letting an execute against the empty string fail at signing time — see
+ * `lib/profile.ts`, which treats an unset registry as "no profiles yet" so
+ * every profile falls back to what an address alone can produce.
+ */
+export const PROFILE_REGISTRY_ADDRESS: string = ''
 
 export function explorerTxUrl(hash: string): string {
   return EXPLORER_TX_TEMPLATE.replace('{hash}', hash)
