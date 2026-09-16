@@ -1,8 +1,9 @@
-import { FileSignature, Plus, Search } from 'lucide-react'
+import { FileSignature, Plus, Search, Upload } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
+import Modal from '@/components/ui/Modal'
 import EmptyState from '@/components/ui/EmptyState'
 import { cn } from '@/lib/cn'
 import type { Envelope } from '@/lib/multisig/bundle'
@@ -13,7 +14,6 @@ import { useActiveMultisigConfig, useMembership } from '@/store/multisig'
 import { useWallet } from '@/store/wallet'
 import { ImportBundle } from './components/BundleExchange'
 import ProposalCard from './components/ProposalCard'
-import TransportChip from './components/TransportChip'
 import { awaitsSignature, hasSigned } from '@/lib/multisig/stage'
 
 /**
@@ -49,6 +49,7 @@ export default function Proposals() {
   const addSignature = useMultisigProposals((state) => state.addSignature)
   const recordBroadcast = useMultisigProposals((state) => state.recordBroadcast)
   const [importError, setImportError] = useState<string>()
+  const [importing, setImporting] = useState(false)
 
   /*
    * Opens on what can still be acted on, not on the archive — the same choice
@@ -123,6 +124,7 @@ export default function Proposals() {
     }
 
     recordBroadcast(envelope)
+    setImporting(false)
   }
 
   return (
@@ -135,6 +137,27 @@ export default function Proposals() {
               <span className="font-medium text-accent">{waiting}</span> waiting for your signature
             </p>
           ) : null}
+          {/*
+            Importing is a button rather than a panel at the foot of the page.
+            It is the answer to "somebody sent me one", which is a thing that
+            happens to a member perhaps twice a round — not something that
+            earns a permanent third of the screen under the list. It sits
+            beside Propose because both answer the same question: how does a
+            proposal get onto this screen.
+          */}
+          <Button
+            variant="ghost"
+            shape="control"
+            size="sm"
+            icon={<Upload size={15} aria-hidden />}
+            onClick={() => {
+              setImportError(undefined)
+              setImporting(true)
+            }}
+          >
+            Import
+          </Button>
+
           <Button
             variant="soft"
             shape="control"
@@ -216,22 +239,15 @@ export default function Proposals() {
         </ul>
       )}
 
-      {/*
-        How the group is passing these around, and the way in for anyone whose
-        copy arrived by some other route. Below the grid rather than above it:
-        it is the answer to "I was sent one", not the reason anybody opened
-        this screen.
-      */}
-      <section className="flex flex-col gap-3 border-t border-border pt-7">
-        <h2 className="text-title">Bring one in</h2>
-        <TransportChip />
-        <p className="text-base text-text-muted">
-          Paste what another member sent you — a proposal to review, or their signature for one you already
-          have.
-        </p>
+      <Modal
+        open={importing}
+        onClose={() => setImporting(false)}
+        title="Bring one in"
+        description="Paste what another member sent you — a proposal to review, or their signature for one you already have. Either form works: the line the clipboard carries, or the JSON in a file."
+      >
         <ImportBundle onImport={accept} />
         {importError ? <p className="text-base text-negative">{importError}</p> : null}
-      </section>
+      </Modal>
     </div>
   )
 }

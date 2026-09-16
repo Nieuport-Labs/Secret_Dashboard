@@ -1,4 +1,4 @@
-import { ArrowDownToLine, Check, Copy, Eye, Plus, Share2, Trash2, TriangleAlert, Users } from 'lucide-react'
+import { ArrowDownToLine, Check, Copy, Eye, Plus, Trash2, TriangleAlert, Users } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -21,7 +21,6 @@ import { useSettings } from '@/store/settings'
 import { useAccountKeys } from '@/store/viewingKeys'
 import { useWallet } from '@/store/wallet'
 import { SignatureBar, StageBadge } from './components/ProposalCard'
-import TransportChip from './components/TransportChip'
 
 /**
  * The account, laid out like the wallet screen, because it is one.
@@ -34,10 +33,10 @@ import TransportChip from './components/TransportChip'
  *
  * What differs is what a click can do. Every action here is a proposal rather
  * than a transaction, so the list's menu says "propose" and means it, and the
- * things that are true of a shared account and of nothing else — the
- * fingerprint, the members, the viewing key, whether the chain has heard of
- * this address at all — sit below the fold in their own sections rather than
- * being crammed into a screen about balances.
+ * things that are true of a shared account and of nothing else — the members,
+ * the viewing key, the fingerprint, whether the chain has heard of this
+ * address at all — sit below what the account holds, and the housekeeping
+ * among them is one quiet line rather than three panels.
  */
 
 /** The wallet's own column widths, so the two screens line up figure for figure. */
@@ -100,7 +99,8 @@ export default function Multisig() {
           config={config}
           isMember={membership.isMember}
           connected={Boolean(walletAddress)}
-          onPropose={() => propose('send')}
+          // The list of things the group could do, not a guess at which one.
+          onPropose={() => navigate('/multisig/propose')}
           onReceive={() => setReceiving(true)}
         />
 
@@ -126,10 +126,21 @@ export default function Multisig() {
         </Notice>
       ) : null}
 
+      {/*
+        The fingerprint is loud here and quiet everywhere else, because this is
+        the moment it is for. Funding a multisig assembled from one wrong key
+        produces a perfectly valid address whose contents nobody can ever move,
+        and it is the only mistake on this screen that cannot be undone — so
+        the check belongs in the sentence about sending money, not in a panel
+        further down that everybody has stopped reading by their second week.
+      */}
       {funded === false ? (
         <Notice>
           The chain has never seen this account. Send it some {DISPLAY_DENOM} first: until something arrives
-          it has no account number, and a transaction signed without one cannot be broadcast.
+          it has no account number, and a transaction signed without one can never be broadcast. Before
+          anybody does, check that every member sees this same fingerprint —{' '}
+          <code className="font-mono text-text">{fingerprintOf(config)}</code> — because a set with one wrong
+          key in it is an address nobody holds.
         </Notice>
       ) : null}
 
@@ -166,41 +177,23 @@ export default function Multisig() {
       </div>
 
       <div className={TWO_COLUMN}>
-        <div className="flex flex-col gap-6">
-          <AddressCard config={config} />
-          <ViewingKeyCard
-            hasKey={Boolean(keys)}
-            contracts={keys?.contracts.length ?? 0}
-            canPropose={membership.isMember}
-            onPropose={() => propose('viewing-key')}
-          />
-        </div>
+        <ViewingKeyCard
+          hasKey={Boolean(keys)}
+          contracts={keys?.contracts.length ?? 0}
+          canPropose={membership.isMember}
+          onPropose={() => propose('viewing-key')}
+        />
 
         <MembersCard config={config} you={membership.member?.address} />
       </div>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-title">Sharing and removing</h2>
-        <TransportChip />
-        <ExportCard config={config} />
-        <div>
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<Trash2 size={15} />}
-            onClick={() => {
-              forgetMultisig(config.address)
-              navigate('/wallet')
-            }}
-          >
-            Remove from this browser
-          </Button>
-          <p className="mt-1 text-label text-text-faint">
-            Local only. The account itself cannot be deleted — it exists wherever its keys and threshold are
-            known — and anything it holds stays where it is.
-          </p>
-        </div>
-      </section>
+      <AccountFooter
+        config={config}
+        onForget={() => {
+          forgetMultisig(config.address)
+          navigate('/wallet')
+        }}
+      />
 
       <ReceiveDrawer open={receiving} onClose={() => setReceiving(false)} address={config.address} />
     </div>
@@ -430,17 +423,83 @@ function Notice({ children }: { children: ReactNode }) {
   )
 }
 
-function AddressCard({ config }: { config: MultisigConfig }) {
+/**
+ * The housekeeping, kept to one line.
+ *
+ * Three things that matter and are almost never wanted: the fingerprint to
+ * read aloud, the configuration to send to a new member, and the way to take
+ * this account off this browser. Each used to be a panel with a paragraph
+ * under it, which put a third of the screen between the balances and nothing
+ * anybody had come to do. The paragraphs are still here — as tooltips, and in
+ * the case of the fingerprint, printed in full the one time it counts, in the
+ * warning about funding an account the chain has never seen.
+ */
+function AccountFooter({ config, onForget }: { config: MultisigConfig; onForget: () => void }) {
+  const [copied, setCopied] = useState(false)
+  const [error, setError] = useState<string>()
+
+  const copyConfig = async () => {
+    try {
+      await navigator.clipboard.writeText(exportConfig(config))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch (caught) {
+      setError(errorMessage(caught))
+    }
+  }
+
+  const download = () => {
+    const blob = new Blob([exportConfig(config)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${config.label.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'multisig'}.multisig.json`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
-    <section className="flex flex-col gap-1.5">
-      <h2 className="text-title">Fingerprint</h2>
-      <code className="font-mono text-headline tracking-wide">{fingerprintOf(config)}</code>
-      <p className="text-label text-text-faint">
-        Every member should see the same code here. It covers the member keys and the threshold, so two
-        people reading it aloud are checking they hold the same account — which is worth doing before anybody
-        sends it money, because a multisig with one wrong key is an address nobody can ever spend from.
-      </p>
-    </section>
+    <div className="flex flex-col gap-2 border-t border-border pt-5">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-label text-text-faint">
+        <span
+          className="flex items-center gap-2"
+          title="A hash of the member keys and the threshold. Two people reading it aloud are checking they hold the same account — worth doing before anybody funds it, because a set with one wrong key is an address nobody can spend from."
+        >
+          Fingerprint
+          <code className="font-mono tracking-wide text-text-muted">{fingerprintOf(config)}</code>
+        </span>
+
+        <button
+          type="button"
+          onClick={() => void copyConfig()}
+          title="Send this to the other members so they can add the same account. It holds public keys and a threshold — nothing that can move funds — plus the shared key their copy uses to talk to yours."
+          className="flex items-center gap-1.5 underline underline-offset-4 hover:text-text-muted"
+        >
+          {copied ? <Check size={13} aria-hidden className="text-positive" /> : null}
+          {copied ? 'Copied' : 'Copy the account'}
+        </button>
+
+        <button
+          type="button"
+          onClick={download}
+          className="underline underline-offset-4 hover:text-text-muted"
+        >
+          Download it
+        </button>
+
+        <button
+          type="button"
+          onClick={onForget}
+          title="Local only. The account itself cannot be deleted — it exists wherever its keys and threshold are known — and anything it holds stays where it is."
+          className="flex items-center gap-1.5 underline underline-offset-4 hover:text-text-muted"
+        >
+          <Trash2 size={13} aria-hidden />
+          Remove from this browser
+        </button>
+      </div>
+
+      {error ? <p className="text-label text-negative">{error}</p> : null}
+    </div>
   )
 }
 
@@ -498,11 +557,17 @@ function ViewingKeyCard({
         <Eye size={16} className="text-text-muted" />
         {hasKey ? `Viewing key set on ${contracts} token${contracts === 1 ? '' : 's'}` : 'No viewing key yet'}
       </h2>
+      {/*
+        The full account of the trade while the group has not made it, and one
+        line afterwards. Somebody deciding whether to spend a round of
+        signatures on this should be told what they are deciding; somebody who
+        decided last month does not need it explained again every time they
+        look at their balances.
+      */}
       <p className="text-label text-text-faint">
-        A multisig cannot use a query permit — those are verified against a single key, and this account has
-        no single key. Private balances need a viewing key instead: the group signs one transaction to store
-        it at each token, and every member can read the balance afterwards. It is a shared secret, so removing
-        a member means setting a new one.
+        {hasKey
+          ? 'Anyone holding the key can read these balances, member or not — so removing a member means setting a new one.'
+          : 'A multisig cannot use a query permit — those are verified against a single key, and this account has no single key. Private balances need a viewing key instead: the group signs one transaction to store it at each token, and every member can read the balance afterwards. It is a shared secret, so removing a member means setting a new one.'}
       </p>
       {canPropose ? (
         <div className="mt-1">
@@ -512,53 +577,5 @@ function ViewingKeyCard({
         </div>
       ) : null}
     </section>
-  )
-}
-
-function ExportCard({ config }: { config: MultisigConfig }) {
-  const [copied, setCopied] = useState(false)
-  const [error, setError] = useState<string>()
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(exportConfig(config))
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
-    } catch (caught) {
-      setError(errorMessage(caught))
-    }
-  }
-
-  const download = () => {
-    const blob = new Blob([exportConfig(config)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${config.label.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'multisig'}.multisig.json`
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
-  return (
-    <div className="flex flex-col gap-2 rounded-card border border-border p-4">
-      <p className="text-base text-text-muted">
-        Send this to the other members so they can add the same account. It holds public keys and a threshold
-        — nothing that can move funds — plus the shared key their copy uses to talk to yours.
-      </p>
-      <div className="flex gap-2">
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={copied ? <Check size={15} /> : <Share2 size={15} />}
-          onClick={copy}
-        >
-          {copied ? 'Copied' : 'Copy'}
-        </Button>
-        <Button variant="secondary" size="sm" onClick={download}>
-          Download
-        </Button>
-      </div>
-      {error ? <p className="text-label text-negative">{error}</p> : null}
-    </div>
   )
 }

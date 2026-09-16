@@ -102,7 +102,10 @@ before it is counted, and one member signing twice counts once.
    still be written as JSON, which is the only route to a contract this app has
    no form for.
 
-5. **Circulate it.** Copy, download or scan the proposal across to the others.
+5. **Circulate it.** The channel does this by itself when it is up; otherwise
+   copy, download or scan the proposal across. Whoever receives one brings it
+   in with **Import** on the Proposals screen, which takes either form — the
+   line the clipboard carries or the JSON in a file.
 
 6. **Sign.** Each member reads what it does — "Send 10 SCRT to secret1abc…",
    with the exact message one click away — and signs. Then sends their
@@ -171,6 +174,11 @@ deliberate: a topic derived from the _address_ would be computable by anyone who
 knows the account, and an observer could then watch the group's traffic and its
 timing even without reading a word of it. Derived from a secret only members
 hold, the conversation cannot be found at all.
+
+Whether it is up shows in the footer, beside the attribution: "Connected to
+Waku · 2 peers", or a line saying to pass proposals across by hand. It is
+chrome rather than a panel because it is true of the whole app and its answer
+is almost always the same one.
 
 **It is not part of the security model.** Anyone who learns a topic can publish
 to it, so bytes arriving that way go through exactly the parser and the checks a

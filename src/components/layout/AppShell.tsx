@@ -3,6 +3,8 @@ import type { ReactNode } from 'react'
 import Toaster from '@/components/notifications/Toaster'
 import ConnectWalletModal from '@/components/wallet/ConnectWalletModal'
 import WalletDataProvider from '@/components/wallet/WalletDataProvider'
+import TransportChip from '@/pages/multisig/components/TransportChip'
+import { useActingMode } from '@/store/accounts'
 import Header from './Header'
 import Sidebar from './Sidebar'
 
@@ -20,6 +22,8 @@ import Sidebar from './Sidebar'
  * are fixed to the viewport and were landing a hundred pixels to its left.
  */
 export default function AppShell({ children }: { children: ReactNode }) {
+  const mode = useActingMode()
+
   return (
     <WalletDataProvider>
       <div className="min-h-dvh">
@@ -43,10 +47,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </main>
 
           {/* Chrome, so it is sized like chrome. The attribution has to be there;
-            it does not have to be the loudest thing above the fold. */}
-          <footer className="flex items-center justify-center gap-2 px-5 py-6 text-text-faint">
-            <span className="text-label">Powered by Secret Network</span>
-            <img src="/img/secret-mark.svg" alt="" className="h-4 w-[15px] opacity-70" />
+            it does not have to be the loudest thing above the fold.
+
+            The group's channel status keeps it company while a multisig is
+            open. It belongs with the chrome for the same reason: it is true of
+            the whole app rather than of anything on the page, and what it
+            reports is almost always "still up". */}
+          <footer className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 px-5 py-6 text-text-faint">
+            <span className="flex items-center gap-2">
+              <span className="text-label">Powered by Secret Network</span>
+              <img src="/img/secret-mark.svg" alt="" className="h-4 w-[15px] opacity-70" />
+            </span>
+            {mode === 'multisig' ? <TransportChip /> : null}
           </footer>
         </div>
 
