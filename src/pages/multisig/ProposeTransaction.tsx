@@ -36,7 +36,12 @@ import { SSCRT_ADDRESS, allTokens } from '@/tokens/registry'
 export default function ProposeTransaction() {
   const navigate = useNavigate()
   const location = useLocation()
-  const preset = (location.state as { preset?: string } | null)?.preset
+  const handed = (location.state ?? null) as {
+    preset?: string
+    proposalId?: string
+    option?: string
+  } | null
+  const preset = handed?.preset
 
   const config = useActiveMultisigConfig()
   const membership = useMembership(config)
@@ -48,11 +53,15 @@ export default function ProposeTransaction() {
   const recordContracts = useViewingKeys((state) => state.recordContracts)
 
   const nextId = useRef(1)
-  const [title, setTitle] = useState('')
+  const [title, setTitle] = useState(() =>
+    preset === 'vote' && handed?.proposalId
+      ? `Vote ${String(handed.option ?? '')} on proposal ${handed.proposalId}`
+      : ''
+  )
   const [note, setNote] = useState('')
   const [memo, setMemo] = useState('')
   const [granter, setGranter] = useState('')
-  const [rows, setRows] = useState<Row[]>(() => initialRows(preset, config?.address))
+  const [rows, setRows] = useState<Row[]>(() => initialRows(handed, config?.address))
   const [gas, setGas] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
@@ -287,10 +296,33 @@ interface Row {
   error?: string
 }
 
-function initialRows(preset: string | undefined, address: string | undefined): Row[] {
+function initialRows(
+  handed: { preset?: string; proposalId?: string; option?: string } | null,
+  address: string | undefined
+): Row[] {
   if (!address) return [{ id: 0, content: '' }]
-  if (preset === 'viewing-key') return [viewingKeyRow(0, address, SSCRT_ADDRESS, generateViewingKey())]
+  if (handed?.preset === 'viewing-key') {
+    return [viewingKeyRow(0, address, SSCRT_ADDRESS, generateViewingKey())]
+  }
+  if (handed?.preset === 'vote' && handed.proposalId) {
+    return [voteRow(0, address, handed.proposalId, handed.option ?? 'YES')]
+  }
   return [{ id: 0, content: '' }]
+}
+
+/**
+ * A vote, handed over from the governance screen.
+ *
+ * The voter is the multisig rather than whoever pressed the button there, and
+ * that is the whole reason this detour exists: a group's vote carries the
+ * group's stake, and the wallet's own vote carries the wallet's.
+ */
+function voteRow(id: number, voter: string, proposalId: string, option: string): Row {
+  return {
+    id,
+    type: 'MsgVote',
+    content: JSON.stringify({ voter, proposal_id: proposalId, option, metadata: '' }, null, 2)
+  }
 }
 
 function sendRow(id: number, sender: string): Row {

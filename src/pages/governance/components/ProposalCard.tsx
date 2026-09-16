@@ -29,8 +29,7 @@ export default function ProposalCard({ proposal, tally, params, bondedTokens, my
   // While voting is open the stored tally is all zeros and the live one is the
   // only true figure; once closed, the stored one is what the chain acted on.
   const shown = open ? tally : proposal.finalTally
-  const outcome =
-    shown && params ? evaluate(shown, bondedTokens, params, proposal.expedited) : undefined
+  const outcome = shown && params ? evaluate(shown, bondedTokens, params, proposal.expedited) : undefined
 
   const expires = timeRemaining(proposal)
 
@@ -53,11 +52,7 @@ export default function ProposalCard({ proposal, tally, params, bondedTokens, my
           question the grid has to answer from across the page is which of
           these can still be voted on.
         */
-        style={
-          open
-            ? { borderColor: 'color-mix(in srgb, var(--color-accent) 50%, transparent)' }
-            : undefined
-        }
+        style={open ? { borderColor: 'color-mix(in srgb, var(--color-accent) 50%, transparent)' } : undefined}
       >
         <div className="flex flex-wrap items-center gap-1.5">
           <StatusBadge status={proposal.status} />

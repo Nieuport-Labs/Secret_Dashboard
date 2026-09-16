@@ -47,9 +47,7 @@ export default function TallyBar({ tally, outcome, historic = false, compact = f
 
   if (cast <= 0n) {
     return (
-      <p className="text-label text-text-faint">
-        {outcome ? 'No votes cast yet' : 'No tally available'}
-      </p>
+      <p className="text-label text-text-faint">{outcome ? 'No votes cast yet' : 'No tally available'}</p>
     )
   }
 

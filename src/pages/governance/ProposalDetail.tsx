@@ -24,7 +24,8 @@ import {
 import { useGovernanceActions } from '@/hooks/useGovernanceActions'
 import { useProposal } from '@/hooks/useProposal'
 import { useValidatorVotes } from '@/hooks/useValidatorVotes'
-import { useActiveValidator } from '@/store/accounts'
+import { useActingMode, useActiveValidator } from '@/store/accounts'
+import { useActiveMultisigConfig, useMembership } from '@/store/multisig'
 import { useWallet } from '@/store/wallet'
 
 export default function ProposalDetail() {
@@ -33,6 +34,20 @@ export default function ProposalDetail() {
   const address = useWallet((state) => state.address)
   /** Whose vote the panel casts — the validator's, in validator mode. */
   const active = useActiveValidator()
+
+  /*
+   * A multisig votes, but it cannot vote from here.
+   *
+   * Its vote is an ordinary `MsgVote` from its own account, which means a
+   * transaction a threshold of members has to sign. Without this branch the
+   * panel would show the *multisig's* vote — `useProposal` reads the acting
+   * address — while the button cast the connected wallet's, which is the worst
+   * possible combination: a screen about one account acting as another.
+   */
+  const mode = useActingMode()
+  const multisig = useActiveMultisigConfig()
+  const membership = useMembership(multisig)
+  const asMultisig = mode === 'multisig' && Boolean(multisig)
 
   /** Shared between the donut, the breakdown list beside it and the
    *  validator chart below — hovering one dims the rest of all three. */
@@ -257,10 +272,19 @@ export default function ProposalDetail() {
             <VotePanel
               myVote={data.myVote}
               connected={Boolean(address)}
-              canVote={actions.canVote}
-              votingAs={active?.account.moniker}
-              state={actions.state}
-              onVote={(option) => void actions.vote(proposal.id, option)}
+              canVote={asMultisig ? membership.isMember : actions.canVote}
+              votingAs={asMultisig ? multisig?.label : active?.account.moniker}
+              actionLabel={asMultisig ? 'Propose this vote' : undefined}
+              state={asMultisig ? { kind: 'idle' } : actions.state}
+              onVote={(option) => {
+                if (asMultisig) {
+                  navigate('/multisig/propose', {
+                    state: { preset: 'vote', proposalId: proposal.id, option }
+                  })
+                  return
+                }
+                void actions.vote(proposal.id, option)
+              }}
             />
           ) : null}
 
