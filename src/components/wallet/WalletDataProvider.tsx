@@ -7,6 +7,7 @@ import { useDerivative } from '@/hooks/useDerivative'
 import { useNativeUnbondings } from '@/hooks/useNativeUnbondings'
 import { STAKING_SCOPE, usePermit } from '@/hooks/usePermit'
 import { WalletDataContext, type WalletData } from '@/hooks/walletData'
+import { permitAuth } from '@/lib/snip20'
 
 /**
  * Reads the account once, for the whole shell.
@@ -20,7 +21,7 @@ export default function WalletDataProvider({ children }: { children: ReactNode }
   // A second permit, for Shade's derivative alone. Its contract does not speak
   // the standard permission vocabulary, so one signature cannot serve both.
   const staking = usePermit(STAKING_SCOPE)
-  const balances = useBalances(permit)
+  const balances = useBalances(permit && permitAuth(permit))
   const activity = useActivity(permit)
   const derivative = useDerivative(staking.permit)
   const nativeUnbondings = useNativeUnbondings()

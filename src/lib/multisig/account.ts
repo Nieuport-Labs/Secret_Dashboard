@@ -80,3 +80,41 @@ export async function requireAccountMeta(client: SecretNetworkClient, address: s
   if (!meta) throw new AccountMissingError(address)
   return meta
 }
+
+/**
+ * The public key the chain recorded for an account.
+ *
+ * Building a multisig needs every member's *key*, not their address — an
+ * address is a hash and cannot be turned back into the key it came from. The
+ * chain records the key the first time an account signs anything, which makes
+ * this the least painful way to add a member who is not standing next to you.
+ *
+ * `undefined` for an account that has never sent a transaction. That is a
+ * common state for a fresh key and not an error: the member has to send their
+ * key across some other way, which is exactly what the "paste a key" field is
+ * for.
+ */
+export async function pubkeyForAddress(
+  client: SecretNetworkClient,
+  address: string
+): Promise<string | undefined> {
+  let response: unknown
+  try {
+    response = await client.query.auth.account({ address })
+  } catch (error) {
+    if (isNotFound(error) || /not found|unknown address/i.test(errorMessage(error))) return undefined
+    throw error
+  }
+
+  const record = (response ?? {}) as Record<string, unknown>
+  const account = (record.account ?? record ?? {}) as Record<string, unknown>
+  const base = (account.base_account ?? account ?? {}) as Record<string, unknown>
+  const pubkey = (base.pub_key ?? account.pub_key) as { '@type'?: string; key?: string } | null | undefined
+
+  if (!pubkey?.key) return undefined
+  // Only single secp256k1 keys can be members. A multisig-of-multisigs is
+  // legal in the SDK and nothing here is built to reason about one.
+  if (pubkey['@type'] && !pubkey['@type'].includes('secp256k1')) return undefined
+
+  return pubkey.key
+}

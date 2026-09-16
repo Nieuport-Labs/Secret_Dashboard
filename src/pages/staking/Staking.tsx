@@ -20,6 +20,7 @@ import { shareOfBonded, type Validator } from '@/lib/staking'
 import { useConnectDialog } from '@/store/connectDialog'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
+import { permitAuth } from '@/lib/snip20'
 
 /**
  * Staking, and Secret's own auto-restake.
@@ -33,7 +34,7 @@ export default function Staking() {
   const address = useWallet((state) => state.address)
   const currency = useSettings((state) => state.currency)
   const { permit } = usePermit()
-  const balances = useBalances(permit)
+  const balances = useBalances(permit && permitAuth(permit))
   const staking = useStaking()
   // Delegating, undelegating and claiming all move SCRT out of or into the
   // spendable balance, not just the staking totals — both need to hear about it.

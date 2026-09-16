@@ -1,8 +1,8 @@
 import { NavLink } from 'react-router-dom'
 
 import { cn } from '@/lib/cn'
-import { useActiveValidator } from '@/store/accounts'
-import { navItemsFor } from './navigation'
+import { useActingMode } from '@/store/accounts'
+import { homeFor, navItemsFor } from './navigation'
 
 /**
  * The design's left rail: mark and wordmark at the top, then the six
@@ -14,8 +14,8 @@ import { navItemsFor } from './navigation'
  * tells you the rail is a fixed layer and not a second column.
  */
 export default function Sidebar() {
-  const active = useActiveValidator()
-  const items = navItemsFor(Boolean(active))
+  const mode = useActingMode()
+  const items = navItemsFor(mode)
 
   return (
     <nav
@@ -32,7 +32,7 @@ export default function Sidebar() {
       )}
     >
       <NavLink
-        to={active ? '/validator' : '/wallet'}
+        to={homeFor(mode)}
         className="hidden items-center gap-2.5 rounded-control px-2 lg:flex"
         aria-label="Secret Dashboard, version 1.9"
       >

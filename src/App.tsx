@@ -2,9 +2,10 @@ import { lazy, Suspense, useEffect } from 'react'
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 
 import AppShell from '@/components/layout/AppShell'
+import { homeFor } from '@/components/layout/navigation'
 import { onAccountChange } from '@/lib/wallet'
 import Wallet from '@/pages/wallet/Wallet'
-import { useActiveValidator } from '@/store/accounts'
+import { useActingMode } from '@/store/accounts'
 import { usePrivacy } from '@/store/privacy'
 import { applyTheme, useSettings } from '@/store/settings'
 import { handleAccountChange, lastUsedWallet, useWallet } from '@/store/wallet'
@@ -27,6 +28,11 @@ const Onboarding = lazy(() => import('@/pages/onboarding/Onboarding'))
 const Profile = lazy(() => import('@/pages/profile/Profile'))
 const Validator = lazy(() => import('@/pages/validator/Validator'))
 const ValidatorStats = lazy(() => import('@/pages/validator/ValidatorStats'))
+const NewMultisig = lazy(() => import('@/pages/multisig/NewMultisig'))
+const Multisig = lazy(() => import('@/pages/multisig/Multisig'))
+const Proposals = lazy(() => import('@/pages/multisig/Proposals'))
+const ProposeTransaction = lazy(() => import('@/pages/multisig/ProposeTransaction'))
+const MultisigProposal = lazy(() => import('@/pages/multisig/MultisigProposal'))
 
 export default function App() {
   const theme = useSettings((state) => state.theme)
@@ -66,11 +72,13 @@ export default function App() {
   // thing on screen at once.
   useEffect(() => onAccountChange(handleAccountChange), [])
 
-  // Acting as a validator moves the home of the app: the wallet screen is not
-  // where someone in that mode expects to land, and its rail no longer offers
-  // a way back to it.
-  const validatorMode = Boolean(useActiveValidator())
-  const home = validatorMode ? '/validator' : '/wallet'
+  // Acting as something other than the wallet moves the home of the app: the
+  // wallet screen is not where someone in that mode expects to land, and the
+  // rail no longer offers a way back to it.
+  const mode = useActingMode()
+  const validatorMode = mode === 'validator'
+  const multisigMode = mode === 'multisig'
+  const home = homeFor(mode)
 
   return (
     <Routes>
@@ -194,6 +202,73 @@ export default function App() {
             validatorMode ? (
               <Suspense fallback={<p className="text-base text-text-muted">Loading stats…</p>}>
                 <ValidatorStats />
+              </Suspense>
+            ) : (
+              <Navigate to="/wallet" replace />
+            )
+          }
+        />
+        {/*
+          Creating or importing one is ungated on purpose: it is how somebody
+          gets into multisig mode in the first place, so requiring to be in it
+          already would close the only door.
+        */}
+        <Route
+          path="/multisig/new"
+          element={
+            <Suspense fallback={<p className="text-base text-text-muted">Loading…</p>}>
+              <NewMultisig />
+            </Suspense>
+          }
+        />
+        {/*
+          The rest exist only while a multisig is the account on screen, the
+          same as the validator's screens — reached without one they send you
+          home rather than rendering a page about nobody.
+        */}
+        <Route
+          path="/multisig"
+          element={
+            multisigMode ? (
+              <Suspense fallback={<p className="text-base text-text-muted">Loading the account…</p>}>
+                <Multisig />
+              </Suspense>
+            ) : (
+              <Navigate to="/wallet" replace />
+            )
+          }
+        />
+        <Route
+          path="/multisig/proposals"
+          element={
+            multisigMode ? (
+              <Suspense fallback={<p className="text-base text-text-muted">Loading proposals…</p>}>
+                <Proposals />
+              </Suspense>
+            ) : (
+              <Navigate to="/wallet" replace />
+            )
+          }
+        />
+        <Route
+          path="/multisig/propose"
+          element={
+            multisigMode ? (
+              <Suspense fallback={<p className="text-base text-text-muted">Loading…</p>}>
+                <ProposeTransaction />
+              </Suspense>
+            ) : (
+              <Navigate to="/wallet" replace />
+            )
+          }
+        />
+        {/* Its own address, so a proposal can be linked between members. */}
+        <Route
+          path="/multisig/proposals/:id"
+          element={
+            multisigMode ? (
+              <Suspense fallback={<p className="text-base text-text-muted">Loading the proposal…</p>}>
+                <MultisigProposal />
               </Suspense>
             ) : (
               <Navigate to="/wallet" replace />

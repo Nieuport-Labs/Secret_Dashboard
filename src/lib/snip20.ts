@@ -5,13 +5,43 @@ import { errorMessage } from '@/lib/errors'
 import { covers, withPermit, type Permit } from '@/lib/permit'
 
 /**
- * SNIP-20 reads, authenticated with a SNIP-24 permit.
+ * SNIP-20 reads, authenticated one of two ways.
  *
- * Every query here needs a permit, and a permit names the tokens it covers, so
- * the first thing each does is check coverage. Skipping that check turns "you
- * signed before this token existed" into an opaque contract error that reads
- * like the node is broken.
+ * A **permit** is the good way and what an ordinary account uses: a signature,
+ * no transaction, no secret to look after. It names the tokens it covers, so
+ * the first thing each query does is check coverage — skipping that check
+ * turns "you signed before this token existed" into an opaque contract error
+ * that reads like the node is broken.
+ *
+ * A **viewing key** is the old way, and the only way a multisig has. SNIP-24
+ * verifies a permit by recovering one secp256k1 public key and comparing its
+ * address; a multisig signature is an aggregate with no such key behind it, so
+ * no permit a group can produce will ever be accepted. What is left is a key
+ * the contract stores, set by a transaction the group signs together, and
+ * shared between the members afterwards.
+ *
+ * The difference is worth stating where the UI can read it: a viewing key is a
+ * shared secret. Anyone holding it can read the balance, it outlives the
+ * membership of whoever was given it, and changing it is another transaction.
  */
+
+/**
+ * How a read proves who is asking.
+ *
+ * The viewing-key variant carries its own owner address, because the contract
+ * has no signature to derive one from — which also means anyone can ask about
+ * any address, provided they hold that address's key.
+ */
+export type Snip20Auth =
+  { kind: 'permit'; permit: Permit } | { kind: 'viewing-key'; address: string; key: string }
+
+export function permitAuth(permit: Permit): Snip20Auth {
+  return { kind: 'permit', permit }
+}
+
+export function viewingKeyAuth(address: string, key: string): Snip20Auth {
+  return { kind: 'viewing-key', address, key }
+}
 
 export type BalanceOutcome =
   | { status: 'ok'; amount: string }
@@ -53,17 +83,20 @@ export async function queryTokenInfo(
 
 export async function queryBalance(
   client: SecretNetworkClient,
-  permit: Permit,
+  auth: Snip20Auth,
   contractAddress: string
 ): Promise<BalanceOutcome> {
-  if (!covers(permit, contractAddress)) return { status: 'not-covered' }
+  if (auth.kind === 'permit' && !covers(auth.permit, contractAddress)) return { status: 'not-covered' }
 
   try {
     const codeHash = await codeHashFor(client, contractAddress)
     const reply = (await client.query.compute.queryContract({
       contract_address: contractAddress,
       code_hash: codeHash,
-      query: withPermit(permit, { balance: {} })
+      query:
+        auth.kind === 'permit'
+          ? withPermit(auth.permit, { balance: {} })
+          : { balance: { address: auth.address, key: auth.key } }
     })) as BalanceReply
 
     // A rejected permit comes back as a normal reply carrying an error object,
@@ -101,11 +134,11 @@ export async function queryBalance(
  */
 export async function queryBalances(
   client: SecretNetworkClient,
-  permit: Permit,
+  auth: Snip20Auth,
   contractAddresses: string[]
 ): Promise<Map<string, BalanceOutcome>> {
   const entries = await Promise.all(
-    contractAddresses.map(async (address) => [address, await queryBalance(client, permit, address)] as const)
+    contractAddresses.map(async (address) => [address, await queryBalance(client, auth, address)] as const)
   )
   return new Map(entries)
 }
@@ -122,17 +155,27 @@ export interface Transfer {
 
 export async function queryTransferHistory(
   client: SecretNetworkClient,
-  permit: Permit,
+  auth: Snip20Auth,
   contractAddress: string,
   { page = 0, pageSize = 20 }: { page?: number; pageSize?: number } = {}
 ): Promise<Transfer[]> {
-  if (!covers(permit, contractAddress)) return []
+  if (auth.kind === 'permit' && !covers(auth.permit, contractAddress)) return []
 
   const codeHash = await codeHashFor(client, contractAddress)
   const reply = (await client.query.compute.queryContract({
     contract_address: contractAddress,
     code_hash: codeHash,
-    query: withPermit(permit, { transfer_history: { page, page_size: pageSize } })
+    query:
+      auth.kind === 'permit'
+        ? withPermit(auth.permit, { transfer_history: { page, page_size: pageSize } })
+        : {
+            transfer_history: {
+              address: auth.address,
+              key: auth.key,
+              page,
+              page_size: pageSize
+            }
+          }
   })) as { transfer_history?: { txs?: Transfer[] } }
 
   // An empty list means nothing was found on this page — never proof that the
@@ -157,4 +200,31 @@ export function transferMsg(
   amount: string
 ): { transfer: { recipient: string; amount: string } } {
   return { transfer: { recipient, amount } }
+}
+
+/**
+ * Store a viewing key at the contract.
+ *
+ * `set_viewing_key` rather than `create_viewing_key`: the contract's own
+ * generator returns the key in the encrypted reply, which works but leaves the
+ * key unknown until the transaction lands — awkward for a group, where the
+ * point is that everyone can read the balance afterwards. A key generated here
+ * is in the proposal every member already has.
+ */
+export function setViewingKeyMsg(key: string): { set_viewing_key: { key: string } } {
+  return { set_viewing_key: { key } }
+}
+
+/**
+ * A key with enough entropy that guessing it is not a strategy.
+ *
+ * Prefixed the way SNIP-20 contracts prefix their own, so a key set by this
+ * app is recognisable as one among a wallet's other keys.
+ */
+export function generateViewingKey(): string {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return `api_key_${btoa(binary)}`
 }

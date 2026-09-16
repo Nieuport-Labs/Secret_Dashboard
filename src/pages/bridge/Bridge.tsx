@@ -44,6 +44,7 @@ import { transactionsCovered, useFeePayer } from '@/store/feePayer'
 import { useConnectDialog } from '@/store/connectDialog'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
+import { permitAuth } from '@/lib/snip20'
 
 type Status =
   | { kind: 'idle' }
@@ -72,7 +73,7 @@ export default function Bridge() {
   const granterFor = useFeePayer((state) => state.granterFor)
   const settings = useSettings()
   const { permit } = usePermit()
-  const balances = useBalances(permit)
+  const balances = useBalances(permit && permitAuth(permit))
 
   const [direction, setDirection] = useState<Direction>('deposit')
   const [chainId, setChainId] = useState<string | undefined>()

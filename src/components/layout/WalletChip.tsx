@@ -1,4 +1,4 @@
-import { Check, ChevronDown, LogOut, Plus, Settings as SettingsIcon, UserRound } from 'lucide-react'
+import { Check, ChevronDown, LogOut, Plus, Settings as SettingsIcon, UserRound, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -9,9 +9,16 @@ import ProfileModal from '@/components/wallet/ProfileModal'
 import { useProfileIdentity } from '@/hooks/useProfileIdentity'
 import { useValidatorProfile } from '@/hooks/useValidatorProfile'
 import { shortenAddress } from '@/lib/format'
+import { hueFor } from '@/lib/identicon'
 import { queryValidator } from '@/lib/staking'
 import ValidatorAvatar from '@/pages/staking/components/ValidatorAvatar'
-import { useAccounts, useActiveValidator, type LinkedAccount } from '@/store/accounts'
+import {
+  displayName,
+  useAccounts,
+  useActiveAccount,
+  type LinkedAccount,
+  type LinkedValidator
+} from '@/store/accounts'
 import { useWallet } from '@/store/wallet'
 
 interface Props {
@@ -42,7 +49,7 @@ export default function WalletChip({ onOpenSettings }: Props) {
   const accounts = useAccounts((state) => state.accounts)
   const setActive = useAccounts((state) => state.setActive)
   const clearActive = useAccounts((state) => state.clearActive)
-  const active = useActiveValidator()
+  const active = useActiveAccount()
 
   const [choosingKind, setChoosingKind] = useState(false)
   const [addingValidator, setAddingValidator] = useState(false)
@@ -60,9 +67,9 @@ export default function WalletChip({ onOpenSettings }: Props) {
     navigate('/wallet')
   }
 
-  const switchToValidator = (valoper: string) => {
-    setActive(valoper)
-    navigate('/validator')
+  const switchTo = (account: LinkedAccount) => {
+    setActive(account.id)
+    navigate(account.kind === 'validator' ? '/validator' : '/multisig')
   }
 
   return (
@@ -80,10 +87,15 @@ export default function WalletChip({ onOpenSettings }: Props) {
           onClick={() => setProfileOpen(true)}
           className="state-layer flex items-center gap-2 rounded-l-control py-1.5 pl-2.5 pr-2 text-base font-medium"
         >
-          {active ? (
+          {active?.kind === 'validator' ? (
             <>
-              <AccountAvatar account={active.account} size={22} />
-              <Identity name={active.account.moniker} address={active.account.valoper} />
+              <AccountAvatar account={active} size={22} />
+              <Identity name={active.moniker} address={active.valoper} />
+            </>
+          ) : active?.kind === 'multisig' ? (
+            <>
+              <MultisigAvatar address={active.address} size={22} />
+              <Identity name={active.label} address={active.address} />
             </>
           ) : (
             <>
@@ -116,17 +128,27 @@ export default function WalletChip({ onOpenSettings }: Props) {
 
           {accounts.map((account) => (
             <MenuItem
-              key={account.valoper}
-              icon={<AccountAvatar account={account} size={16} />}
-              onClick={() => switchToValidator(account.valoper)}
+              key={account.id}
+              icon={
+                account.kind === 'validator' ? (
+                  <AccountAvatar account={account} size={16} />
+                ) : (
+                  <MultisigAvatar address={account.address} size={16} />
+                )
+              }
+              onClick={() => switchTo(account)}
             >
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="max-w-[150px] truncate">{account.moniker}</span>
+                <span className="max-w-[150px] truncate">{displayName(account)}</span>
                 <span className="text-label text-text-faint">
-                  {account.operator ? 'Validator' : 'Validator · watching'}
+                  {account.kind === 'multisig'
+                    ? `Multisig · ${account.threshold} of ${account.memberCount}`
+                    : account.operator
+                      ? 'Validator'
+                      : 'Validator · watching'}
                 </span>
               </span>
-              {active?.account.valoper === account.valoper ? (
+              {active?.id === account.id ? (
                 <Check size={15} aria-hidden className="ml-2 shrink-0 text-accent" />
               ) : null}
             </MenuItem>
@@ -162,6 +184,10 @@ export default function WalletChip({ onOpenSettings }: Props) {
           setChoosingKind(false)
           setAddingValidator(true)
         }}
+        onChooseMultisig={() => {
+          setChoosingKind(false)
+          navigate('/multisig/new')
+        }}
       />
       <AddValidatorModal open={addingValidator} onClose={() => setAddingValidator(false)} />
     </>
@@ -188,6 +214,23 @@ function Identity({ name, address }: { name: string; address: string }) {
 }
 
 /**
+ * A multisig has no picture and no Keybase identity — it is an address and a
+ * set of members. A colour derived from the address is enough to tell two
+ * apart in a list, which is all this has to do.
+ */
+function MultisigAvatar({ address, size }: { address: string; size: number }) {
+  return (
+    <span
+      aria-hidden
+      className="flex shrink-0 items-center justify-center rounded-pill text-label font-medium text-white"
+      style={{ width: size, height: size, backgroundColor: `hsl(${hueFor(address)} 45% 45%)` }}
+    >
+      <Users size={Math.round(size * 0.55)} strokeWidth={2} />
+    </span>
+  )
+}
+
+/**
  * The wallet's face in the header: its published avatar, or the Secret mark
  * when it has none.
  *
@@ -209,7 +252,7 @@ function ChipAvatar({ url }: { url?: string }) {
  * row per account. The Keybase result is cached, so a validator's row and the
  * chip beside it fetch once between them.
  */
-function AccountAvatar({ account, size }: { account: LinkedAccount; size: number }) {
+function AccountAvatar({ account, size }: { account: LinkedValidator; size: number }) {
   const identity = useStoredIdentity(account)
   const profile = useValidatorProfile(identity)
 
@@ -227,7 +270,7 @@ function AccountAvatar({ account, size }: { account: LinkedAccount; size: number
  * The result is stored either way — a validator that published no identity
  * records an empty string, which is what stops this asking again every render.
  */
-function useStoredIdentity(account: LinkedAccount): string | undefined {
+function useStoredIdentity(account: LinkedValidator): string | undefined {
   const client = useWallet((state) => state.queryClient)
   const setIdentity = useAccounts((state) => state.setIdentity)
   const { valoper, identity } = account
