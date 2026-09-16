@@ -31,6 +31,15 @@ export interface NavItem {
   needsWallet?: boolean
   /** Highlight only on this exact path, for a destination that has children. */
   exact?: boolean
+  /**
+   * What this destination may put a dot on its icon for.
+   *
+   * Named rather than a boolean, because the rail cannot know what "unread"
+   * means for a destination — only that this one is about proposals waiting
+   * for the connected member's signature, and that `Sidebar` knows how to
+   * count those.
+   */
+  badge?: 'unsigned-proposals'
 }
 
 /**
@@ -82,7 +91,13 @@ export const VALIDATOR_NAV_ITEMS: NavItem[] = [
 export const MULTISIG_NAV_ITEMS: NavItem[] = [
   // Exact, or the overview would stay lit while a proposal is open.
   { to: '/multisig', label: 'Multisig', short: 'Group', icon: Users, exact: true },
-  { to: '/multisig/proposals', label: 'Proposals', short: 'Props', icon: FileSignature },
+  {
+    to: '/multisig/proposals',
+    label: 'Proposals',
+    short: 'Props',
+    icon: FileSignature,
+    badge: 'unsigned-proposals'
+  },
   { to: '/governance', label: 'Governance', short: 'Gov', icon: Landmark }
 ]
 

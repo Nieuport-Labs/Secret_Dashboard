@@ -81,7 +81,13 @@ const ACTIONS: Action[] = [
 export default function ProposeTransaction() {
   const navigate = useNavigate()
   const location = useLocation()
-  const handed = (location.state ?? null) as { preset?: string; proposalId?: string; option?: string } | null
+  const handed = (location.state ?? null) as {
+    preset?: string
+    proposalId?: string
+    option?: string
+    asset?: string
+    contract?: string
+  } | null
 
   const config = useActiveMultisigConfig()
   const membership = useMembership(config)
@@ -92,9 +98,14 @@ export default function ProposeTransaction() {
   const setViewingKey = useViewingKeys((state) => state.setKey)
   const recordContracts = useViewingKeys((state) => state.recordContracts)
 
-  /** Arriving from the governance screen or the overview picks the form. */
-  const [action, setAction] = useState<Action['kind'] | undefined>(
-    handed?.preset === 'vote' ? 'vote' : handed?.preset === 'viewing-key' ? 'viewing-key' : undefined
+  /*
+   * Arriving from somewhere that already knows what it wants — the governance
+   * screen with a vote, a balance row with a token — opens on that form rather
+   * than on the grid. Matched against the list rather than trusted, since this
+   * comes in as router state.
+   */
+  const [action, setAction] = useState<Action['kind'] | undefined>(() =>
+    ACTIONS.some((entry) => entry.kind === handed?.preset) ? (handed?.preset as Action['kind']) : undefined
   )
 
   const [fromForm, setFromForm] = useState<DeclaredMsg[]>([])
@@ -231,7 +242,12 @@ export default function ProposeTransaction() {
                 config={config}
                 onMessages={setFromForm}
                 onSuggestTitle={setSuggested}
-                initial={{ proposalId: handed?.proposalId, option: handed?.option }}
+                initial={{
+                  proposalId: handed?.proposalId,
+                  option: handed?.option,
+                  asset: handed?.asset,
+                  contract: handed?.contract
+                }}
               />
             )}
 

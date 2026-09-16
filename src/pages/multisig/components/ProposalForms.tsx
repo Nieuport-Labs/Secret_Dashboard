@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import AmountField from '@/components/ui/AmountField'
 import Picker, { type PickerOption } from '@/components/ui/Picker'
+import StakeProposal from '@/pages/multisig/components/StakeProposal'
 import { DECIMALS, DISPLAY_DENOM } from '@/chains/secret4'
 import { useAccountStaking } from '@/hooks/useAccountStaking'
 import { isValidBech32 } from '@/lib/bech32'
@@ -28,6 +29,12 @@ import { bankDenomFor } from '@/tokens/routes'
  * The raw editor is still there under Advanced, and still the only way to
  * reach a contract this app has no form for. What changed is that it is no
  * longer the price of doing something ordinary.
+ *
+ * Staking is the exception that proves the rule: it has no form here at all,
+ * because the app already has a good one. `StakeProposal` opens the staking
+ * screen's own dialog and turns what it collects into a message — one place
+ * where the group decides how much to delegate and to whom, whether the
+ * account doing it holds one key or five.
  *
  * Every form's output goes through `describeMessage` for the preview above the
  * button, so the person composing sees the same sentence the people reviewing
@@ -60,8 +67,11 @@ interface FormProps {
   onMessages: (messages: DeclaredMsg[]) => void
   /** A title the composer may adopt while the person has not written their own. */
   onSuggestTitle: (title: string) => void
-  /** Handed over from elsewhere in the app, e.g. a vote from the governance screen. */
-  initial?: { proposalId?: string; option?: string }
+  /**
+   * Handed over from elsewhere in the app: a vote from the governance screen,
+   * or the token whose row on the overview was the reason somebody came here.
+   */
+  initial?: { proposalId?: string; option?: string; asset?: string; contract?: string }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -107,20 +117,6 @@ function AddressInput({
   )
 }
 
-function validatorOptions(
-  validators: { address: string; moniker: string }[],
-  amounts?: Map<string, { amount: string }>
-): PickerOption[] {
-  return validators.map((validator) => ({
-    id: validator.address,
-    label: validator.moniker,
-    detail: validator.address,
-    meta: amounts?.get(validator.address)
-      ? `${formatAmount(amounts.get(validator.address)!.amount, { decimals: DECIMALS, reveal: true })} ${DISPLAY_DENOM}`
-      : undefined
-  }))
-}
-
 /** Tokens that wrap a bank denomination, which is what wrapping and unwrapping need. */
 function wrappableTokens() {
   return allTokens().filter((token) => bankDenomFor(token.address))
@@ -141,8 +137,13 @@ function tokenOptions(tokens: ReturnType<typeof allTokens>): PickerOption[] {
 
 const NATIVE = 'native'
 
-function SendForm({ config, onMessages, onSuggestTitle }: FormProps) {
-  const [asset, setAsset] = useState(NATIVE)
+function SendForm({ config, onMessages, onSuggestTitle, initial }: FormProps) {
+  // Whatever row was clicked to get here, when one was — `native`, or a
+  // contract address. A `bank:<denom>` row has no send route of its own yet,
+  // so anything unrecognised falls back to the native coin.
+  const [asset, setAsset] = useState(
+    initial?.asset && (initial.asset === NATIVE || tokenByAddress(initial.asset)) ? initial.asset : NATIVE
+  )
   const [amount, setAmount] = useState('')
   const [to, setTo] = useState('')
 
@@ -195,9 +196,17 @@ function SendForm({ config, onMessages, onSuggestTitle }: FormProps) {
 /* Wrap and unwrap                                                             */
 /* -------------------------------------------------------------------------- */
 
-function WrapForm({ config, onMessages, onSuggestTitle, unwrapping }: FormProps & { unwrapping: boolean }) {
+function WrapForm({
+  config,
+  onMessages,
+  onSuggestTitle,
+  unwrapping,
+  initial
+}: FormProps & { unwrapping: boolean }) {
   const tokens = useMemo(wrappableTokens, [])
-  const [contract, setContract] = useState(SSCRT_ADDRESS)
+  const [contract, setContract] = useState(
+    initial?.contract && bankDenomFor(initial.contract) ? initial.contract : SSCRT_ADDRESS
+  )
   const [amount, setAmount] = useState('')
 
   const token = tokenByAddress(contract)
@@ -239,120 +248,6 @@ function WrapForm({ config, onMessages, onSuggestTitle, unwrapping }: FormProps 
 /* -------------------------------------------------------------------------- */
 /* Staking                                                                     */
 /* -------------------------------------------------------------------------- */
-
-function StakeForm({ config, onMessages, onSuggestTitle, unstaking }: FormProps & { unstaking: boolean }) {
-  const { validators, delegations, loading } = useAccountStaking(config.address)
-  const [validator, setValidator] = useState('')
-  const [amount, setAmount] = useState('')
-
-  // Unstaking can only touch what is actually staked, so the list is the
-  // account's own delegations rather than every validator on the chain.
-  const choices = unstaking
-    ? validators.filter((entry) => delegations.has(entry.address))
-    : validators.filter((entry) => !entry.jailed)
-
-  const staked = validator ? delegations.get(validator)?.amount : undefined
-
-  useEffect(() => {
-    if (!validator || !amount || Number(amount) <= 0) return onMessages([])
-
-    onMessages([
-      unstaking
-        ? compose.unstake({ delegator: config.address, validator, amount })
-        : compose.stake({ delegator: config.address, validator, amount })
-    ])
-
-    const moniker = validators.find((entry) => entry.address === validator)?.moniker ?? 'a validator'
-    onSuggestTitle(
-      `${unstaking ? 'Unstake' : 'Stake'} ${amount} ${DISPLAY_DENOM} ${unstaking ? 'from' : 'with'} ${moniker}`
-    )
-  }, [validator, amount, unstaking, config.address, validators, onMessages, onSuggestTitle])
-
-  return (
-    <div className="flex flex-col gap-4">
-      <Field label="Validator" hint={loading ? 'Reading the validator set…' : undefined}>
-        <Picker
-          label="Validator"
-          options={validatorOptions(choices, unstaking ? delegations : undefined)}
-          value={validator}
-          onChange={setValidator}
-          placeholder={unstaking ? 'Which one to unstake from' : 'Who to stake with'}
-        />
-      </Field>
-
-      <AmountField
-        label="Amount"
-        amount={amount}
-        onAmount={setAmount}
-        decimals={DECIMALS}
-        symbol={DISPLAY_DENOM}
-        available={unstaking ? staked : undefined}
-      />
-
-      {unstaking ? (
-        <p className="text-label text-text-faint">
-          Unstaking takes 21 days, earns nothing while it runs, and cannot be cancelled once the group has
-          signed it.
-        </p>
-      ) : null}
-    </div>
-  )
-}
-
-function RedelegateForm({ config, onMessages, onSuggestTitle }: FormProps) {
-  const { validators, delegations, loading } = useAccountStaking(config.address)
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  const [amount, setAmount] = useState('')
-
-  useEffect(() => {
-    if (!from || !to || from === to || !amount || Number(amount) <= 0) return onMessages([])
-
-    onMessages([compose.redelegate({ delegator: config.address, from, to, amount })])
-    const target = validators.find((entry) => entry.address === to)?.moniker ?? 'another validator'
-    onSuggestTitle(`Move ${amount} ${DISPLAY_DENOM} to ${target}`)
-  }, [from, to, amount, config.address, validators, onMessages, onSuggestTitle])
-
-  return (
-    <div className="flex flex-col gap-4">
-      <Field label="From" hint={loading ? 'Reading the validator set…' : undefined}>
-        <Picker
-          label="Current validator"
-          options={validatorOptions(
-            validators.filter((entry) => delegations.has(entry.address)),
-            delegations
-          )}
-          value={from}
-          onChange={setFrom}
-          placeholder="Where the stake is now"
-        />
-      </Field>
-
-      <Field label="To">
-        <Picker
-          label="New validator"
-          options={validatorOptions(validators.filter((entry) => !entry.jailed && entry.address !== from))}
-          value={to}
-          onChange={setTo}
-          placeholder="Where it should go"
-        />
-      </Field>
-
-      <AmountField
-        label="Amount"
-        amount={amount}
-        onAmount={setAmount}
-        decimals={DECIMALS}
-        symbol={DISPLAY_DENOM}
-        available={from ? delegations.get(from)?.amount : undefined}
-      />
-
-      <p className="text-label text-text-faint">
-        Moving stake is immediate and keeps earning — but the same stake cannot be moved again for 21 days.
-      </p>
-    </div>
-  )
-}
 
 function ClaimForm({ config, onMessages, onSuggestTitle }: FormProps) {
   const { rewards, validators, loading } = useAccountStaking(config.address)
@@ -587,12 +482,11 @@ export default function ProposalForm({ kind, ...props }: FormProps & { kind: Act
       return <WrapForm {...props} unwrapping={false} />
     case 'unwrap':
       return <WrapForm {...props} unwrapping />
+    // The staking screen's own dialog, not a form — see `StakeProposal`.
     case 'stake':
-      return <StakeForm {...props} unstaking={false} />
     case 'unstake':
-      return <StakeForm {...props} unstaking />
     case 'redelegate':
-      return <RedelegateForm {...props} />
+      return <StakeProposal {...props} kind={kind} />
     case 'claim':
       return <ClaimForm {...props} />
     case 'vote':

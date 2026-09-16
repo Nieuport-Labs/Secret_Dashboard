@@ -29,6 +29,16 @@ interface Props {
   available?: string
   unbondingSeconds: number
   state: ActionState
+  /** Which tab opens. Defaults to unstaking when there is something staked. */
+  initialMode?: Mode
+  /**
+   * What the button says, when pressing it does not send the transaction.
+   *
+   * A multisig cannot stake by pressing a button — it stakes by a transaction
+   * a threshold of members signs — so the same dialog composes a proposal
+   * there, and has to say so rather than promising something it will not do.
+   */
+  submitLabel?: string
   onClose: () => void
   onDelegate: (amount: string) => void
   onUndelegate: (amount: string) => void
@@ -51,6 +61,8 @@ export default function StakeModal({
   available,
   unbondingSeconds,
   state,
+  initialMode,
+  submitLabel,
   onClose,
   onDelegate,
   onUndelegate,
@@ -61,7 +73,7 @@ export default function StakeModal({
   // work the first time this particular identity is asked about.
   const profile = useValidatorProfile(validator.identity)
 
-  const [mode, setMode] = useState<Mode>(delegation ? 'undelegate' : 'delegate')
+  const [mode, setMode] = useState<Mode>(initialMode ?? (delegation ? 'undelegate' : 'delegate'))
   const [amount, setAmount] = useState('')
   const [destination, setDestination] = useState(
     validators.find((v) => v.address !== validator.address)?.address ?? ''
@@ -291,7 +303,7 @@ export default function StakeModal({
             disabled={Boolean(amountError) || BigInt(baseUnits || '0') === 0n}
             onClick={submit}
           >
-            {MODES.find((m) => m.value === mode)?.label}
+            {submitLabel ?? MODES.find((m) => m.value === mode)?.label}
           </Button>
         </>
       )}

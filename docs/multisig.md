@@ -49,8 +49,14 @@ The seed is **not** a signing key. It grants no authority over the account.
 ## What is checked, and where
 
 Nothing is trusted because of where it came from. A proposal that arrives by
-clipboard, file or QR code is checked identically, and a tampered one costs a
-member one glance at a red checklist.
+clipboard, file or QR code is checked identically, and a tampered one cannot be
+signed at all — the button has nothing to sign, because the transaction could
+not be built.
+
+The checks themselves are not paraded. A clean review is one line above the
+Sign button and anything that failed is a card that cannot be scrolled past;
+the itemised list is behind "What was checked". A wall of green ticks on every
+proposal is what teaches people to skip the one that is not green.
 
 Before a member can sign:
 
@@ -90,14 +96,19 @@ before it is counted, and one member signing twice counts once.
 
 4. **Propose.** Any member picks what the group should do — send, wrap, stake,
    vote, set a viewing key, pay someone's fees — and fills in a short form.
-   Nothing is sent. Under Advanced the messages can still be written as JSON,
-   which is the only route to a contract this app has no form for.
+   Staking, unstaking and moving a delegation open the staking screen's own
+   dialog rather than a form of their own, so the group picks a validator the
+   same way anybody picks one. Nothing is sent. Under Advanced the messages can
+   still be written as JSON, which is the only route to a contract this app has
+   no form for.
 
 5. **Circulate it.** Copy, download or scan the proposal across to the others.
 
 6. **Sign.** Each member reads what it does — "Send 10 SCRT to secret1abc…",
-   with the exact message one click away — checks the list below it, and signs.
-   Then sends their signature back the same way.
+   with the exact message one click away — and signs. Then sends their
+   signature back the same way. An open proposal the connected member has not
+   signed puts a dot on the Proposals tab, so a round in progress does not
+   depend on somebody remembering to look.
 
    A message this app cannot describe says so and shows its JSON instead. That
    is a refusal to guess rather than a failure to render: a confident summary

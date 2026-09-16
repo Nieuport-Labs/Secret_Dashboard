@@ -1,8 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-import { addressForPubkey } from '@/lib/multisig/config'
+import { addressForPubkey, isMember } from '@/lib/multisig/config'
+import { awaitsSignature } from '@/lib/multisig/stage'
 import type { BroadcastReceipt, Proposal, SignatureBundle } from '@/lib/multisig/bundle'
+import { useActiveMultisigConfig } from '@/store/multisig'
+import { useWallet } from '@/store/wallet'
 
 /**
  * Proposals in flight, and the signatures collected for them.
@@ -161,4 +164,24 @@ export function useProposalEntry(
   const byAccount = useMultisigProposals((state) => state.byAccount)
   if (!multisig || !id) return undefined
   return byAccount[multisig]?.[id]
+}
+
+/**
+ * How many open proposals this wallet has not signed — the number behind the
+ * dot on the Proposals tab.
+ *
+ * Counted for the account the shell is currently wearing and for the wallet
+ * currently connected, because both are what make a proposal "yours to sign":
+ * a member who switches keys is no longer being waited on, and nor is anyone
+ * looking at somebody else's multisig. Zero when either is missing, which is
+ * also what stops the rail advertising work to a visitor who cannot do it.
+ */
+export function useAwaitingMySignature(): number {
+  const byAccount = useMultisigProposals((state) => state.byAccount)
+  const config = useActiveMultisigConfig()
+  const address = useWallet((state) => state.address)
+
+  if (!config || !address || !isMember(config, address)) return 0
+  return Object.values(byAccount[config.address] ?? {}).filter((entry) => awaitsSignature(entry, address))
+    .length
 }

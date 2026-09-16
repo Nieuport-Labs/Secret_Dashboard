@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom'
 
 import { cn } from '@/lib/cn'
 import { useActingMode } from '@/store/accounts'
+import { useAwaitingMySignature } from '@/store/multisigProposals'
 import { homeFor, navItemsFor } from './navigation'
 
 /**
@@ -16,6 +17,12 @@ import { homeFor, navItemsFor } from './navigation'
 export default function Sidebar() {
   const mode = useActingMode()
   const items = navItemsFor(mode)
+  /*
+   * Proposals this member has not signed. Zero in every mode but multisig,
+   * since the hook asks about the account the shell is wearing — so the rail
+   * pays for nothing while nobody is acting as a group.
+   */
+  const awaiting = useAwaitingMySignature()
 
   return (
     <nav
@@ -46,7 +53,10 @@ export default function Sidebar() {
       </NavLink>
 
       <ul className="contents lg:flex lg:flex-col lg:gap-0.5">
-        {items.map(({ to, label, short, icon: Icon, exact }) => (
+        {items.map(({ to, label, short, icon: Icon, exact, badge }) => {
+          const dot = badge === 'unsigned-proposals' && awaiting > 0
+
+          return (
           <li key={to} className="min-w-0 flex-1 lg:flex-none">
             <NavLink
               to={to}
@@ -85,7 +95,23 @@ export default function Sidebar() {
                   >
                     {/* Lucide, with an explicit size at every use — the icon must
                         not inherit a font size that happens to be nearby. */}
-                    <Icon size={18} strokeWidth={1.75} aria-hidden />
+                    <span className="relative flex">
+                      <Icon size={18} strokeWidth={1.75} aria-hidden />
+                      {/*
+                        A dot, not a count. What a member needs from the rail is
+                        that something is waiting for them; how many there are is
+                        a question the screen behind it answers, and a badge
+                        reading "1" is the same instruction as a dot at twice the
+                        ink. Announced properly for a screen reader, which cannot
+                        see either.
+                      */}
+                      {dot ? (
+                        <span
+                          aria-hidden
+                          className="absolute -right-1.5 -top-1 size-2 rounded-pill bg-accent"
+                        />
+                      ) : null}
+                    </span>
                   </span>
                   {/*
                     Two spans rather than one, because the two layouts do not
@@ -100,11 +126,17 @@ export default function Sidebar() {
                   <span className="hidden lg:block lg:w-auto lg:text-left lg:text-base lg:leading-normal">
                     {label}
                   </span>
+                  {dot ? (
+                    <span className="sr-only">
+                      , {awaiting} waiting for your signature
+                    </span>
+                  ) : null}
                 </>
               )}
             </NavLink>
           </li>
-        ))}
+          )
+        })}
       </ul>
     </nav>
   )

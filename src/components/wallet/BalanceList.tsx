@@ -39,21 +39,62 @@ import { useWallet } from '@/store/wallet'
 
 interface Props {
   balances: Balances
-  /** The stkd-SCRT position, which this list shows underneath its own row. */
-  derivative: Derivative
+  /**
+   * The stkd-SCRT position, which this list shows underneath its own row.
+   *
+   * Optional, because not every account this list draws is the connected
+   * wallet. A multisig's balances come from a viewing key and there is no
+   * derivative read for them at all — passing the *wallet's* position here
+   * would hang one account's unbonding queue under another account's balance,
+   * which is worse than showing no queue.
+   */
+  derivative?: Derivative
   /** Plain SCRT undelegating, shown the same way under the SCRT row. */
-  nativeUnbondings: NativeUnbondings
+  nativeUnbondings?: NativeUnbondings
   /** Open the unstake panel, either to unbond or to claim what has matured. */
-  onUnstake: () => void
-  /** Sign the permit again — offered only where one is refusing a read. */
-  onSignPermit: () => void
+  onUnstake?: () => void
+  /** Fix whatever is refusing a read: sign the permit again, or set a new key. */
+  onSignPermit?: () => void
   /** The derivative's own permit: whether it exists, and how to get one. */
-  stakingPermit: { signed: boolean; signing: boolean; error?: string; sign: () => void }
+  stakingPermit?: { signed: boolean; signing: boolean; error?: string; sign: () => void }
   /** `native`, `bank:<denom>`, or a SNIP-20 contract address. */
   onSend: (assetId: string) => void
   onWrap: (contract: string) => void
   onUnwrap: (contract: string) => void
+  /** Where the SCRT row's Stake action goes. Defaults to the staking screen. */
+  onStake?: () => void
+  /**
+   * Whether the account holding these can act on them by itself.
+   *
+   * A multisig cannot: every one of these actions is a transaction a threshold
+   * of members has to sign, so the menu offers to propose them rather than
+   * promising something a click will not do. It also has no query permit —
+   * private balances come from a viewing key — so the prompts about signing
+   * one belong to the wallet alone.
+   */
+  mode?: 'wallet' | 'propose'
 }
+
+/** What an account with no derivative read behind it looks like. */
+const NO_DERIVATIVE: Derivative = {
+  unbondings: [],
+  claimable: '0',
+  unbondingTotal: '0',
+  nextBatch: { amount: '0' },
+  loading: false,
+  needsPermit: false,
+  refresh: () => {}
+}
+
+const NO_UNBONDINGS: NativeUnbondings = {
+  entries: [],
+  total: '0',
+  unbondingSeconds: 0,
+  loading: false,
+  refresh: () => {}
+}
+
+const NO_PERMIT = { signed: false, signing: false, sign: () => {} }
 
 interface AssetRow {
   id: string
@@ -89,18 +130,22 @@ function shortDenom(denom: string): string {
  */
 export default function BalanceList({
   balances,
-  derivative,
-  nativeUnbondings,
-  onUnstake,
-  onSignPermit,
-  stakingPermit,
+  derivative = NO_DERIVATIVE,
+  nativeUnbondings = NO_UNBONDINGS,
+  onUnstake = () => {},
+  onSignPermit = () => {},
+  stakingPermit = NO_PERMIT,
   onSend,
   onWrap,
-  onUnwrap
+  onUnwrap,
+  onStake,
+  mode = 'wallet'
 }: Props) {
   const navigate = useNavigate()
   const currency = useSettings((state) => state.currency)
   const address = useWallet((state) => state.address)
+  /** These balances belong to an account that acts by proposing, not by signing. */
+  const proposing = mode === 'propose'
   /** Row whose contract address was just copied, so the row can say so. */
   const [copied, setCopied] = useState<string | undefined>()
   const [query, setQuery] = useState('')
@@ -418,7 +463,7 @@ export default function BalanceList({
                         figure is the route's, not ours. */}
                     {row.decimals !== undefined ? (
                       <MenuItem icon={<Send size={16} aria-hidden />} onClick={() => onSend(row.id)}>
-                        Send
+                        {proposing ? 'Propose a send' : 'Send'}
                       </MenuItem>
                     ) : null}
 
@@ -427,7 +472,7 @@ export default function BalanceList({
                         icon={<ShieldCheck size={16} aria-hidden className="text-accent" />}
                         onClick={() => onWrap(row.contract!)}
                       >
-                        Wrap
+                        {proposing ? 'Propose a wrap' : 'Wrap'}
                       </MenuItem>
                     ) : null}
 
@@ -436,27 +481,35 @@ export default function BalanceList({
                         icon={<ShieldOff size={16} aria-hidden />}
                         onClick={() => onUnwrap(row.contract!)}
                       >
-                        Unwrap
+                        {proposing ? 'Propose an unwrap' : 'Unwrap'}
                       </MenuItem>
                     ) : null}
 
                     {row.denom === DENOM ? (
-                      <MenuItem icon={<Coins size={16} aria-hidden />} onClick={() => navigate('/staking')}>
-                        Stake
+                      <MenuItem
+                        icon={<Coins size={16} aria-hidden />}
+                        onClick={() => (onStake ? onStake() : navigate('/staking'))}
+                      >
+                        {proposing ? 'Propose staking' : 'Stake'}
                       </MenuItem>
                     ) : null}
 
                     {/* The one token in this registry that is also a staking
                         position: it can be taken back to SCRT, not only sold.
                         Not offered on a row standing in for an empty balance —
-                        there is nothing there to unbond, only a queue to watch. */}
-                    {row.id === STKD_SCRT_ADDRESS && BigInt(row.amount) > 0n ? (
+                        there is nothing there to unbond, only a queue to watch.
+
+                        Nor anywhere but the wallet: Shade's queue is read with
+                        a permit, which a multisig has no way to produce, so
+                        offering the action would be offering a panel that
+                        cannot show what it is acting on. */}
+                    {!proposing && row.id === STKD_SCRT_ADDRESS && BigInt(row.amount) > 0n ? (
                       <MenuItem icon={<Hourglass size={16} aria-hidden />} onClick={onUnstake}>
                         Unstake
                       </MenuItem>
                     ) : null}
 
-                    {row.id === STKD_SCRT_ADDRESS && BigInt(derivative.claimable) > 0n ? (
+                    {!proposing && row.id === STKD_SCRT_ADDRESS && BigInt(derivative.claimable) > 0n ? (
                       <MenuItem
                         icon={<HandCoins size={16} aria-hidden className="text-positive" />}
                         onClick={onUnstake}
@@ -499,7 +552,9 @@ export default function BalanceList({
           {query.trim()
             ? `Nothing matches. ${rows.length} ${rows.length === 1 ? 'asset' : 'assets'} held in total.`
             : balances.tokens.length === 0
-              ? 'Nothing here yet. Sign the query permit to read your private balances, or bridge something in.'
+              ? proposing
+                ? 'Nothing here yet. Private balances need a viewing key, which the group sets in one transaction.'
+                : 'Nothing here yet. Sign the query permit to read your private balances, or bridge something in.'
               : 'No balance in anything checked so far. The status in the header reads every token in the registry.'}
         </p>
       )}
@@ -514,7 +569,7 @@ export default function BalanceList({
         screen that does not know whether there is anything to read. So it is
         offered, once, with a way to say no that sticks.
       */}
-      {address && !stakingPermit.signed && !offerHidden && !offerDeclined && !hasDerivative ? (
+      {!proposing && address && !stakingPermit.signed && !offerHidden && !offerDeclined && !hasDerivative ? (
         <div className="flex items-start gap-3 px-2 text-text-muted">
           <Hourglass size={16} aria-hidden className="mt-0.5 shrink-0" />
           <p className="text-label">
@@ -577,7 +632,10 @@ export default function BalanceList({
                 onClick={onSignPermit}
                 className="self-start text-label text-accent underline underline-offset-4"
               >
-                Re-sign permit
+                {/* Refused for different reasons in the two modes, and fixed in
+                    different ways: a permit is re-signed on the spot, a viewing
+                    key takes a round of signatures. */}
+                {proposing ? 'Set a new viewing key' : 'Re-sign permit'}
               </button>
             ) : null}
           </div>

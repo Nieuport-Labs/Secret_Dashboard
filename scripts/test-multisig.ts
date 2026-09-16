@@ -88,6 +88,9 @@ import {
 import { deriveRoom } from '../src/lib/waku/room.ts'
 import { describeMessage, formatCoinString, validatorAddressesIn } from '../src/lib/multisig/describe.ts'
 import * as compose from '../src/lib/multisig/compose.ts'
+import { fromBaseUnits } from '../src/lib/format.ts'
+import { ageLabel, awaitsSignature, hasSigned, stageOf } from '../src/lib/multisig/stage.ts'
+import type { ProposalEntry } from '../src/store/multisigProposals.ts'
 
 let passed = 0
 let failed = 0
@@ -841,6 +844,38 @@ function testDescribe(): void {
     unstaked.notes
   )
 
+  /*
+   * The staking dialog's own conversion, which is the wallet's and not this
+   * module's: it hands back base units, `StakeProposal` turns them into the
+   * figure a person typed, and `compose` turns that back into base units. Two
+   * conversions in a row is exactly where a factor of a million goes missing,
+   * and the resulting proposal would read perfectly well while staking a
+   * millionth of what the group agreed.
+   */
+  const validator = 'secretvaloper1vgyaeqgmvln7755u7ly4r2dy3ljv93walnhde6'
+  for (const base of ['10000000', '1', '123456789', '1500000']) {
+    const message = compose.stake({
+      delegator: MULTISIG_2OF3,
+      validator,
+      amount: fromBaseUnits(base)
+    })
+    check(
+      `the staking dialog's ${base}uscrt survives the round trip`,
+      message.content.amount === `${base}uscrt`,
+      message.content.amount
+    )
+  }
+
+  const moved = describeMessage(
+    compose.redelegate({
+      delegator: MULTISIG_2OF3,
+      from: validator,
+      to: 'secretvaloper17nyn59zpxff5n2ex4aqemvmpczg5j5h3zzsf2n',
+      amount: fromBaseUnits('2500000')
+    })
+  )
+  check('moving stake reads as moving 2.5', moved.headline.includes('2.5'), moved.headline)
+
   const wrapped = describeMessage(compose.wrap({ from: MULTISIG_2OF3, contract: SSCRT_ADDRESS, amount: '5' }))
   check('wrapping reads as wrapping', wrapped.headline === 'Wrap 5 SCRT into sSCRT', wrapped.headline)
 
@@ -919,6 +954,60 @@ function testDescribe(): void {
         amount: '1'
       })
     ]).length === 1
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* How far along a proposal is                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What the rail's dot, the card's chip and the list's counter all read from.
+ *
+ * Worth its own checks because the answer is acted on in two directions: a
+ * proposal wrongly counted as signed stops being shown to the one person whose
+ * signature it is waiting for, and one wrongly counted as unsigned nags
+ * somebody who has already done it. Both are quiet failures.
+ */
+function testStage(): void {
+  const entry = (signers: string[], receipt?: { code: number }): ProposalEntry => ({
+    proposal: { id: 'p', createdAt: Date.now() } as ProposalEntry['proposal'],
+    signatures: signers.map((pubkey) => ({ pubkey }) as ProposalEntry['signatures'][number]),
+    receipt: receipt ? ({ code: receipt.code } as ProposalEntry['receipt']) : undefined,
+    updatedAt: Date.now()
+  })
+
+  check('nobody has signed an empty proposal', !hasSigned(entry([]), ADDRESS_A))
+  check('a signature is matched to its member by address', hasSigned(entry([KEY_A]), ADDRESS_A))
+  check('and not to somebody else', !hasSigned(entry([KEY_A]), ADDRESS_B))
+  // A bundle whose key will not decode is somebody else's problem to report;
+  // here it must simply not count as anyone's signature.
+  check('a malformed key is nobody’s signature', !hasSigned(entry(['not base64!!']), ADDRESS_A))
+
+  check('an unsigned open proposal is waiting for you', awaitsSignature(entry([]), ADDRESS_A))
+  check('a signed one is not', !awaitsSignature(entry([KEY_A]), ADDRESS_A))
+  // The dot must go out once something is sent, however few signatures it has.
+  check(
+    'and neither is a broadcast one',
+    !awaitsSignature(entry([], { code: 0 }), ADDRESS_A),
+    'a sent proposal still nagging for a signature'
+  )
+
+  check('two of three is still collecting', stageOf(entry([KEY_A, KEY_B]), 3) === 'collecting')
+  check('two of two is ready', stageOf(entry([KEY_A, KEY_B]), 2) === 'ready')
+  check('a receipt with code 0 is broadcast', stageOf(entry([KEY_A], { code: 0 }), 2) === 'broadcast')
+  check('a receipt with a code is a refusal', stageOf(entry([KEY_A], { code: 5 }), 2) === 'refused')
+
+  check('a fresh proposal reads as just now', ageLabel(Date.now()) === 'just now', ageLabel(Date.now()))
+  check(
+    'an hour ago reads as an hour',
+    ageLabel(Date.now() - 3_600_000) === '1 hour ago',
+    ageLabel(Date.now() - 3_600_000)
+  )
+  check(
+    'and three days ago as three days',
+    ageLabel(Date.now() - 3 * 86_400_000) === '3 days ago',
+    ageLabel(Date.now() - 3 * 86_400_000)
   )
 }
 
@@ -1386,6 +1475,7 @@ async function main(): Promise<void> {
   testBundle()
   testRoom()
   testDescribe()
+  testStage()
   await testEncryption()
   await testSignatures()
   await testFlow()
