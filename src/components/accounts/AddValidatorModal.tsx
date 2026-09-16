@@ -89,6 +89,7 @@ export default function AddValidatorModal({ open, onClose }: Props) {
   const choose = (validator: Validator, operator?: string) => {
     add({
       kind: 'validator',
+      id: validator.address,
       valoper: validator.address,
       moniker: validator.moniker,
       identity: validator.identity,
@@ -147,7 +148,7 @@ export default function AddValidatorModal({ open, onClose }: Props) {
             <li className="px-1 py-3 text-base text-text-muted">No validator matches that.</li>
           ) : (
             results.map((validator) => {
-              const added = accounts.some((a) => a.valoper === validator.address)
+              const added = accounts.some((a) => a.id === validator.address)
               return (
                 <li key={validator.address}>
                   <button

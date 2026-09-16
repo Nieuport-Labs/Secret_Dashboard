@@ -12,6 +12,15 @@ built around four things the original does not do:
   arrives, rather than the app asking sixty times a minute.
 - **Fee grants on every transaction, and gas credits you can buy.** Someone else can pay your gas,
   including a vault contract you pay once and draw down.
+- **Multisig accounts a group can actually review.** A Secret contract call is
+  encrypted, so a member approving one would otherwise be signing four hundred
+  bytes of base64. Every proposal carries its own encryption seed, so each
+  member's machine decrypts the message and checks it says what the proposal
+  claims before anything is signed. Proposals and signatures travel between
+  members over [Waku](https://waku.org) — peer-to-peer, with no server holding
+  them and nobody able to take the channel away. See
+  [`docs/multisig.md`](docs/multisig.md).
+
 - **Get gas at bridge time.** Arriving on Secret with no SCRT means you cannot sign anything —
   not even the transaction that would get you gas. A slice of what you bridge is swapped and
   turned into gas credits _in flight_, so an empty wallet still works.
@@ -25,16 +34,17 @@ npm run dev
 
 Opens on port 3000.
 
-| Script                 | What it does                                                   |
-| ---------------------- | -------------------------------------------------------------- |
-| `npm run dev`          | Development server                                             |
-| `npm run build`        | Type-check and build for production                            |
-| `npm run preview`      | Serve the production build                                     |
-| `npm run lint`         | ESLint                                                         |
-| `npm run typecheck`    | `tsc --noEmit`                                                 |
-| `npm run verify:chain` | Check every chain assumption the app rests on, against mainnet |
-| `npm run test:bridge`  | Gas-slice sizing and IBC memo shapes                           |
-| `npm run test:proposal`| Proposal encoding, and a simulated submission against mainnet  |
+| Script                  | What it does                                                                      |
+| ----------------------- | --------------------------------------------------------------------------------- |
+| `npm run dev`           | Development server                                                                |
+| `npm run build`         | Type-check and build for production                                               |
+| `npm run preview`       | Serve the production build                                                        |
+| `npm run lint`          | ESLint                                                                            |
+| `npm run typecheck`     | `tsc --noEmit`                                                                    |
+| `npm run verify:chain`  | Check every chain assumption the app rests on, against mainnet                    |
+| `npm run test:bridge`   | Gas-slice sizing and IBC memo shapes                                              |
+| `npm run test:proposal` | Proposal encoding, and a simulated submission against mainnet                     |
+| `npm run test:multisig` | Multisig address derivation and transaction assembly, against `secretcli` vectors |
 
 `verify:chain` is read-only and needs no wallet. Run it when something behaves oddly before
 suspecting the app — it will tell you whether an endpoint is lying about which chain it serves,

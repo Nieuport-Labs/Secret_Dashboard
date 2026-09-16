@@ -4,12 +4,16 @@ import {
   ChartNoAxesColumn,
   Coins,
   Activity,
+  FileSignature,
   Landmark,
   Server,
+  Users,
   Wallet,
   Wrench,
   type LucideIcon
 } from 'lucide-react'
+
+import type { ActingMode } from '@/store/accounts'
 
 export interface NavItem {
   to: string
@@ -27,6 +31,15 @@ export interface NavItem {
   needsWallet?: boolean
   /** Highlight only on this exact path, for a destination that has children. */
   exact?: boolean
+  /**
+   * What this destination may put a dot on its icon for.
+   *
+   * Named rather than a boolean, because the rail cannot know what "unread"
+   * means for a destination — only that this one is about proposals waiting
+   * for the connected member's signature, and that `Sidebar` knows how to
+   * count those.
+   */
+  badge?: 'unsigned-proposals'
 }
 
 /**
@@ -65,6 +78,38 @@ export const VALIDATOR_NAV_ITEMS: NavItem[] = [
   { to: '/validator/stats', label: 'Stats', icon: ChartNoAxesColumn }
 ]
 
-export function navItemsFor(validatorMode: boolean): NavItem[] {
-  return validatorMode ? VALIDATOR_NAV_ITEMS : NAV_ITEMS
+/**
+ * What the rail shows while acting as a multisig.
+ *
+ * Shorter still than the validator's, and for the same reason: nothing here
+ * can be done alone. Bridging, wrapping and buying gas are all things a single
+ * key does, and offering them from a multisig would promise an immediacy the
+ * account does not have — every one of them would have to become a proposal
+ * and wait for a threshold. Governance stays, because a group voting together
+ * is exactly what a multisig is for.
+ */
+export const MULTISIG_NAV_ITEMS: NavItem[] = [
+  // Exact, or the overview would stay lit while a proposal is open.
+  { to: '/multisig', label: 'Multisig', short: 'Group', icon: Users, exact: true },
+  {
+    to: '/multisig/proposals',
+    label: 'Proposals',
+    short: 'Props',
+    icon: FileSignature,
+    badge: 'unsigned-proposals'
+  },
+  { to: '/governance', label: 'Governance', short: 'Gov', icon: Landmark }
+]
+
+export function navItemsFor(mode: ActingMode): NavItem[] {
+  if (mode === 'validator') return VALIDATOR_NAV_ITEMS
+  if (mode === 'multisig') return MULTISIG_NAV_ITEMS
+  return NAV_ITEMS
+}
+
+/** Where each mode's home is — what the logo links to, and where `/` lands. */
+export function homeFor(mode: ActingMode): string {
+  if (mode === 'validator') return '/validator'
+  if (mode === 'multisig') return '/multisig'
+  return '/wallet'
 }

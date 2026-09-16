@@ -48,9 +48,7 @@ export default function VoteDonut({ tally, size = 168, hovered, onHover }: Props
 
   const share = (value: bigint) => Number((value * 1_000_000n) / cast) / 1_000_000
 
-  const leader = VOTE_ORDER.reduce((best, option) =>
-    amounts[option] > amounts[best] ? option : best
-  )
+  const leader = VOTE_ORDER.reduce((best, option) => (amounts[option] > amounts[best] ? option : best))
   const centered = hovered ?? leader
 
   let offset = 0

@@ -20,6 +20,7 @@ import { usePermit } from '@/hooks/usePermit'
 import { useProfileIdentity } from '@/hooks/useProfileIdentity'
 import { usePrivacy } from '@/store/privacy'
 import { useWallet } from '@/store/wallet'
+import { permitAuth } from '@/lib/snip20'
 
 /** What the QR and the copy button are pointed at. */
 type Target = 'link' | 'address'
@@ -101,7 +102,7 @@ export default function Profile() {
    * holdings are unreadable from this page in any case.
    */
   const { permit } = usePermit()
-  const balances = useBalances(permit)
+  const balances = useBalances(permit && permitAuth(permit))
 
   // The tab, so a profile is findable among a dozen of them. Crawlers do not
   // run this, which is why a shared link's card is the static one from

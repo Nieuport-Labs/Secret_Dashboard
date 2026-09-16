@@ -26,13 +26,7 @@ const TONES: Record<ProposalStatus, { color: string; live?: boolean }> = {
   PROPOSAL_STATUS_FAILED: { color: '#8b93a3' }
 }
 
-export default function StatusBadge({
-  status,
-  className
-}: {
-  status: ProposalStatus
-  className?: string
-}) {
+export default function StatusBadge({ status, className }: { status: ProposalStatus; className?: string }) {
   const tone = TONES[status] ?? TONES.PROPOSAL_STATUS_UNSPECIFIED
 
   return (

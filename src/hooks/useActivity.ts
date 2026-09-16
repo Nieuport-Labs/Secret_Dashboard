@@ -6,7 +6,7 @@ import { resolveLcdUrl } from '@/lib/endpoint'
 import { errorMessage } from '@/lib/errors'
 import type { Permit } from '@/lib/permit'
 import { queryPublicTransfers } from '@/lib/publicHistory'
-import { queryTransferHistory } from '@/lib/snip20'
+import { permitAuth, queryTransferHistory } from '@/lib/snip20'
 import { loadWatchlist } from '@/lib/watchlist'
 import { privateSymbol, tokenByAddress } from '@/tokens/registry'
 import { useSettings } from '@/store/settings'
@@ -58,7 +58,10 @@ export function useActivity(permit: Permit | undefined, pageSize = 12) {
 
       const perToken = await mapWithLimit(loadWatchlist(address), 4, async (contract) => {
         try {
-          return { contract, txs: await queryTransferHistory(client, permit, contract, { pageSize }) }
+          return {
+            contract,
+            txs: await queryTransferHistory(client, permitAuth(permit), contract, { pageSize })
+          }
         } catch {
           return { contract, txs: undefined }
         }

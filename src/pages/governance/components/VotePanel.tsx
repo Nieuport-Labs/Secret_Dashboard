@@ -18,14 +18,30 @@ interface Props {
    * connected and still hold no authority over the validator's vote.
    */
   canVote: boolean
-  /** The validator this vote belongs to, when it is not the wallet's own. */
+  /** The account this vote belongs to, when it is not the wallet's own. */
   votingAs?: string
+  /**
+   * What pressing the button does, when it is not casting a vote.
+   *
+   * A multisig cannot vote by pressing a button — its vote is a transaction a
+   * threshold of members has to sign — so the same panel starts a proposal
+   * instead, and has to say so rather than promising something it will not do.
+   */
+  actionLabel?: string
   state: ActionState
   onVote: (option: VoteOption) => void
 }
 
 /** Casting or changing a vote. Only rendered while a proposal is actually open. */
-export default function VotePanel({ myVote, connected, canVote, votingAs, state, onVote }: Props) {
+export default function VotePanel({
+  myVote,
+  connected,
+  canVote,
+  votingAs,
+  actionLabel,
+  state,
+  onVote
+}: Props) {
   const [choice, setChoice] = useState<VoteOption | undefined>(myVote)
   const sending = state.kind === 'sending'
 
@@ -104,9 +120,7 @@ export default function VotePanel({ myVote, connected, canVote, votingAs, state,
           ? 'Connect a wallet to vote'
           : !canVote
             ? 'Not permitted to vote'
-            : myVote
-              ? 'Change vote'
-              : 'Cast vote'}
+            : (actionLabel ?? (myVote ? 'Change vote' : 'Cast vote'))}
       </Button>
 
       {/*
@@ -118,19 +132,18 @@ export default function VotePanel({ myVote, connected, canVote, votingAs, state,
       {votingAs ? (
         connected && !canVote ? (
           <p className="text-label text-text-faint">
-            {votingAs}’s operator has not granted this wallet permission to vote. The Validator screen
-            has the command that would.
+            {votingAs}’s operator has not granted this wallet permission to vote. The Validator screen has the
+            command that would.
           </p>
         ) : (
           <p className="text-label text-text-faint">
-            This vote is cast by {votingAs} and carries the stake delegated to it. Delegators who vote
-            for themselves override it.
+            This vote is cast by {votingAs} and carries the stake delegated to it. Delegators who vote for
+            themselves override it.
           </p>
         )
       ) : (
         <p className="text-label text-text-faint">
-          Your vote is weighted by what you have staked. Undelegated {DISPLAY_DENOM} carries no voting
-          power.
+          Your vote is weighted by what you have staked. Undelegated {DISPLAY_DENOM} carries no voting power.
         </p>
       )}
     </div>

@@ -4,9 +4,8 @@ import { queryAllBalances } from '@/lib/bank'
 import { mapWithLimit } from '@/lib/concurrency'
 import { errorMessage } from '@/lib/errors'
 import { fiatValue } from '@/lib/format'
-import type { Permit } from '@/lib/permit'
 import { fetchPrices } from '@/lib/prices'
-import { queryBalance, type BalanceOutcome } from '@/lib/snip20'
+import { queryBalance, type BalanceOutcome, type Snip20Auth } from '@/lib/snip20'
 import { loadWatchlist, rememberTokens } from '@/lib/watchlist'
 import { allTokenAddresses, allTokens, tokenByAddress, type TokenInfo } from '@/tokens/registry'
 import { tokenAddressForBankDenom } from '@/tokens/routes'
@@ -92,10 +91,35 @@ export interface Balances {
  * Each token carries its own outcome, so one unreachable contract is one
  * unavailable row rather than an empty list.
  */
-export function useBalances(permit: Permit | undefined): Balances {
-  const address = useWallet((state) => state.address)
+export function useBalances(auth: Snip20Auth | undefined, owner?: string, contracts?: string[]): Balances {
+  const walletAddress = useWallet((state) => state.address)
   const client = useWallet((state) => state.queryClient)
   const currency = useSettings((state) => state.currency)
+
+  /*
+   * Whose balances these are. Defaults to the connected wallet, which is what
+   * every existing caller wants; a multisig passes its own address, because the
+   * account being read and the account holding the screen are not the same
+   * thing there.
+   */
+  const address = owner ?? walletAddress
+
+  /*
+   * The effect below depends on *which* authentication this is, not on the
+   * object carrying it. A caller building `{kind:'viewing-key', …}` inline
+   * would otherwise hand a new object every render and this would re-read the
+   * whole registry forever — the kind of bug that only shows up as a node
+   * politely rate-limiting somebody.
+   */
+  const pinned = contracts
+  const pinnedKey = contracts?.join(',') ?? ''
+
+  const authKey =
+    auth === undefined
+      ? 'none'
+      : auth.kind === 'permit'
+        ? `permit:${auth.permit.signature.signature}`
+        : `key:${auth.address}:${auth.key}`
 
   const [native, setNative] = useState<string | undefined>()
   const [bank, setBank] = useState<Map<string, string>>(new Map())
@@ -151,7 +175,17 @@ export function useBalances(permit: Permit | undefined): Balances {
     }
 
     const run = async () => {
-      const contracts = permit ? (sweep ? allTokenAddresses() : loadWatchlist(address)) : []
+      /*
+       * Which tokens to ask about.
+       *
+       * A permit covers the whole registry, so a sweep is free to try every
+       * contract and a watchlist keeps the ordinary refresh cheap. A viewing
+       * key covers only the contracts it was actually set on — asking the
+       * other ninety would fill the list with "unauthorized" rows that say
+       * nothing except that no key was set there. So a caller reading with a
+       * key passes exactly the contracts it has one for.
+       */
+      const contracts = pinned ?? (auth ? (sweep ? allTokenAddresses() : loadWatchlist(address)) : [])
       const priceIds = [
         SCRT_PRICE_ID,
         ...allTokens()
@@ -212,7 +246,7 @@ export function useBalances(permit: Permit | undefined): Balances {
       const outcomes = await mapWithLimit(
         contracts,
         QUERY_CONCURRENCY,
-        async (contract) => [contract, await queryBalance(client, permit!, contract)] as const,
+        async (contract) => [contract, await queryBalance(client, auth!, contract)] as const,
         (done, total) => {
           if (!cancelled && sweep) setScanProgress([done, total])
         }
@@ -239,8 +273,10 @@ export function useBalances(permit: Permit | undefined): Balances {
         })
       }
 
-      // Anything with a balance is worth reading again next time without a sweep.
-      rememberTokens(address, held)
+      // Anything with a balance is worth reading again next time without a
+      // sweep — but only when this read was the registry-wide kind. A pinned
+      // read knows less than the watchlist does and must not overwrite it.
+      if (!pinned) rememberTokens(address, held)
 
       setTokens(rows)
       setLoading(false)
@@ -253,7 +289,8 @@ export function useBalances(permit: Permit | undefined): Balances {
       cancelled = true
     }
     // `request` is the refresh trigger, and says whether this one sweeps.
-  }, [address, client, permit, currency, request, sweep])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `authKey` stands in for `auth`; see above.
+  }, [address, client, authKey, pinnedKey, currency, request, sweep])
 
   return {
     native,

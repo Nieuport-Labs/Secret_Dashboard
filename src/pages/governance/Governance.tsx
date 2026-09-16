@@ -71,9 +71,7 @@ export default function Governance() {
   }, [governance.proposals, filter, query])
 
   const visible = matches.slice(0, shown)
-  const openCount = governance.proposals.filter(
-    (p) => p.status === 'PROPOSAL_STATUS_VOTING_PERIOD'
-  ).length
+  const openCount = governance.proposals.filter((p) => p.status === 'PROPOSAL_STATUS_VOTING_PERIOD').length
 
   const reset = (next: () => void) => {
     next()
