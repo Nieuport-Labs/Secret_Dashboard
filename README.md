@@ -16,7 +16,10 @@ built around four things the original does not do:
   encrypted, so a member approving one would otherwise be signing four hundred
   bytes of base64. Every proposal carries its own encryption seed, so each
   member's machine decrypts the message and checks it says what the proposal
-  claims before anything is signed. See [`docs/multisig.md`](docs/multisig.md).
+  claims before anything is signed. Proposals and signatures travel between
+  members over [Waku](https://waku.org) — peer-to-peer, with no server holding
+  them and nobody able to take the channel away. See
+  [`docs/multisig.md`](docs/multisig.md).
 
 - **Get gas at bridge time.** Arriving on Secret with no SCRT means you cannot sign anything —
   not even the transaction that would get you gas. A slice of what you bridge is swapped and

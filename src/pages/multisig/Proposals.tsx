@@ -10,6 +10,7 @@ import { fingerprintOf } from '@/lib/multisig/config'
 import { useMultisigProposals, useProposalsFor, type ProposalEntry } from '@/store/multisigProposals'
 import { useActiveMultisigConfig, useMembership } from '@/store/multisig'
 import { ImportBundle } from './components/BundleExchange'
+import TransportChip from './components/TransportChip'
 
 /**
  * Every proposal this copy of the app knows about.
@@ -104,6 +105,8 @@ export default function Proposals() {
           ))}
         </ul>
       )}
+
+      <TransportChip />
 
       <section className="flex flex-col gap-3">
         <h2 className="text-title">Import</h2>

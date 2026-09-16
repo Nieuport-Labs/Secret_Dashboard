@@ -3,9 +3,11 @@ import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 
 import AppShell from '@/components/layout/AppShell'
 import { homeFor } from '@/components/layout/navigation'
+import { useMultisigSync } from '@/hooks/useMultisigSync'
 import { onAccountChange } from '@/lib/wallet'
 import Wallet from '@/pages/wallet/Wallet'
 import { useActingMode } from '@/store/accounts'
+import { useActiveMultisigConfig } from '@/store/multisig'
 import { usePrivacy } from '@/store/privacy'
 import { applyTheme, useSettings } from '@/store/settings'
 import { handleAccountChange, lastUsedWallet, useWallet } from '@/store/wallet'
@@ -294,8 +296,17 @@ export default function App() {
  *
  * `AppShell` still takes `children`, unchanged — this only adapts it to the
  * `Outlet` a layout route renders through.
+ *
+ * The multisig's peer-to-peer connection is started here rather than on one of
+ * its screens: a signing round should keep catching up while the member reads
+ * governance or checks a balance, and a node started and stopped by navigation
+ * would spend its life reconnecting. It costs nothing outside multisig mode —
+ * the hook does nothing without an account, and the Waku code is only fetched
+ * when there is one.
  */
 function Shell() {
+  useMultisigSync(useActiveMultisigConfig())
+
   return (
     <AppShell>
       <Outlet />

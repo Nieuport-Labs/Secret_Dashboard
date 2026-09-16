@@ -8,6 +8,7 @@ import { DENOM, DISPLAY_DENOM, GAS_PRICE_USCRT } from '@/chains/secret4'
 import { errorMessage } from '@/lib/errors'
 import { estimateFee, formatAmount } from '@/lib/format'
 import { MESSAGE_TEMPLATES } from '@/lib/messageTemplates'
+import { publishEnvelope } from '@/hooks/useMultisigSync'
 import { composeProposal } from '@/lib/multisig/flow'
 import { defaultGasFor, foreignSigners, type DeclaredMsg } from '@/lib/multisig/messages'
 import { generateViewingKey } from '@/lib/snip20'
@@ -109,6 +110,11 @@ export default function ProposeTransaction() {
       })
 
       upsert(proposal)
+
+      // Straight out to the other members, if the group has a connection. It
+      // is not waited on and not reported: the proposal is saved either way,
+      // and its own screen offers the clipboard regardless.
+      void publishEnvelope(proposal)
 
       // A viewing key is only useful if every member ends up holding it, and
       // the proposal is what carries it: it is inside the encrypted message

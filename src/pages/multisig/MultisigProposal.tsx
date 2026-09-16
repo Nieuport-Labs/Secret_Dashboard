@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import { CHAIN_ID, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
+import { publishEnvelope } from '@/hooks/useMultisigSync'
 import { resolveLcdUrl } from '@/lib/endpoint'
 import { errorMessage } from '@/lib/errors'
 import { formatAmount, shortenAddress } from '@/lib/format'
@@ -161,6 +162,7 @@ export default function MultisigProposal() {
       })
       addSignature(proposal.id, config.address, bundle)
       setMine(bundle)
+      void publishEnvelope(bundle)
       setAction({ kind: 'idle' })
     } catch (caught) {
       setAction({ kind: 'failed', message: errorMessage(caught) })
@@ -182,16 +184,19 @@ export default function MultisigProposal() {
       const lcdUrl = await resolveLcdUrl(lcdOverride)
       const tx = await broadcastProposal({ lcdUrl, chainId: CHAIN_ID, txBytes, seed: proposal.seed })
 
-      recordBroadcast({
-        v: 1,
-        kind: 'broadcast',
+      const receipt = {
+        v: 1 as const,
+        kind: 'broadcast' as const,
         proposalId: proposal.id,
         fingerprint: fingerprintOf(config),
         txHash: tx.transactionHash,
         code: tx.code,
         height: tx.height,
         broadcastAt: Date.now()
-      })
+      }
+      recordBroadcast(receipt)
+      // So the others stop waiting for signatures on something already sent.
+      void publishEnvelope(receipt)
 
       setAction(
         tx.code === 0

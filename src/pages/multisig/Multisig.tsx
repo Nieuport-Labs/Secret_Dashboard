@@ -15,6 +15,7 @@ import { useProposalsFor } from '@/store/multisigProposals'
 import { forgetMultisig, useActiveMultisigConfig, useMembership } from '@/store/multisig'
 import { useAccountKeys } from '@/store/viewingKeys'
 import { useWallet } from '@/store/wallet'
+import TransportChip from './components/TransportChip'
 
 /**
  * The account, and everything a member needs to know about it at a glance.
@@ -197,6 +198,7 @@ export default function Multisig() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-title">Sharing and removing</h2>
+        <TransportChip />
         <ExportCard config={config} />
         <div>
           <Button

@@ -474,6 +474,42 @@ export function decodeText(value: string): Envelope {
   return parseEnvelope(parsed)
 }
 
+/**
+ * The binary form, for a transport that carries bytes.
+ *
+ * Deliberately the plain JSON rather than the text form's base64: Waku already
+ * frames and encrypts what it carries, so encoding it a second time would only
+ * make every message a third larger for nothing.
+ */
+export function encodeEnvelope(envelope: Envelope): Uint8Array {
+  const json = JSON.stringify(envelope)
+  if (json.length > MAX_BUNDLE_BYTES) {
+    throw new BundleError('That is too large to share in one piece.')
+  }
+  return encoder.encode(json)
+}
+
+/**
+ * Read one back.
+ *
+ * Bytes off a public topic are the least trusted input this app has — anyone
+ * can publish to a topic they know — so they go through exactly the parser
+ * everything else does, and a message that is not a bundle at all is a
+ * refusal rather than a crash.
+ */
+export function decodeEnvelope(bytes: Uint8Array): Envelope {
+  if (bytes.length > MAX_BUNDLE_BYTES) throw new BundleError('That is too large to be a multisig bundle.')
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(decoder.decode(bytes))
+  } catch {
+    throw new BundleError('That is not a multisig bundle.')
+  }
+
+  return parseEnvelope(parsed)
+}
+
 /** The same thing as a file, for the route where a line of text is awkward. */
 export function encodeJson(envelope: Envelope): string {
   const json = JSON.stringify(envelope, null, 2)

@@ -132,9 +132,37 @@ overview reads them for any account.
 - **Signatures are bound to a sequence.** Two proposals built on the same
   sequence are mutually exclusive: broadcasting one voids the other's
   signatures for good.
-- **Proposals travel by hand.** Clipboard, file, or QR when it fits — a
-  proposal carrying an encrypted message does not. A peer-to-peer transport is
-  designed but not built.
+- **The channel is best-effort.** Waku keeps a message for about two days and
+  nobody is obliged to relay it. Every copy re-publishes what it still holds,
+  so a group stays in sync as long as one member is around — but the clipboard
+  is always there, and a proposal that must arrive should be sent by hand.
+
+## How proposals reach the other members
+
+Over [Waku](https://waku.org), a peer-to-peer messaging network. A light node
+in the browser hands a message to a service node, which relays it to everyone
+subscribed to the same topic. Nobody operates the group's channel: there is no
+account to suspend, no endpoint to block and no operator to ask — which is why
+it was chosen over a small server, which would have been less code and one more
+party able to stop a group working.
+
+The topic and the payload key both come from the random secret in the account's
+configuration, the one members exchange when they set the account up. That is
+deliberate: a topic derived from the _address_ would be computable by anyone who
+knows the account, and an observer could then watch the group's traffic and its
+timing even without reading a word of it. Derived from a secret only members
+hold, the conversation cannot be found at all.
+
+**It is not part of the security model.** Anyone who learns a topic can publish
+to it, so bytes arriving that way go through exactly the parser and the checks a
+pasted bundle does. What the channel buys is that members need not be online at
+the same moment, and that nobody has to paste anything; what it costs, if it is
+down, is that they do.
+
+Practical limits, all of them the network's rather than this app's: 150 KB a
+message, about one message a second, and roughly 48 hours of history. The
+libp2p stack is around 800 KB and is fetched only when a multisig is actually
+opened — a wallet screen never downloads it.
 
 ## Checking this app against `secretcli`
 

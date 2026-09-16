@@ -85,6 +85,7 @@ import {
   signBytesHash,
   type SignDocInput
 } from '../src/lib/multisig/signdoc.ts'
+import { deriveRoom } from '../src/lib/waku/room.ts'
 
 let passed = 0
 let failed = 0
@@ -786,6 +787,53 @@ function testMessages(): void {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Where proposals travel                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The group's Waku topic and payload key, both from its own shared secret.
+ *
+ * The property that matters is the one that is easy to lose in a refactor:
+ * the topic must not be derivable from anything public. If it were a hash of
+ * the account address, anyone who knows the account — which is everyone, once
+ * it holds something — could find the group's traffic and watch its timing.
+ */
+function testRoom(): void {
+  const secret = 'f'.repeat(64)
+  const room = deriveRoom(secret)
+  const again = deriveRoom(secret)
+
+  check('a room is derived deterministically', room.contentTopic === again.contentTopic)
+  check('the key is 32 bytes', room.symKey.length === 32)
+  check(
+    'the topic is shaped the way Waku wants',
+    /^\/secret-dashboard\/1\/ms-[0-9a-f]{16}\/proto$/.test(room.contentTopic),
+    room.contentTopic
+  )
+
+  const other = deriveRoom('a'.repeat(64))
+  check('another group gets another topic', other.contentTopic !== room.contentTopic)
+  check('another group gets another key', toBase64(other.symKey) !== toBase64(room.symKey))
+
+  // The two are derived from the same secret under different labels, so
+  // publishing the topic must not be publishing anything about the key.
+  check(
+    'the topic is not a prefix of the key',
+    !toBase64(room.symKey).includes(room.contentTopic.split('ms-')[1].split('/')[0])
+  )
+
+  // Nothing public may reach the topic. The account address is the obvious
+  // candidate and is exactly what must not work.
+  check(
+    'the address does not appear in the topic',
+    !room.contentTopic.includes(MULTISIG_2OF3.slice(6, 20))
+  )
+
+  refuses('a malformed secret is refused', () => deriveRoom('nope'), /32 bytes of hex/)
+  refuses('a short secret is refused', () => deriveRoom('ab'.repeat(8)), /32 bytes of hex/)
+}
+
+/* -------------------------------------------------------------------------- */
 /* The wire format                                                             */
 /* -------------------------------------------------------------------------- */
 
@@ -1203,6 +1251,7 @@ async function main(): Promise<void> {
   testAssembly()
   testMessages()
   testBundle()
+  testRoom()
   await testEncryption()
   await testSignatures()
   await testFlow()
