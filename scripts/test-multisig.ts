@@ -86,6 +86,8 @@ import {
   type SignDocInput
 } from '../src/lib/multisig/signdoc.ts'
 import { deriveRoom } from '../src/lib/waku/room.ts'
+import { describeMessage, formatCoinString, validatorAddressesIn } from '../src/lib/multisig/describe.ts'
+import * as compose from '../src/lib/multisig/compose.ts'
 
 let passed = 0
 let failed = 0
@@ -787,6 +789,140 @@ function testMessages(): void {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Saying what a message does                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The sentence a member reads instead of the JSON.
+ *
+ * Worth testing rather than eyeballing, because the failure mode is a summary
+ * that is confidently wrong — a figure off by a factor of a million reads
+ * perfectly well, and a member who trusts the sentence would approve it.
+ */
+function testDescribe(): void {
+  const send = describeMessage(compose.sendNative({ from: MULTISIG_2OF3, to: ADDRESS_A, amount: '10' }))
+  check('a send is described in whole coins', send.headline === 'Send 10 SCRT', send.headline)
+  check(
+    'and it names the recipient',
+    send.rows.some((row) => row.value === ADDRESS_A),
+    send.rows
+  )
+  check('a send is recognised', send.recognised)
+
+  // The conversion this is really testing: a person typed 10 and the chain
+  // wants 10000000. Both halves have to agree or the sentence lies.
+  const raw = compose.sendNative({ from: MULTISIG_2OF3, to: ADDRESS_A, amount: '10' })
+  check('the message itself carries base units', raw.content.amount === '10000000uscrt', raw.content.amount)
+
+  const staked = describeMessage(
+    compose.stake({
+      delegator: MULTISIG_2OF3,
+      validator: 'secretvaloper1vgyaeqgmvln7755u7ly4r2dy3ljv93walnhde6',
+      amount: '1.5'
+    }),
+    { validatorNames: new Map([['secretvaloper1vgyaeqgmvln7755u7ly4r2dy3ljv93walnhde6', 'Secret Saturn']]) }
+  )
+  check(
+    'staking names the validator when it is known',
+    staked.headline === 'Stake 1.5 SCRT with Secret Saturn',
+    staked.headline
+  )
+
+  const unstaked = describeMessage(
+    compose.unstake({
+      delegator: MULTISIG_2OF3,
+      validator: 'secretvaloper1vgyaeqgmvln7755u7ly4r2dy3ljv93walnhde6',
+      amount: '2'
+    })
+  )
+  check(
+    'unstaking warns about the 21 days',
+    unstaked.notes?.some((note) => /21 days/.test(note)) ?? false,
+    unstaked.notes
+  )
+
+  const wrapped = describeMessage(compose.wrap({ from: MULTISIG_2OF3, contract: SSCRT_ADDRESS, amount: '5' }))
+  check('wrapping reads as wrapping', wrapped.headline === 'Wrap 5 SCRT into sSCRT', wrapped.headline)
+
+  const unwrapped = describeMessage(
+    compose.unwrap({ from: MULTISIG_2OF3, contract: SSCRT_ADDRESS, amount: '5' })
+  )
+  check('unwrapping reads as unwrapping', /^Unwrap 5 sSCRT/.test(unwrapped.headline), unwrapped.headline)
+
+  const transfer = describeMessage(
+    compose.sendToken({ from: MULTISIG_2OF3, to: ADDRESS_A, contract: SSCRT_ADDRESS, amount: '3' })
+  )
+  check(
+    'a token transfer uses the token’s own decimals',
+    transfer.headline === 'Send 3 sSCRT',
+    transfer.headline
+  )
+
+  // The key is in the proposal for every member to decrypt; printing it on a
+  // screen adds nothing and risks a shoulder or a screenshot.
+  const key = describeMessage(
+    compose.setViewingKey({
+      account: MULTISIG_2OF3,
+      contracts: [SSCRT_ADDRESS],
+      key: 'api_key_secret-value'
+    })[0]
+  )
+  check(
+    'a viewing key is described without printing the key',
+    !JSON.stringify(key).includes('secret-value'),
+    key
+  )
+  check('and it says the key is shared', key.notes?.some((note) => /shared secret/.test(note)) ?? false)
+
+  const unlimited = describeMessage(compose.grantFeeAllowance({ granter: MULTISIG_2OF3, grantee: ADDRESS_A }))
+  check(
+    'an unlimited fee allowance is called out',
+    unlimited.notes?.some((note) => /no limit/.test(note)) ?? false,
+    unlimited.notes
+  )
+  const limited = describeMessage(
+    compose.grantFeeAllowance({ granter: MULTISIG_2OF3, grantee: ADDRESS_A, limit: '1' })
+  )
+  check(
+    'a limited one shows the limit',
+    limited.rows.some((row) => row.value === '1 SCRT'),
+    limited.rows
+  )
+
+  const voted = describeMessage(
+    compose.vote({ voter: MULTISIG_2OF3, proposalId: '370', option: 'NO_WITH_VETO' })
+  )
+  check('a vote reads in words', voted.headline === 'Vote No with veto on proposal 370', voted.headline)
+
+  // The honest answer for anything this app cannot read.
+  const unknown = describeMessage({
+    template: 'MsgExecuteContract',
+    content: { sender: MULTISIG_2OF3, contract_address: SSCRT_ADDRESS, msg: { do_something_odd: {} } }
+  })
+  check('an unrecognised contract call says so', !unknown.recognised, unknown)
+  check(
+    'and tells the member to read it',
+    unknown.notes?.some((note) => /cannot say what it does/.test(note)) ?? false
+  )
+
+  check(
+    'a malformed coin string is left alone rather than mangled',
+    formatCoinString('not-a-coin') === 'not-a-coin'
+  )
+  check(
+    'validators are collected for looking up',
+    validatorAddressesIn([
+      compose.redelegate({
+        delegator: MULTISIG_2OF3,
+        from: 'secretvaloper1vgyaeqgmvln7755u7ly4r2dy3ljv93walnhde6',
+        to: 'secretvaloper1vgyaeqgmvln7755u7ly4r2dy3ljv93walnhde6',
+        amount: '1'
+      })
+    ]).length === 1
+  )
+}
+
+/* -------------------------------------------------------------------------- */
 /* Where proposals travel                                                      */
 /* -------------------------------------------------------------------------- */
 
@@ -824,10 +960,7 @@ function testRoom(): void {
 
   // Nothing public may reach the topic. The account address is the obvious
   // candidate and is exactly what must not work.
-  check(
-    'the address does not appear in the topic',
-    !room.contentTopic.includes(MULTISIG_2OF3.slice(6, 20))
-  )
+  check('the address does not appear in the topic', !room.contentTopic.includes(MULTISIG_2OF3.slice(6, 20)))
 
   refuses('a malformed secret is refused', () => deriveRoom('nope'), /32 bytes of hex/)
   refuses('a short secret is refused', () => deriveRoom('ab'.repeat(8)), /32 bytes of hex/)
@@ -1252,6 +1385,7 @@ async function main(): Promise<void> {
   testMessages()
   testBundle()
   testRoom()
+  testDescribe()
   await testEncryption()
   await testSignatures()
   await testFlow()

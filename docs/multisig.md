@@ -88,12 +88,20 @@ before it is counted, and one member signing twice counts once.
 3. **Fund it.** Until something arrives the chain has no record of the account,
    so it has no account number and nothing it signs can be broadcast.
 
-4. **Propose.** Any member composes a transaction. Nothing is sent.
+4. **Propose.** Any member picks what the group should do — send, wrap, stake,
+   vote, set a viewing key, pay someone's fees — and fills in a short form.
+   Nothing is sent. Under Advanced the messages can still be written as JSON,
+   which is the only route to a contract this app has no form for.
 
 5. **Circulate it.** Copy, download or scan the proposal across to the others.
 
-6. **Sign.** Each member reviews the checklist and signs, then sends their
-   signature back the same way.
+6. **Sign.** Each member reads what it does — "Send 10 SCRT to secret1abc…",
+   with the exact message one click away — checks the list below it, and signs.
+   Then sends their signature back the same way.
+
+   A message this app cannot describe says so and shows its JSON instead. That
+   is a refusal to guess rather than a failure to render: a confident summary
+   of a message nobody parsed would be worse than no summary at all.
 
 7. **Broadcast.** Whoever holds a threshold of verified signatures sends it.
    Anyone can — a signature is not a secret — but only verified ones are used.

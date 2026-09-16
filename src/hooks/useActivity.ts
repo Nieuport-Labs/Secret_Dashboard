@@ -58,7 +58,10 @@ export function useActivity(permit: Permit | undefined, pageSize = 12) {
 
       const perToken = await mapWithLimit(loadWatchlist(address), 4, async (contract) => {
         try {
-          return { contract, txs: await queryTransferHistory(client, permitAuth(permit), contract, { pageSize }) }
+          return {
+            contract,
+            txs: await queryTransferHistory(client, permitAuth(permit), contract, { pageSize })
+          }
         } catch {
           return { contract, txs: undefined }
         }

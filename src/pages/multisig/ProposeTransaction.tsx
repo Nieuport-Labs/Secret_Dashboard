@@ -1,48 +1,87 @@
-import { Eye, Plus, Send, Trash2 } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import {
+  ArrowLeft,
+  Coins,
+  Eye,
+  FileCode,
+  Gift,
+  Landmark,
+  Lock,
+  LockOpen,
+  Send,
+  Shuffle,
+  TrendingDown,
+  TrendingUp,
+  XCircle,
+  type LucideIcon
+} from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
-import Picker from '@/components/ui/Picker'
-import { DENOM, DISPLAY_DENOM, GAS_PRICE_USCRT } from '@/chains/secret4'
+import { DISPLAY_DENOM, GAS_PRICE_USCRT } from '@/chains/secret4'
+import { publishEnvelope } from '@/hooks/useMultisigSync'
+import { resolveLcdUrl } from '@/lib/endpoint'
 import { errorMessage } from '@/lib/errors'
 import { estimateFee, formatAmount } from '@/lib/format'
-import { MESSAGE_TEMPLATES } from '@/lib/messageTemplates'
-import { publishEnvelope } from '@/hooks/useMultisigSync'
 import { composeProposal } from '@/lib/multisig/flow'
 import { defaultGasFor, foreignSigners, type DeclaredMsg } from '@/lib/multisig/messages'
-import { generateViewingKey } from '@/lib/snip20'
-import { resolveLcdUrl } from '@/lib/endpoint'
 import { useMultisigProposals } from '@/store/multisigProposals'
 import { useActiveMultisigConfig, useMembership } from '@/store/multisig'
 import { useSettings } from '@/store/settings'
 import { useViewingKeys } from '@/store/viewingKeys'
 import { useWallet } from '@/store/wallet'
-import { SSCRT_ADDRESS, allTokens } from '@/tokens/registry'
+import AdvancedMessages from './components/AdvancedMessages'
+import { toDeclared, type Row } from './components/advancedRows'
+import MessageCard from './components/MessageCard'
+import ProposalForm, { type ActionKind } from './components/ProposalForms'
 
 /**
  * Composing a transaction for the group to sign.
  *
- * The same JSON-and-templates approach Powertools uses, for the same reason:
- * whatever the chain can be asked to do, a group should be able to propose,
- * and a form per message type would cover a tenth of it. What is different
- * here is that nothing is sent — the result is a document that goes to the
- * other members, and the checks that matter happen on their screens, where
- * they can see the proposal rather than having written it.
+ * Arranged around the question a person actually arrives with — "what should
+ * we do?" — rather than around the chain's message types. Each answer is a
+ * form asking for the two or three things that answer needs, because a field
+ * labelled "Amount" with SCRT beside it cannot be got wrong the way
+ * `"amount": "10000000uscrt"` can: the base units, the denomination spelling
+ * and the field names are the app's problem, not the proposer's.
  *
- * Two shortcuts sit on top, because they are what a new group actually does
- * first: send something, and set a viewing key so everyone can see what the
- * account holds.
+ * Under Advanced the JSON editor is unchanged, and remains the only route to a
+ * contract this app has no form for. What it no longer is, is the price of
+ * doing something ordinary.
+ *
+ * Whatever is composed is previewed through exactly the component the
+ * reviewers will see it through. That is deliberate: an author who does not
+ * recognise their own proposal in the preview has filled the form in wrong,
+ * and finding that here costs nothing, while finding it mid-round costs
+ * everybody's time and a sequence.
  */
+
+interface Action {
+  kind: ActionKind | 'advanced'
+  label: string
+  description: string
+  icon: LucideIcon
+}
+
+const ACTIONS: Action[] = [
+  { kind: 'send', label: 'Send', description: `${DISPLAY_DENOM} or a token, to any address`, icon: Send },
+  { kind: 'wrap', label: 'Wrap', description: `Make ${DISPLAY_DENOM} private`, icon: Lock },
+  { kind: 'unwrap', label: 'Unwrap', description: `Back to public ${DISPLAY_DENOM}`, icon: LockOpen },
+  { kind: 'stake', label: 'Stake', description: 'Delegate to a validator', icon: TrendingUp },
+  { kind: 'unstake', label: 'Unstake', description: 'Begin the 21-day unbonding', icon: TrendingDown },
+  { kind: 'redelegate', label: 'Move stake', description: 'From one validator to another', icon: Shuffle },
+  { kind: 'claim', label: 'Claim rewards', description: 'Collect what staking earned', icon: Coins },
+  { kind: 'vote', label: 'Vote', description: 'On a governance proposal', icon: Landmark },
+  { kind: 'viewing-key', label: 'Viewing key', description: 'So members can read balances', icon: Eye },
+  { kind: 'fee-grant', label: 'Pay fees', description: 'Cover another account’s gas', icon: Gift },
+  { kind: 'fee-revoke', label: 'Stop paying fees', description: 'Cancel an allowance', icon: XCircle },
+  { kind: 'advanced', label: 'Advanced', description: 'Write the messages yourself', icon: FileCode }
+]
+
 export default function ProposeTransaction() {
   const navigate = useNavigate()
   const location = useLocation()
-  const handed = (location.state ?? null) as {
-    preset?: string
-    proposalId?: string
-    option?: string
-  } | null
-  const preset = handed?.preset
+  const handed = (location.state ?? null) as { preset?: string; proposalId?: string; option?: string } | null
 
   const config = useActiveMultisigConfig()
   const membership = useMembership(config)
@@ -53,24 +92,24 @@ export default function ProposeTransaction() {
   const setViewingKey = useViewingKeys((state) => state.setKey)
   const recordContracts = useViewingKeys((state) => state.recordContracts)
 
-  const nextId = useRef(1)
-  const [title, setTitle] = useState(() =>
-    preset === 'vote' && handed?.proposalId
-      ? `Vote ${String(handed.option ?? '')} on proposal ${handed.proposalId}`
-      : ''
+  /** Arriving from the governance screen or the overview picks the form. */
+  const [action, setAction] = useState<Action['kind'] | undefined>(
+    handed?.preset === 'vote' ? 'vote' : handed?.preset === 'viewing-key' ? 'viewing-key' : undefined
   )
+
+  const [fromForm, setFromForm] = useState<DeclaredMsg[]>([])
+  const [rows, setRows] = useState<Row[]>([{ id: 0, content: '' }])
+  const [title, setTitle] = useState('')
+  const [suggested, setSuggested] = useState('')
   const [note, setNote] = useState('')
   const [memo, setMemo] = useState('')
   const [granter, setGranter] = useState('')
-  const [rows, setRows] = useState<Row[]>(() => initialRows(handed, config?.address))
-  const [gas, setGas] = useState<string>('')
+  const [gas, setGas] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
-  /** The key this proposal would set, made once so a re-render does not change it. */
-  const pendingKey = useRef(generateViewingKey())
-
-  const declared = useMemo(() => toDeclared(rows), [rows])
+  const advanced = action === 'advanced'
+  const declared = useMemo(() => (advanced ? toDeclared(rows) : fromForm), [advanced, rows, fromForm])
 
   const gasDefault = config ? defaultGasFor(declared, config.members.length, config.threshold) : 0
   const gasLimit = Number(gas) || gasDefault
@@ -81,8 +120,8 @@ export default function ProposeTransaction() {
     try {
       return foreignSigners(declared, account)
     } catch {
-      // A message too incomplete to name its signer is not a mistake yet — the
-      // person is still typing it.
+      // A half-filled message names nobody yet, which is not a mistake while
+      // somebody is still typing it.
       return []
     }
   }, [declared, account])
@@ -101,7 +140,7 @@ export default function ProposeTransaction() {
         lcdUrl,
         config,
         proposer: walletAddress,
-        title: title.trim() || 'Untitled proposal',
+        title: (title.trim() || suggested).trim() || 'Untitled proposal',
         note: note.trim() || undefined,
         messages: declared,
         memo: memo.trim(),
@@ -110,23 +149,12 @@ export default function ProposeTransaction() {
       })
 
       upsert(proposal)
-
-      // Straight out to the other members, if the group has a connection. It
-      // is not waited on and not reported: the proposal is saved either way,
-      // and its own screen offers the clipboard regardless.
+      // Straight out to the other members, if the group has a connection. Not
+      // waited on and not reported: the proposal is saved either way, and its
+      // own screen offers the clipboard regardless.
       void publishEnvelope(proposal)
 
-      // A viewing key is only useful if every member ends up holding it, and
-      // the proposal is what carries it: it is inside the encrypted message
-      // each of them decrypts to check the proposal. Recording it here saves
-      // the proposer from pasting it back in later.
-      const keyed = declared
-        .filter((message) => isViewingKeyMessage(message))
-        .map((message) => String(message.content.contract_address))
-      if (keyed.length > 0) {
-        setViewingKey(config.address, pendingKey.current)
-        recordContracts(config.address, keyed)
-      }
+      rememberViewingKey(config.address, declared, setViewingKey, recordContracts)
 
       navigate(`/multisig/proposals/${proposal.id}`)
     } catch (caught) {
@@ -137,7 +165,10 @@ export default function ProposeTransaction() {
   }
 
   const ready =
-    membership.isMember && declared.length > 0 && foreign.length === 0 && rows.every((row) => !row.error)
+    membership.isMember &&
+    declared.length > 0 &&
+    foreign.length === 0 &&
+    (!advanced || rows.every((row) => !row.error))
 
   return (
     <div className="mx-auto flex max-w-[860px] flex-col gap-8">
@@ -149,325 +180,196 @@ export default function ProposeTransaction() {
         </p>
       </header>
 
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={<Send size={15} />}
-          onClick={() => {
-            setTitle(`Send ${DISPLAY_DENOM}`)
-            setRows([sendRow(nextId.current++, config.address)])
-          }}
-        >
-          Send {DISPLAY_DENOM}
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={<Eye size={15} />}
-          onClick={() => {
-            setTitle('Set a viewing key')
-            setRows([viewingKeyRow(nextId.current++, config.address, SSCRT_ADDRESS, pendingKey.current)])
-          }}
-        >
-          Set a viewing key
-        </Button>
-      </div>
+      {action === undefined ? (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-title">What should the group do?</h2>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {ACTIONS.map((entry) => (
+              <li key={entry.kind}>
+                <button
+                  type="button"
+                  onClick={() => setAction(entry.kind)}
+                  className="state-layer flex w-full items-start gap-3 rounded-card border border-border p-4 text-left"
+                >
+                  <span
+                    aria-hidden
+                    className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-pill bg-accent-container text-accent"
+                  >
+                    <entry.icon size={16} strokeWidth={1.75} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-base font-medium">{entry.label}</span>
+                    <span className="block text-label text-text-muted">{entry.description}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setAction(undefined)
+              setFromForm([])
+              setSuggested('')
+            }}
+            className="flex w-fit items-center gap-1.5 text-base text-text-muted"
+          >
+            <ArrowLeft size={15} /> Something else
+          </button>
 
-      <section className="flex flex-col gap-3">
-        <label className="flex flex-col gap-1.5">
-          <span className="text-label text-text-muted">What this is</span>
-          <input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder="Pay the auditor"
-            className="rounded-control border border-border bg-surface px-3 py-2 text-base outline-none focus:border-accent"
-          />
-          <span className="text-label text-text-faint">
-            For the other members. It travels with the proposal and is not part of the transaction.
-          </span>
-        </label>
+          <section className="flex flex-col gap-4">
+            <h2 className="text-title">{ACTIONS.find((entry) => entry.kind === action)?.label}</h2>
 
-        <label className="flex flex-col gap-1.5">
-          <span className="text-label text-text-muted">Why (optional)</span>
-          <textarea
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-            rows={2}
-            className="rounded-control border border-border bg-surface px-3 py-2 text-base outline-none focus:border-accent"
-          />
-        </label>
-      </section>
+            {advanced ? (
+              <AdvancedMessages rows={rows} onRows={setRows} sender={config.address} />
+            ) : (
+              <ProposalForm
+                kind={action as ActionKind}
+                config={config}
+                onMessages={setFromForm}
+                onSuggestTitle={setSuggested}
+                initial={{ proposalId: handed?.proposalId, option: handed?.option }}
+              />
+            )}
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-title">Messages</h2>
+            {foreign.length > 0 ? (
+              <p className="text-base text-negative">
+                Message {foreign[0].index + 1} acts for {foreign[0].signer}, not for this account. The chain
+                would refuse it however many members signed.
+              </p>
+            ) : null}
+          </section>
 
-        {rows.map((row, index) => (
-          <MessageRow
-            key={row.id}
-            row={row}
-            index={index}
-            removable={rows.length > 1}
-            onChange={(patch) =>
-              setRows((current) =>
-                current.map((entry) => (entry.id === row.id ? { ...entry, ...patch } : entry))
-              )
-            }
-            onRemove={() => setRows((current) => current.filter((entry) => entry.id !== row.id))}
-            sender={config.address}
-          />
-        ))}
+          {declared.length > 0 ? (
+            <section className="flex flex-col gap-3">
+              <h2 className="text-title">What the others will see</h2>
+              <ul className="flex flex-col gap-2">
+                {declared.map((message, index) => (
+                  <MessageCard key={index} message={message} index={index} />
+                ))}
+              </ul>
+            </section>
+          ) : null}
 
-        <Button
-          variant="text"
-          size="sm"
-          icon={<Plus size={15} />}
-          onClick={() => setRows((current) => [...current, { id: nextId.current++, content: '' }])}
-        >
-          Add a message
-        </Button>
+          <section className="flex flex-col gap-3">
+            <h2 className="text-title">Details</h2>
 
-        {foreign.length > 0 ? (
-          <p className="text-base text-negative">
-            Message {foreign[0].index + 1} acts for {foreign[0].signer}, not for this account. The chain would
-            refuse it however many members signed.
-          </p>
-        ) : null}
-      </section>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-label text-text-muted">What to call it</span>
+              <input
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder={suggested || 'Pay the auditor'}
+                className="rounded-control border border-border bg-surface px-3 py-2 text-base outline-none focus:border-accent"
+              />
+              <span className="text-label text-text-faint">
+                {suggested && !title.trim()
+                  ? `Left empty it will be called “${suggested}”.`
+                  : 'For the other members. It travels with the proposal, not in the transaction.'}
+              </span>
+            </label>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-title">Transaction</h2>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-label text-text-muted">Why (optional)</span>
+              <textarea
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                rows={2}
+                className="rounded-control border border-border bg-surface px-3 py-2 text-base outline-none focus:border-accent"
+              />
+            </label>
 
-        <label className="flex flex-col gap-1.5">
-          <span className="text-label text-text-muted">Memo (optional, public)</span>
-          <input
-            value={memo}
-            onChange={(event) => setMemo(event.target.value)}
-            maxLength={256}
-            className="rounded-control border border-border bg-surface px-3 py-2 text-base outline-none focus:border-accent"
-          />
-        </label>
+            <details className="rounded-card border border-border p-4">
+              <summary className="cursor-pointer text-base text-text-muted">Fee, memo and who pays</summary>
+              <div className="mt-3 flex flex-col gap-3">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-label text-text-muted">Memo (optional, public)</span>
+                  <input
+                    value={memo}
+                    onChange={(event) => setMemo(event.target.value)}
+                    maxLength={256}
+                    className="rounded-control border border-border bg-surface px-3 py-2 text-base outline-none focus:border-accent"
+                  />
+                </label>
 
-        <label className="flex flex-col gap-1.5">
-          <span className="text-label text-text-muted">Gas</span>
-          <input
-            value={gas}
-            onChange={(event) => setGas(event.target.value.replace(/[^0-9]/g, ''))}
-            placeholder={String(gasDefault)}
-            inputMode="numeric"
-            className="w-40 rounded-control border border-border bg-surface px-3 py-2 text-base outline-none focus:border-accent"
-          />
-          <span className="text-label text-text-faint">
-            Fee {formatAmount(estimateFee(gasLimit, GAS_PRICE_USCRT), { reveal: true })} {DISPLAY_DENOM}. A
-            contract call cannot be simulated on Secret, so this is an estimate. A transaction that runs out
-            of gas costs the fee and the whole round of signatures with it, because the sequence is spent
-            either way — so err upwards.
-          </span>
-        </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-label text-text-muted">Gas</span>
+                  <input
+                    value={gas}
+                    onChange={(event) => setGas(event.target.value.replace(/[^0-9]/g, ''))}
+                    placeholder={String(gasDefault)}
+                    inputMode="numeric"
+                    className="w-40 rounded-control border border-border bg-surface px-3 py-2 text-base outline-none focus:border-accent"
+                  />
+                  <span className="text-label text-text-faint">
+                    Fee {formatAmount(estimateFee(gasLimit, GAS_PRICE_USCRT), { reveal: true })}{' '}
+                    {DISPLAY_DENOM}. A contract call cannot be simulated on Secret, so this is an estimate. A
+                    transaction that runs out of gas costs the fee and the whole round of signatures with it,
+                    because the sequence is spent either way — so err upwards.
+                  </span>
+                </label>
 
-        <label className="flex flex-col gap-1.5">
-          <span className="text-label text-text-muted">Paid by (optional)</span>
-          <input
-            value={granter}
-            onChange={(event) => setGranter(event.target.value)}
-            placeholder={`${DENOM === 'uscrt' ? 'secret1…' : ''} an account that granted this one a fee allowance`}
-            spellCheck={false}
-            className="rounded-control border border-border bg-surface px-3 py-2 font-mono text-sm outline-none focus:border-accent"
-          />
-          <span className="text-label text-text-faint">
-            The granter is part of what everyone signs, so it cannot be added or changed afterwards.
-          </span>
-        </label>
-      </section>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-label text-text-muted">Paid by (optional)</span>
+                  <input
+                    value={granter}
+                    onChange={(event) => setGranter(event.target.value)}
+                    placeholder="An account that granted this one a fee allowance"
+                    spellCheck={false}
+                    className="rounded-control border border-border bg-surface px-3 py-2 font-mono text-sm outline-none focus:border-accent"
+                  />
+                  <span className="text-label text-text-faint">
+                    The granter is part of what everyone signs, so it cannot be added or changed afterwards.
+                  </span>
+                </label>
+              </div>
+            </details>
+          </section>
 
-      {error ? <p className="text-base text-negative">{error}</p> : null}
+          {error ? <p className="text-base text-negative">{error}</p> : null}
 
-      <div className="flex justify-end">
-        <Button onClick={propose} disabled={!ready} loading={busy}>
-          Create the proposal
-        </Button>
-      </div>
+          <div className="flex justify-end">
+            <Button onClick={propose} disabled={!ready} loading={busy}>
+              Create the proposal
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   )
-}
-
-/* -------------------------------------------------------------------------- */
-/* Rows                                                                        */
-/* -------------------------------------------------------------------------- */
-
-interface Row {
-  id: number
-  type?: string
-  content: string
-  error?: string
-}
-
-function initialRows(
-  handed: { preset?: string; proposalId?: string; option?: string } | null,
-  address: string | undefined
-): Row[] {
-  if (!address) return [{ id: 0, content: '' }]
-  if (handed?.preset === 'viewing-key') {
-    return [viewingKeyRow(0, address, SSCRT_ADDRESS, generateViewingKey())]
-  }
-  if (handed?.preset === 'vote' && handed.proposalId) {
-    return [voteRow(0, address, handed.proposalId, handed.option ?? 'YES')]
-  }
-  return [{ id: 0, content: '' }]
 }
 
 /**
- * A vote, handed over from the governance screen.
+ * Note the viewing key a proposal is about to set.
  *
- * The voter is the multisig rather than whoever pressed the button there, and
- * that is the whole reason this detour exists: a group's vote carries the
- * group's stake, and the wallet's own vote carries the wallet's.
+ * Read back out of the messages rather than taken from the form, so that the
+ * Advanced route records it too and there is one definition of "the key this
+ * account is getting". Recorded before the transaction lands, because the
+ * proposal is where the key lives: every member decrypts it to check the
+ * proposal in the first place.
  */
-function voteRow(id: number, voter: string, proposalId: string, option: string): Row {
-  return {
-    id,
-    type: 'MsgVote',
-    content: JSON.stringify({ voter, proposal_id: proposalId, option, metadata: '' }, null, 2)
-  }
-}
+function rememberViewingKey(
+  account: string,
+  messages: DeclaredMsg[],
+  setKey: (owner: string, key: string) => void,
+  recordContracts: (owner: string, contracts: string[]) => void
+): void {
+  const contracts: string[] = []
+  let key: string | undefined
 
-function sendRow(id: number, sender: string): Row {
-  return {
-    id,
-    type: 'MsgSend',
-    content: JSON.stringify(
-      { from_address: sender, to_address: 'secret1…', amount: `1000000${DENOM}` },
-      null,
-      2
-    )
-  }
-}
+  for (const message of messages) {
+    if (message.template !== 'MsgExecuteContract') continue
+    const inner = message.content.msg as { set_viewing_key?: { key?: string } } | undefined
+    if (!inner?.set_viewing_key?.key) continue
 
-function viewingKeyRow(id: number, sender: string, contract: string, key: string): Row {
-  return {
-    id,
-    type: 'MsgExecuteContract',
-    content: JSON.stringify(
-      {
-        sender,
-        contract_address: contract,
-        code_hash: '',
-        msg: { set_viewing_key: { key } },
-        sent_funds: ''
-      },
-      null,
-      2
-    )
-  }
-}
-
-function toDeclared(rows: Row[]): DeclaredMsg[] {
-  const declared: DeclaredMsg[] = []
-  for (const row of rows) {
-    if (!row.type || !row.content.trim()) continue
-    try {
-      declared.push({ template: row.type, content: JSON.parse(row.content) as Record<string, unknown> })
-    } catch {
-      // A half-typed message is not a proposal yet; the row shows its own error.
-    }
-  }
-  return declared
-}
-
-function isViewingKeyMessage(message: DeclaredMsg): boolean {
-  if (message.template !== 'MsgExecuteContract') return false
-  const inner = message.content.msg as Record<string, unknown> | undefined
-  return Boolean(inner && 'set_viewing_key' in inner)
-}
-
-const TYPE_OPTIONS = Object.entries(MESSAGE_TEMPLATES)
-  .sort(([, a], [, b]) => a.module.localeCompare(b.module))
-  .map(([key, definition]) => ({ id: key, label: key, detail: definition.module }))
-
-function MessageRow({
-  row,
-  index,
-  removable,
-  sender,
-  onChange,
-  onRemove
-}: {
-  row: Row
-  index: number
-  removable: boolean
-  sender: string
-  onChange: (patch: Partial<Row>) => void
-  onRemove: () => void
-}) {
-  const pick = async (type: string) => {
-    const secretjs = await import('secretjs')
-    const example = MESSAGE_TEMPLATES[type]!.example(secretjs, sender)
-    onChange({ type, content: JSON.stringify(example, null, 2), error: undefined })
+    key = inner.set_viewing_key.key
+    contracts.push(String(message.content.contract_address ?? ''))
   }
 
-  const validate = (content: string) => {
-    try {
-      JSON.parse(content)
-      onChange({ content, error: undefined })
-    } catch (caught) {
-      onChange({ content, error: errorMessage(caught) })
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-2 rounded-card border border-border p-3">
-      <div className="flex items-center gap-2">
-        <span className="text-label text-text-faint">{index + 1}</span>
-        <div className="min-w-0 flex-1">
-          <Picker
-            label="Message type"
-            options={TYPE_OPTIONS}
-            value={row.type}
-            onChange={(id) => void pick(id)}
-            placeholder="Choose a message"
-          />
-        </div>
-        {removable ? (
-          <button
-            type="button"
-            aria-label={`Remove message ${index + 1}`}
-            onClick={onRemove}
-            className="state-layer rounded-control p-2 text-text-muted"
-          >
-            <Trash2 size={15} />
-          </button>
-        ) : null}
-      </div>
-
-      <textarea
-        value={row.content}
-        onChange={(event) => validate(event.target.value)}
-        rows={8}
-        spellCheck={false}
-        placeholder="{}"
-        className="rounded-control border border-border bg-surface px-3 py-2 font-mono text-sm outline-none focus:border-accent"
-      />
-
-      {row.error ? <p className="text-label text-negative">{row.error}</p> : null}
-
-      {allTokens().some((token) => token.address === (safeParse(row.content)?.contract_address ?? '')) ? (
-        <p className="text-label text-text-faint">
-          {tokenNameFor(String(safeParse(row.content)?.contract_address ?? ''))}
-        </p>
-      ) : null}
-    </div>
-  )
-}
-
-function safeParse(content: string): Record<string, unknown> | undefined {
-  try {
-    return JSON.parse(content) as Record<string, unknown>
-  } catch {
-    return undefined
-  }
-}
-
-function tokenNameFor(address: string): string {
-  const token = allTokens().find((entry) => entry.address === address)
-  return token ? `This contract is ${token.symbol}.` : ''
+  if (!key || contracts.length === 0) return
+  setKey(account, key)
+  recordContracts(account, contracts.filter(Boolean))
 }

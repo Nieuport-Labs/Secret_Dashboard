@@ -10,6 +10,8 @@ import { errorMessage } from '@/lib/errors'
 import { formatAmount, shortenAddress } from '@/lib/format'
 import type { Envelope, Proposal, SignatureBundle } from '@/lib/multisig/bundle'
 import { addressForPubkey, fingerprintOf } from '@/lib/multisig/config'
+import { validatorAddressesIn } from '@/lib/multisig/describe'
+import { queryValidator } from '@/lib/staking'
 import {
   assembleProposal,
   broadcastProposal,
@@ -29,6 +31,7 @@ import { useActiveMultisigConfig, useMembership } from '@/store/multisig'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 import { ExportBundle, ImportBundle } from './components/BundleExchange'
+import MessageCard from './components/MessageCard'
 
 /**
  * One proposal: what it does, whether it is safe, and what to do about it.
@@ -409,20 +412,48 @@ type ActionState =
  * and a dangerous kind: it would look like review.
  */
 function WhatItDoes({ proposal }: { proposal: Proposal }) {
+  const client = useWallet((state) => state.queryClient)
+  const [names, setNames] = useState<Map<string, string>>(new Map())
+
+  /*
+   * Validator names, looked up once for whatever this proposal mentions.
+   *
+   * "Stake 10 SCRT with Secret Saturn" is a sentence a member can check
+   * against what the group actually agreed. A valoper address is not — two of
+   * them differ in the middle and nobody notices. Failure is silent and the
+   * address stands in, which is exactly as useful as before.
+   */
+  const mentioned = validatorAddressesIn(proposal.msgs).join(',')
+  useEffect(() => {
+    if (!client || !mentioned) return
+
+    let cancelled = false
+    void Promise.all(
+      mentioned.split(',').map(async (address) => [address, await queryValidator(client, address)] as const)
+    )
+      .then((results) => {
+        if (cancelled) return
+        setNames(
+          new Map(
+            results
+              .filter(([, validator]) => validator?.moniker)
+              .map(([address, validator]) => [address, validator!.moniker])
+          )
+        )
+      })
+      .catch(() => undefined)
+
+    return () => {
+      cancelled = true
+    }
+  }, [client, mentioned])
+
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-title">What it does</h2>
       <ul className="flex flex-col gap-2">
         {proposal.msgs.map((message, index) => (
-          <li key={index} className="flex flex-col gap-1.5 rounded-card border border-border p-3">
-            <span className="text-label text-text-muted">
-              {index + 1}. {message.template}
-              {message.ciphertext ? ' · encrypted on the wire' : ''}
-            </span>
-            <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-sm text-text-muted">
-              {JSON.stringify(message.content, null, 2)}
-            </pre>
-          </li>
+          <MessageCard key={index} message={message} index={index} context={{ validatorNames: names }} />
         ))}
       </ul>
       <p className="text-label text-text-faint">
