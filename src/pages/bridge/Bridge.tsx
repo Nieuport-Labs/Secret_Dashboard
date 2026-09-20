@@ -15,7 +15,7 @@ import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
 import AmountField from '@/components/ui/AmountField'
 import Picker from '@/components/ui/Picker'
-import { DECIMALS, DISPLAY_DENOM, GAS, explorerTxUrl } from '@/chains/secret4'
+import { DECIMALS, DISPLAY_DENOM, GAS, explorerTxUrl, withGasBuffer } from '@/chains/secret4'
 import { SOURCE_CHAINS, chainImageUrl, type SourceChain } from '@/chains/sources'
 import { depositGasLimit, sendDeposit, sendWithdraw, type Leg } from '@/lib/bridge'
 import { queryAllBalances } from '@/lib/bank'
@@ -380,7 +380,7 @@ export default function Bridge() {
         const unwrap = isScrtToken
           ? undefined
           : { contract: token.address, codeHash: await codeHashFor(queryClient, token.address) }
-        const gasLimit = chain.withdrawGas + (unwrap ? GAS.unwrap : 0)
+        const gasLimit = withGasBuffer(chain.withdrawGas) + (unwrap ? GAS.unwrap : 0)
         const msgTypes = unwrap ? [MSG_EXECUTE_CONTRACT, MSG_TRANSFER] : [MSG_TRANSFER]
 
         const result = await sendWithdraw({

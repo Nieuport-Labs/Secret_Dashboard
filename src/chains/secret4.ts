@@ -33,8 +33,22 @@ export const BECH32_VALCONS_PREFIX = 'secretvalcons'
  */
 export const GAS_PRICE_USCRT = 0.1
 
-/** Gas limits, sized per message rather than one pessimistic number. */
-export const GAS = {
+/**
+ * Margin applied on top of every hand-sized gas limit below. Real executions
+ * sit close to their estimate but occasionally exceed it (state size, branch
+ * taken, chain load), and running out of gas burns the fee while doing
+ * nothing — so every limit is padded by the same ratio rather than chasing
+ * one-off bumps per message type.
+ */
+export const GAS_BUFFER = 1.2
+
+/** Applies `GAS_BUFFER` to a gas figure. The one place that does the multiplication, so every gas limit in the app — table-driven or computed on the spot — is padded the same way. */
+export function withGasBuffer(gasLimit: number): number {
+  return Math.ceil(gasLimit * GAS_BUFFER)
+}
+
+/** Gas limits, sized per message rather than one pessimistic number, then padded by `GAS_BUFFER`. */
+const GAS_BASE = {
   send: 25_000,
   snip20Transfer: 60_000,
   wrap: 60_000,
@@ -87,6 +101,10 @@ export const GAS = {
   grantAllowance: 100_000,
   revokeAllowance: 80_000
 } as const
+
+export const GAS = Object.fromEntries(
+  Object.entries(GAS_BASE).map(([key, value]) => [key, withGasBuffer(value)])
+) as { [K in keyof typeof GAS_BASE]: number }
 
 /**
  * Endpoint candidates. Probed in order; the first that answers with JSON *and*
