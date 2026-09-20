@@ -1,6 +1,6 @@
 import type { SecretNetworkClient } from 'secretjs'
 
-import { DENOM, GAS, GAS_PRICE_USCRT } from '@/chains/secret4'
+import { DENOM, GAS, GAS_PRICE_USCRT, withGasBuffer } from '@/chains/secret4'
 import type { SourceChain } from '@/chains/sources'
 import type { Route } from '@/tokens/routes'
 import { MSG_TRANSFER } from '@/lib/msgTypes'
@@ -114,7 +114,7 @@ export async function sendDeposit({ chain, sender, legs, gasLimit }: SendOptions
  */
 export function depositGasLimit(chain: SourceChain, route: Route, legs: number, hooked: boolean): number {
   const base = route.gas ?? chain.depositGas
-  return Math.ceil(base * legs * (hooked ? 1.5 : 1))
+  return withGasBuffer(Math.ceil(base * legs * (hooked ? 1.5 : 1)))
 }
 
 export interface WithdrawOptions {
@@ -168,7 +168,7 @@ export async function sendWithdraw({
 }: WithdrawOptions): Promise<SendResult> {
   const { MsgExecuteContract, MsgTransfer } = await import('secretjs')
 
-  const gasLimit = chain.withdrawGas + (unwrap ? GAS.unwrap : 0)
+  const gasLimit = withGasBuffer(chain.withdrawGas) + (unwrap ? GAS.unwrap : 0)
   const messages = [
     ...(unwrap
       ? [

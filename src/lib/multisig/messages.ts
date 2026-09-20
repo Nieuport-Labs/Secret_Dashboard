@@ -28,7 +28,7 @@
  * before anyone signs.
  */
 
-import { BECH32_PREFIX, GAS } from '@/chains/secret4'
+import { BECH32_PREFIX, GAS, withGasBuffer } from '@/chains/secret4'
 import { reprefix } from '@/lib/bech32'
 import { MESSAGE_TEMPLATES, type Secretjs } from '@/lib/messageTemplates'
 
@@ -241,7 +241,7 @@ export function computeEntries(messages: DeclaredMsg[]): ComputeEntry[] {
  * fee *and* a whole round of signatures, since the signed sequence is spent
  * either way.
  */
-const COMPUTE_GAS = 250_000
+const COMPUTE_GAS = withGasBuffer(250_000)
 
 const PER_TEMPLATE: Record<string, number> = {
   MsgSend: GAS.send,
@@ -259,7 +259,7 @@ const PER_TEMPLATE: Record<string, number> = {
 }
 
 /** Anything the table above does not name, sized the way Powertools sizes it. */
-const FALLBACK_GAS = 150_000
+const FALLBACK_GAS = withGasBuffer(150_000)
 
 /**
  * What a multisig transaction costs beyond its messages.

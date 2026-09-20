@@ -1,6 +1,6 @@
 import type { SecretNetworkClient, TxResponse } from 'secretjs'
 
-import { DENOM, GAS_PRICE_USCRT } from '@/chains/secret4'
+import { DENOM, GAS_PRICE_USCRT, withGasBuffer } from '@/chains/secret4'
 import { codeHashFor } from '@/lib/codeHash'
 import { toBaseUnits as toMicroUnits } from '@/lib/format'
 
@@ -14,7 +14,7 @@ import { toBaseUnits as toMicroUnits } from '@/lib/format'
  */
 
 /** Gas for the execute plus the grant (and a revoke when topping up). */
-export const GAS_BUY = 400_000
+export const GAS_BUY = withGasBuffer(400_000)
 
 export interface VaultStatus {
   /**

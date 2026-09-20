@@ -5,7 +5,7 @@ import type { Msg, SecretNetworkClient } from 'secretjs'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import Picker from '@/components/ui/Picker'
-import { DENOM, explorerTxUrl, GAS_PRICE_USCRT } from '@/chains/secret4'
+import { DENOM, explorerTxUrl, GAS_PRICE_USCRT, withGasBuffer } from '@/chains/secret4'
 import { errorMessage } from '@/lib/errors'
 import { MESSAGE_TEMPLATES } from '@/lib/messageTemplates'
 import { useFeePayer } from '@/store/feePayer'
@@ -16,7 +16,7 @@ import { useWallet } from '@/store/wallet'
  *  all ("for security reasons"), and a simulation can fail outright for other
  *  reasons too. Generous enough for a bank send or a staking message; a
  *  contract call that needs more than this will have to be sent knowing that. */
-const GAS_FALLBACK_PER_MESSAGE = 150_000
+const GAS_FALLBACK_PER_MESSAGE = withGasBuffer(150_000)
 /** Simulated gas is usually a slight underestimate of what execution takes;
  *  this margin is the same kind of cushion `GAS_PRICE_USCRT` already is. */
 const GAS_SIMULATION_MARGIN = 1.3
@@ -42,7 +42,7 @@ async function estimateGas(client: SecretNetworkClient, messages: Msg[]): Promis
   try {
     const sim = await client.tx.simulate(messages)
     const used = Number(sim.gas_info?.gas_used ?? 0)
-    if (used > 0) return Math.ceil(used * GAS_SIMULATION_MARGIN)
+    if (used > 0) return withGasBuffer(Math.ceil(used * GAS_SIMULATION_MARGIN))
   } catch {
     // Unsupported message type, or the node refused the simulation outright.
   }
