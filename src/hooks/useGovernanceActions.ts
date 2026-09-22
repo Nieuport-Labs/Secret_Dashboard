@@ -1,12 +1,12 @@
 import { useCallback, useState } from 'react'
 
-import { DENOM, GAS, GAS_PRICE_USCRT } from '@/chains/secret4'
+import { GAS } from '@/chains/secret4'
 import { errorMessage } from '@/lib/errors'
+import { sendTx } from '@/lib/sendTx'
 import { execMessage } from '@/lib/authz'
 import { voteMessage, type VoteOption } from '@/lib/governance'
 import { MSG_EXEC, MSG_VOTE } from '@/lib/msgTypes'
 import { useValidatorAuthority } from '@/hooks/useValidatorAuthority'
-import { useFeePayer } from '@/store/feePayer'
 import { useWallet } from '@/store/wallet'
 import type { ActionState } from '@/hooks/useStakingActions'
 
@@ -27,7 +27,6 @@ import type { ActionState } from '@/hooks/useStakingActions'
 export function useGovernanceActions(onSuccess?: () => void) {
   const client = useWallet((state) => state.client)
   const address = useWallet((state) => state.address)
-  const granterFor = useFeePayer((state) => state.granterFor)
   const { operator, direct, grants } = useValidatorAuthority()
 
   const [state, setState] = useState<ActionState>({ kind: 'idle' })
@@ -47,12 +46,7 @@ export function useGovernanceActions(onSuccess?: () => void) {
         const outgoing = viaGrant ? await execMessage(address, [message]) : message
         const gas = viaGrant ? GAS.vote + GAS.authzExec : GAS.vote
 
-        const tx = await client.tx.broadcast([outgoing], {
-          gasLimit: gas,
-          gasPriceInFeeDenom: GAS_PRICE_USCRT,
-          feeDenom: DENOM,
-          feeGranter: granterFor(gas, [viaGrant ? MSG_EXEC : MSG_VOTE])
-        })
+        const tx = await sendTx(client, [outgoing], gas, [viaGrant ? MSG_EXEC : MSG_VOTE])
 
         if (tx.code !== 0) {
           setState({ kind: 'failed', message: tx.rawLog || `The chain rejected it (code ${tx.code}).` })
@@ -65,7 +59,7 @@ export function useGovernanceActions(onSuccess?: () => void) {
         setState({ kind: 'failed', message: errorMessage(error) })
       }
     },
-    [client, address, voter, viaGrant, granterFor, onSuccess]
+    [client, address, voter, viaGrant, onSuccess]
   )
 
   return { state, reset: () => setState({ kind: 'idle' }), vote, voter, canVote }

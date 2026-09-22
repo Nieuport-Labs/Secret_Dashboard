@@ -57,6 +57,16 @@ export interface KeplrLike {
     signDoc: AminoSignDoc,
     options?: { preferNoSetFee?: boolean; preferNoSetMemo?: boolean }
   ): Promise<AminoSignResponse>
+  /**
+   * ADR-036: sign bytes that are not a transaction. No fee, no broadcast — how
+   * an off-chain profile is saved by an account with no gas. Optional because a
+   * Keplr-compatible wallet is not obliged to have it.
+   */
+  signArbitrary?(
+    chainId: string,
+    signer: string,
+    data: string
+  ): Promise<{ pub_key: { type: string; value: string }; signature: string }>
 }
 
 declare global {

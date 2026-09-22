@@ -2,9 +2,9 @@ import { useCallback, useState } from 'react'
 
 import { DENOM, GAS, GAS_PRICE_USCRT } from '@/chains/secret4'
 import { errorMessage } from '@/lib/errors'
+import { sendTx } from '@/lib/sendTx'
 import { submitProposalMessage, submittedProposalId, type ProposalDraft } from '@/lib/governance'
 import { MSG_SUBMIT_PROPOSAL } from '@/lib/msgTypes'
-import { useFeePayer } from '@/store/feePayer'
 import { useWallet } from '@/store/wallet'
 import type { ActionState } from '@/hooks/useStakingActions'
 
@@ -35,7 +35,6 @@ export type DryRun =
 export function useSubmitProposal() {
   const client = useWallet((state) => state.client)
   const address = useWallet((state) => state.address)
-  const granterFor = useFeePayer((state) => state.granterFor)
 
   const [state, setState] = useState<ActionState>({ kind: 'idle' })
   const [dryRun, setDryRun] = useState<DryRun>({ kind: 'idle' })
@@ -92,12 +91,7 @@ export function useSubmitProposal() {
         const message = await submitProposalMessage(draft, address)
         const gas = gasFor()
 
-        const tx = await client.tx.broadcast([message], {
-          gasLimit: gas,
-          gasPriceInFeeDenom: GAS_PRICE_USCRT,
-          feeDenom: DENOM,
-          feeGranter: granterFor(gas, [MSG_SUBMIT_PROPOSAL])
-        })
+        const tx = await sendTx(client, [message], gas, [MSG_SUBMIT_PROPOSAL])
 
         if (tx.code !== 0) {
           setState({
@@ -113,7 +107,7 @@ export function useSubmitProposal() {
         setState({ kind: 'failed', message: errorMessage(error) })
       }
     },
-    [client, address, gasFor, granterFor]
+    [client, address, gasFor]
   )
 
   return {

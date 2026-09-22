@@ -1,38 +1,36 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { DENOM, GAS, GAS_PRICE_USCRT, PROFILE_REGISTRY_ADDRESS } from '@/chains/secret4'
-import { codeHashFor } from '@/lib/codeHash'
 import { errorMessage } from '@/lib/errors'
-import { MSG_EXECUTE_CONTRACT } from '@/lib/msgTypes'
-import {
-  clearProfileMsg,
-  EMPTY_DRAFT,
-  queryProfile,
-  registryConfigured,
-  setProfileMsg,
-  type Profile,
-  type ProfileDraft
-} from '@/lib/profile'
-import { forgetProfile } from '@/hooks/useProfileIdentity'
+import { EMPTY_DRAFT, registryConfigured, setProfileMsg, type ProfileDraft } from '@/lib/profile'
+import type { RecordProfile } from '@/lib/profileRecord'
+import { normalise, publishOffchain } from '@/lib/profileServer'
+import { profileState, rememberOffchain } from '@/lib/profileSync'
+import { writePendingProfile } from '@/lib/sendTx'
 import type { ActionState } from '@/hooks/useWalletActions'
-import { useFeePayer } from '@/store/feePayer'
 import { useWallet } from '@/store/wallet'
 
 /**
- * The connected account's own profile: what is on chain, what is being edited,
- * and the transaction that closes the gap between them.
+ * The connected account's own profile: what is published, what is being
+ * edited, and the two ways of closing the gap between them.
  *
- * Kept apart from `useProfileIdentity`, which reads *anyone's* profile and
- * caches it for the page. This one is about editing, which needs the unsaved
- * draft, the dirty flag and the signing client — none of which belong in a
- * lookup that every avatar on a list runs.
+ * Saving costs nothing. The wallet signs the profile as a message, not a
+ * transaction, and the server keeps the signed copy; everyone sees it at once.
+ * The chain catches up by itself — the next transaction this account sends
+ * carries the write along (`lib/sendTx.ts`) — or right away, for someone with
+ * gas who presses "Write on chain now".
  *
- * There is no autosave and no debounce. Every write here is a transaction with
- * a wallet prompt and a fee attached, so it happens when the user presses the
- * button and at no other time.
+ * Kept apart from `useProfileIdentity`, which reads *anyone's* profile. This
+ * one is about editing, which needs the unsaved draft, the dirty flag and the
+ * wallet — none of which belong in a lookup that every avatar on a list runs.
+ *
+ * There is no autosave. Every save is a wallet prompt, so it happens when the
+ * user presses the button and at no other time.
  */
 
-function toDraft(profile: Profile | undefined): ProfileDraft {
+/** `stored`: signed and kept by the server; on chain later. */
+export type ProfileActionState = ActionState | { kind: 'stored' }
+
+function toDraft(profile: RecordProfile | undefined): ProfileDraft {
   if (!profile) return EMPTY_DRAFT
   return { name: profile.name, bio: profile.bio, avatar: profile.avatar, links: profile.links }
 }
@@ -46,86 +44,76 @@ export function useOwnProfile() {
   const client = useWallet((state) => state.client)
   const queryClient = useWallet((state) => state.queryClient)
   const address = useWallet((state) => state.address)
-  const granterFor = useFeePayer((state) => state.granterFor)
+  const walletId = useWallet((state) => state.walletId)
 
   const [saved, setSaved] = useState<ProfileDraft>(EMPTY_DRAFT)
   const [draft, setDraft] = useState<ProfileDraft>(EMPTY_DRAFT)
+  const [pending, setPending] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [state, setState] = useState<ActionState>({ kind: 'idle' })
+  const [state, setState] = useState<ProfileActionState>({ kind: 'idle' })
 
   const load = useCallback(async () => {
-    if (!queryClient || !address || !registryConfigured()) {
+    if (!queryClient || !address) {
       setLoading(false)
       return
     }
 
     setLoading(true)
-    try {
-      const next = toDraft(await queryProfile(queryClient, address))
-      setSaved(next)
-      setDraft(next)
-    } catch {
-      // A registry that cannot be read leaves the form empty rather than
-      // broken. Saving from here would overwrite a profile the user could not
-      // see, so the caller disables the button while this is true.
-      setSaved(EMPTY_DRAFT)
-      setDraft(EMPTY_DRAFT)
-    } finally {
-      setLoading(false)
-    }
+    const current = await profileState(queryClient, address)
+    const next = toDraft(current.profile)
+    setSaved(next)
+    setDraft(next)
+    setPending(current.pending)
+    setLoading(false)
   }, [queryClient, address])
 
   useEffect(() => {
     void load()
   }, [load])
 
-  const broadcast = useCallback(
-    async (msg: object, gasLimit: number) => {
-      if (!client || !queryClient || !address || !registryConfigured()) return
+  const store = useCallback(
+    async (profile: RecordProfile | null) => {
+      if (!queryClient || !address || !walletId) return
       setState({ kind: 'sending' })
-
       try {
-        const { MsgExecuteContract } = await import('secretjs')
-        const tx = await client.tx.broadcast(
-          [
-            new MsgExecuteContract({
-              sender: address,
-              contract_address: PROFILE_REGISTRY_ADDRESS,
-              code_hash: await codeHashFor(queryClient, PROFILE_REGISTRY_ADDRESS),
-              msg,
-              sent_funds: []
-            })
-          ],
-          {
-            gasLimit,
-            gasPriceInFeeDenom: GAS_PRICE_USCRT,
-            feeDenom: DENOM,
-            feeGranter: granterFor(gasLimit, [MSG_EXECUTE_CONTRACT])
-          }
-        )
-
-        if (tx.code !== 0) {
-          setState({ kind: 'failed', message: tx.rawLog || `The chain rejected it (code ${tx.code}).` })
-          return
-        }
-
-        // The cached copy every other screen reads is now wrong; drop it before
-        // re-reading, or the profile page shows the old name until a reload.
-        forgetProfile(address)
+        const offchain = await publishOffchain(walletId, address, profile)
+        await rememberOffchain(queryClient, address, offchain)
         await load()
-        setState({ kind: 'done', hash: tx.transactionHash })
+        setState({ kind: 'stored' })
       } catch (error) {
         setState({ kind: 'failed', message: errorMessage(error) })
       }
     },
-    [client, queryClient, address, granterFor, load]
+    [queryClient, address, walletId, load]
   )
 
-  const save = useCallback(() => broadcast(setProfileMsg(draft), GAS.setProfile), [broadcast, draft])
+  const save = useCallback(() => store(normalise(draft)), [store, draft])
 
-  const clear = useCallback(() => broadcast(clearProfileMsg, GAS.clearProfile), [broadcast])
+  const clear = useCallback(() => store(null), [store])
 
-  /** Put the form back to what is on chain. */
+  /** For someone with gas who would rather not wait for their next transaction. */
+  const writeNow = useCallback(async () => {
+    if (!client) return
+    setState({ kind: 'sending' })
+    try {
+      const tx = await writePendingProfile(client)
+      if (!tx) {
+        await load()
+        setState({ kind: 'idle' })
+        return
+      }
+      if (tx.code !== 0) {
+        setState({ kind: 'failed', message: tx.rawLog || `The chain rejected it (code ${tx.code}).` })
+        return
+      }
+      await load()
+      setState({ kind: 'done', hash: tx.transactionHash })
+    } catch (error) {
+      setState({ kind: 'failed', message: errorMessage(error) })
+    }
+  }, [client, load])
+
+  /** Put the form back to what is published. */
   const revert = useCallback(() => {
     setDraft(saved)
     setState({ kind: 'idle' })
@@ -144,10 +132,15 @@ export function useOwnProfile() {
     revert,
     save,
     clear,
+    writeNow,
     loading,
     state,
     dirty: !same(draft, saved),
-    /** Whether anything is on chain to clear. */
-    published: !same(saved, EMPTY_DRAFT)
+    /** Whether anything is published to clear. */
+    published: !same(saved, EMPTY_DRAFT),
+    /** Saved, but the chain does not say it yet. */
+    pending,
+    /** Whether a write on chain is possible at all on this network yet. */
+    onchain: registryConfigured()
   }
 }
