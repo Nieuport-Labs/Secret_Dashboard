@@ -1,14 +1,14 @@
 import { useCallback, useState } from 'react'
 import type { Msg } from 'secretjs'
 
-import { DENOM, GAS, GAS_PRICE_USCRT } from '@/chains/secret4'
+import { DENOM, GAS } from '@/chains/secret4'
 import { codeHashFor } from '@/lib/codeHash'
 import { claimMsg, unbondMsg } from '@/lib/derivative'
 import { errorMessage } from '@/lib/errors'
+import { sendTx } from '@/lib/sendTx'
 import { MSG_EXECUTE_CONTRACT, MSG_SEND } from '@/lib/msgTypes'
 import { depositMsg, redeemMsg, transferMsg } from '@/lib/snip20'
 import { STKD_SCRT_ADDRESS } from '@/tokens/registry'
-import { useFeePayer } from '@/store/feePayer'
 import { useWallet } from '@/store/wallet'
 
 export type ActionState =
@@ -33,7 +33,6 @@ export function useWalletActions(onSuccess?: () => void) {
   const client = useWallet((state) => state.client)
   const queryClient = useWallet((state) => state.queryClient)
   const address = useWallet((state) => state.address)
-  const granterFor = useFeePayer((state) => state.granterFor)
 
   const [state, setState] = useState<ActionState>({ kind: 'idle' })
 
@@ -42,12 +41,7 @@ export function useWalletActions(onSuccess?: () => void) {
       if (!client || !address) return
       setState({ kind: 'sending' })
       try {
-        const tx = await client.tx.broadcast(messages, {
-          gasLimit,
-          gasPriceInFeeDenom: GAS_PRICE_USCRT,
-          feeDenom: DENOM,
-          feeGranter: granterFor(gasLimit, msgTypes)
-        })
+        const tx = await sendTx(client, messages, gasLimit, msgTypes)
 
         if (tx.code !== 0) {
           setState({ kind: 'failed', message: tx.rawLog || `The chain rejected it (code ${tx.code}).` })
@@ -60,7 +54,7 @@ export function useWalletActions(onSuccess?: () => void) {
         setState({ kind: 'failed', message: errorMessage(error) })
       }
     },
-    [client, address, granterFor, onSuccess]
+    [client, address, onSuccess]
   )
 
   /** Native SCRT, or any other bank denomination the account holds. */

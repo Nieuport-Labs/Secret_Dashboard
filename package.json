@@ -16,7 +16,8 @@
     "test:activity": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-activity.ts",
     "test:proposal": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-proposal.ts",
     "test:errors": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-errors.ts",
-    "test:multisig": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-multisig.ts"
+    "test:multisig": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-multisig.ts",
+    "test:profile": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-profile.ts"
   },
   "dependencies": {
     "@cosmjs/amino": "^0.32.4",

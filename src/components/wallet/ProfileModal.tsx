@@ -1,4 +1,4 @@
-import { Check, Copy, ExternalLink, Globe, Loader2, Trash2 } from 'lucide-react'
+import { Check, Clock, Copy, ExternalLink, Globe, Loader2, Trash2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 
 import Avatar from '@/components/wallet/Avatar'
@@ -8,7 +8,7 @@ import { explorerTxUrl } from '@/chains/secret4'
 import { cn } from '@/lib/cn'
 import { errorMessage } from '@/lib/errors'
 import { shortenAddress } from '@/lib/format'
-import { LIMITS, LINK_KINDS, registryConfigured } from '@/lib/profile'
+import { LIMITS, LINK_KINDS } from '@/lib/profile'
 import { clearProfileImage, saveProfileImage, toAvatarDataUrl } from '@/lib/profileImage'
 import { profileUrl } from '@/lib/profileLink'
 import { useOwnProfile } from '@/hooks/useOwnProfile'
@@ -20,8 +20,12 @@ interface Props {
 }
 
 /**
- * The profile editor: everything this account publishes about itself, and the
- * one button that puts it on chain.
+ * The profile editor: everything this account publishes about itself.
+ *
+ * Saving is free — the wallet signs the profile, the server keeps the signed
+ * copy — and the chain catches up with the account's next transaction
+ * (`lib/sendTx.ts`). So an account with no gas still gets a profile, and the
+ * dialog says plainly when it is waiting to be written.
  *
  * A dialog rather than a page because it is reached from the account chip in
  * the header, which is on every screen — sending someone to a settings route to
@@ -36,13 +40,12 @@ interface Props {
  * only expectation the user arrived with.
  */
 export default function ProfileModal({ open, onClose, address }: Props) {
-  const { draft, update, revert, save, clear, loading, state, dirty, published } = useOwnProfile()
+  const { draft, update, revert, save, clear, writeNow, loading, state, dirty, published, pending, onchain } =
+    useOwnProfile()
 
   const [imageError, setImageError] = useState<string | undefined>()
   const [encoding, setEncoding] = useState(false)
   const [copied, setCopied] = useState(false)
-
-  const configured = registryConfigured()
 
   /*
    * One picture, two copies, one action. The 64px one is what goes on chain and
@@ -117,8 +120,8 @@ export default function ProfileModal({ open, onClose, address }: Props) {
         <Globe size={16} aria-hidden className="mt-0.5 shrink-0 text-text-muted" />
         <p className="text-sm text-text-muted">
           Everything here is <span className="font-semibold text-text">public</span>. Anyone with your address
-          can read it, and the transaction that saves it stays on chain — including after you clear it. Your
-          balances and activity are not part of this and stay private.
+          can read it. Once it is written on chain, that transaction stays there — including after you clear
+          it. Your balances and activity are not part of this and stay private.
         </p>
       </div>
 
@@ -132,8 +135,8 @@ export default function ProfileModal({ open, onClose, address }: Props) {
           saving={encoding}
         />
         <p className="text-label text-text-faint">
-          Stored on chain at 64px, so the picture travels with the link instead of living on somebody else's
-          server.
+          Stored at 64px inside the profile itself, so the picture travels with the link instead of depending
+          on an image host.
         </p>
       </div>
 
@@ -214,11 +217,34 @@ export default function ProfileModal({ open, onClose, address }: Props) {
       </div>
 
       <div className="flex flex-col gap-2.5">
-        {!configured ? (
-          <p className="text-sm text-text-muted" role="status">
-            The profile registry is not deployed on this network yet, so there is nowhere to save to.
-            Everything above still works — it just cannot be published.
-          </p>
+        {pending && !dirty ? (
+          <div
+            className="flex items-start gap-2.5 rounded-card border border-border bg-surface p-3"
+            role="status"
+          >
+            <Clock size={16} aria-hidden className="mt-0.5 shrink-0 text-text-muted" />
+            <div className="flex flex-col gap-2 text-sm text-text-muted">
+              <p>
+                {onchain
+                  ? 'Published, not on chain yet. It will be written along with your next transaction, at no extra step.'
+                  : 'Published, not on chain yet. The profile registry is not live on this network, so it will be written with your first transaction after it is.'}
+              </p>
+              <p className="text-text-faint">
+                Until then, the copy your wallet signed is kept by this dashboard's server, which can see
+                which addresses have a profile. On chain, nobody can list them.
+              </p>
+              {onchain ? (
+                <button
+                  type="button"
+                  onClick={() => void writeNow()}
+                  disabled={saving}
+                  className="self-start text-text underline underline-offset-4 disabled:opacity-50"
+                >
+                  Write on chain now
+                </button>
+              ) : null}
+            </div>
+          </div>
         ) : null}
 
         <div className="flex items-center gap-2">
@@ -227,10 +253,10 @@ export default function ProfileModal({ open, onClose, address }: Props) {
             size="lg"
             block
             loading={saving}
-            disabled={!configured || !dirty || loading || encoding}
+            disabled={!dirty || loading || encoding}
             onClick={() => void save()}
           >
-            {saving ? 'Saving…' : 'Save onchain'}
+            {saving ? 'Saving…' : 'Save profile'}
           </Button>
 
           {dirty && !saving ? (
@@ -251,7 +277,7 @@ export default function ProfileModal({ open, onClose, address }: Props) {
             loading={saving}
             onClick={() => void clear()}
           >
-            Remove from chain
+            Remove profile
           </Button>
         ) : null}
 
@@ -262,9 +288,15 @@ export default function ProfileModal({ open, onClose, address }: Props) {
           </p>
         ) : null}
 
+        {state.kind === 'stored' ? (
+          <p className="text-sm text-positive" role="status">
+            Saved. No fee — your wallet signed it, nothing was sent.
+          </p>
+        ) : null}
+
         {state.kind === 'done' ? (
           <p className="text-sm text-positive" role="status">
-            Saved.{' '}
+            Written on chain.{' '}
             <a
               className="underline underline-offset-4"
               href={explorerTxUrl(state.hash)}

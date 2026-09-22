@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import type { Msg } from 'secretjs'
 
-import { DENOM, GAS, GAS_PRICE_USCRT } from '@/chains/secret4'
+import { GAS } from '@/chains/secret4'
 import {
   MSG_BEGIN_REDELEGATE,
   MSG_DELEGATE,
@@ -10,8 +10,8 @@ import {
   MSG_WITHDRAW_REWARD
 } from '@/lib/msgTypes'
 import { errorMessage } from '@/lib/errors'
+import { sendTx } from '@/lib/sendTx'
 import { coin, stakingMessages } from '@/lib/staking'
-import { useFeePayer } from '@/store/feePayer'
 import { useWallet } from '@/store/wallet'
 
 export type ActionState =
@@ -31,7 +31,6 @@ export type ActionState =
 export function useStakingActions(onSuccess?: () => void) {
   const client = useWallet((state) => state.client)
   const address = useWallet((state) => state.address)
-  const granterFor = useFeePayer((state) => state.granterFor)
 
   const [state, setState] = useState<ActionState>({ kind: 'idle' })
 
@@ -40,12 +39,7 @@ export function useStakingActions(onSuccess?: () => void) {
       if (!client || !address) return
       setState({ kind: 'sending' })
       try {
-        const tx = await client.tx.broadcast(messages, {
-          gasLimit,
-          gasPriceInFeeDenom: GAS_PRICE_USCRT,
-          feeDenom: DENOM,
-          feeGranter: granterFor(gasLimit, msgTypes)
-        })
+        const tx = await sendTx(client, messages, gasLimit, msgTypes)
 
         if (tx.code !== 0) {
           setState({ kind: 'failed', message: tx.rawLog || `The chain rejected it (code ${tx.code}).` })
@@ -58,7 +52,7 @@ export function useStakingActions(onSuccess?: () => void) {
         setState({ kind: 'failed', message: errorMessage(error) })
       }
     },
-    [client, address, granterFor, onSuccess]
+    [client, address, onSuccess]
   )
 
   const delegate = useCallback(
