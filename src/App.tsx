@@ -53,6 +53,18 @@ export default function App() {
     void connectSettings(syncAddress)
   }, [syncAddress])
 
+  // The ShadeSwap pair list, fetched once a wallet is here and the page has
+  // settled, so the first "Pay with" or gas refill does not wait for it. After
+  // the first visit it comes from the browser's own copy (see `listPairs`).
+  const queryClient = useWallet((state) => state.queryClient)
+  useEffect(() => {
+    if (!syncAddress || !queryClient) return
+    const timer = setTimeout(() => {
+      void import('@/lib/shadeSwap').then(({ listPairs }) => listPairs(queryClient).catch(() => undefined))
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [syncAddress, queryClient])
+
   /*
    * Read here and nowhere else, on purpose.
    *

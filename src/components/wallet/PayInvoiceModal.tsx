@@ -1,21 +1,19 @@
 import { CheckCircle2, ChevronDown, ExternalLink, Eye, Loader2, ShieldCheck } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { PickerDialog } from '@/components/ui/Picker'
 import { explorerTxUrl } from '@/chains/secret4'
 import { useAssetBalance } from '@/hooks/useAssetBalance'
-import { useBalances } from '@/hooks/useBalances'
 import { usePermit } from '@/hooks/usePermit'
 import { cn } from '@/lib/cn'
 import { errorMessage } from '@/lib/errors'
 import { formatAmount, shortenAddress } from '@/lib/format'
-import { quoteInto, swappableTokens } from '@/lib/gasPurchase'
+import { balancesOf, quoteInto, swappableTokens } from '@/lib/gasPurchase'
 import { invoiceBaseUnits, type Invoice } from '@/lib/invoice'
 import { paymentMessages, settlementToken, type PaySource } from '@/lib/invoicePayment'
 import type { Quote } from '@/lib/shadeSwap'
-import { permitAuth } from '@/lib/snip20'
 import { sendTx } from '@/lib/sendTx'
 import { canUnwrap, useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
@@ -92,6 +90,7 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
   const [swappable, setSwappable] = useState<string[]>([])
   /** Still finding which tokens could pay — the pool list and the permit's tokens. */
   const [listing, setListing] = useState(false)
+  const [held, setHeld] = useState<Map<string, bigint>>(new Map())
   const [quote, setQuote] = useState<QuoteState>({ kind: 'none' })
 
   /*
@@ -105,10 +104,14 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
     if (!queryClient || !permit || !token || !otherWays) return
     let cancelled = false
     setListing(true)
-    void swappableTokens(queryClient, permit, token)
-      .then((tokens) => {
-        if (!cancelled) setSwappable(tokens)
-      })
+    void (async () => {
+      const tokens = await swappableTokens(queryClient, permit, token)
+      if (cancelled) return
+      setSwappable(tokens)
+      // Every balance in one request through the batch router.
+      const balances = await balancesOf(queryClient, permit, [token, ...tokens])
+      if (!cancelled) setHeld(new Map([...balances].filter(([, amount]) => amount > 0n)))
+    })()
       .catch(() => undefined)
       .finally(() => {
         if (!cancelled) setListing(false)
@@ -118,31 +121,9 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
     }
   }, [queryClient, permit, token, otherWays])
 
-  const contracts = useMemo(
-    () => (token && otherWays ? [token, ...swappable] : []),
-    [token, otherWays, swappable]
-  )
-  const balances = useBalances(
-    permit && contracts.length > 0 ? permitAuth(permit) : undefined,
-    undefined,
-    contracts
-  )
   // Until both the candidates and their balances are in, the picker is not
   // the whole list — say so rather than show a short one as if it were.
-  const loadingTokens =
-    Boolean(permit) &&
-    otherWays &&
-    (listing || balances.loading || (contracts.length > 0 && balances.tokens.length === 0))
-
-  const held = useMemo(() => {
-    const map = new Map<string, bigint>()
-    for (const row of balances.tokens) {
-      if (row.outcome.status === 'ok' && BigInt(row.outcome.amount) > 0n) {
-        map.set(row.token.address, BigInt(row.outcome.amount))
-      }
-    }
-    return map
-  }, [balances.tokens])
+  const loadingTokens = Boolean(permit) && otherWays && listing
 
   const swapping = payWith !== DIRECT && payWith !== UNWRAP
   const payToken = swapping ? tokenByAddress(payWith) : undefined

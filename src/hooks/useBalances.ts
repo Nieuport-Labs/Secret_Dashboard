@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { queryAllBalances } from '@/lib/bank'
-import { mapWithLimit } from '@/lib/concurrency'
 import { errorMessage } from '@/lib/errors'
 import { fiatValue } from '@/lib/format'
 import { fetchPrices } from '@/lib/prices'
-import { queryBalance, type BalanceOutcome, type Snip20Auth } from '@/lib/snip20'
+import { queryBalancesBatched, type BalanceOutcome, type Snip20Auth } from '@/lib/snip20'
 import { loadWatchlist, rememberTokens } from '@/lib/watchlist'
 import { allTokenAddresses, allTokens, tokenByAddress, type TokenInfo } from '@/tokens/registry'
 import { tokenAddressForBankDenom } from '@/tokens/routes'
@@ -15,13 +14,6 @@ import { useWallet } from '@/store/wallet'
 
 /** CoinGecko's id for SCRT itself. */
 const SCRT_PRICE_ID = 'secret'
-
-/**
- * How many contract reads run at once. Deliberately modest: the chain has two
- * working public providers, and a sweep of the whole registry is 96 encrypted
- * queries.
- */
-const QUERY_CONCURRENCY = 6
 
 /**
  * Balances are re-read on this interval regardless of push notifications.
@@ -243,14 +235,11 @@ export function useBalances(auth: Snip20Auth | undefined, owner?: string, contra
       }
       setScrtPrice(prices.get(SCRT_PRICE_ID))
 
-      const outcomes = await mapWithLimit(
-        contracts,
-        QUERY_CONCURRENCY,
-        async (contract) => [contract, await queryBalance(client, auth!, contract)] as const,
-        (done, total) => {
-          if (!cancelled && sweep) setScanProgress([done, total])
-        }
-      )
+      // A few dozen per request through the batch router rather than one
+      // request per token — see `queryBalancesBatched`.
+      const outcomes = await queryBalancesBatched(client, auth!, contracts, (done, total) => {
+        if (!cancelled && sweep) setScanProgress([done, total])
+      })
 
       if (cancelled) return
 

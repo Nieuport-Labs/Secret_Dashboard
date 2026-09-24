@@ -6,9 +6,10 @@ import { estimateFee } from '@/lib/feegrant-sdk'
 import { MSG_EXECUTE_CONTRACT } from '@/lib/msgTypes'
 
 import {
+  balancesOf,
+  bestExactOut,
   PURCHASE_GAS,
   purchaseMessages,
-  quoteForSscrt,
   slippageFor,
   swappableTokens
 } from '@/lib/gasPurchase'
@@ -17,12 +18,15 @@ import {
   findRoutes,
   listPairs,
   MAX_SWAP_GAS,
-  quoteExactIn,
+  pairsOf,
+  quoteIn,
+  reservesFor,
   swapGas,
   swapMessage,
-  type Quote
+  type Quote,
+  type Route
 } from '@/lib/shadeSwap'
-import { permitAuth, queryBalance, queryBalances } from '@/lib/snip20'
+import { permitAuth, queryBalance } from '@/lib/snip20'
 import { useFeePayer, vaultCredit } from '@/store/feePayer'
 import { useNotifications } from '@/store/notifications'
 import { useSettings } from '@/store/settings'
@@ -148,37 +152,38 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
   }))
   if (routable.length === 0) return undefined
 
-  const balances = await queryBalances(
-    queryClient,
-    permitAuth(permit),
-    routable.map((candidate) => candidate.token)
-  )
+  // Every balance in one request, and every pool on every route in another.
+  const [balances, reserves] = await Promise.all([
+    balancesOf(
+      queryClient,
+      permit,
+      routable.map((candidate) => candidate.token)
+    ),
+    reservesFor(queryClient, pairsOf(routable.flatMap((candidate) => candidate.routes)))
+  ])
 
   // What each whole holding would fetch, by its best route.
-  const valued: Array<{ token: string; balance: bigint; best: Quote }> = []
+  const valued: Array<{ balance: bigint; best: Quote; routes: Route[] }> = []
   for (const candidate of routable) {
-    const outcome = balances.get(candidate.token)
-    const balance = outcome?.status === 'ok' ? BigInt(outcome.amount) : 0n
+    const balance = balances.get(candidate.token) ?? 0n
     if (balance <= 0n) continue
-    const quotes = await Promise.all(
-      candidate.routes.map((route) => quoteExactIn(queryClient, route, balance).catch(() => undefined))
-    )
-    const best = quotes
+    const best = candidate.routes
+      .map((route) => quoteIn(route, reserves, balance))
       .filter((quote): quote is Quote => quote !== undefined)
       .sort((a, b) => (a.amountOut === b.amountOut ? 0 : a.amountOut > b.amountOut ? -1 : 1))[0]
-    if (best && best.amountOut > 0n) valued.push({ token: candidate.token, balance, best })
+    if (best && best.amountOut > 0n) valued.push({ balance, best, routes: candidate.routes })
   }
   valued.sort((a, b) =>
     a.best.amountOut === b.best.amountOut ? 0 : a.best.amountOut > b.best.amountOut ? -1 : 1
   )
 
-  for (const { token, balance, best } of valued) {
+  for (const { balance, best, routes } of valued) {
     // Enough to cover `need` with room for slippage: pay only for that.
-    const exact = await quoteForSscrt(queryClient, token, need)
+    const exact = bestExactOut(routes, reserves, need)
 
     if (exact && exact.amountIn <= balance) {
       return {
-        message: await swapMessage(address, exact.route, exact.amountIn, need),
+        message: await swapMessage(queryClient, address, exact.route, exact.amountIn, need),
         gas: swapGas(exact.route),
         minOut: need
       }
@@ -188,7 +193,7 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
     const minOut = (best.amountOut * (10_000n - slippageFor(best.impactBps))) / 10_000n
     if (minOut < MIN_SWAP_OUT) continue
     return {
-      message: await swapMessage(address, best.route, best.amountIn, minOut),
+      message: await swapMessage(queryClient, address, best.route, best.amountIn, minOut),
       gas: swapGas(best.route),
       minOut
     }

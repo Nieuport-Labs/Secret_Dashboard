@@ -1,6 +1,7 @@
 import type { SecretNetworkClient } from 'secretjs'
 
-import { codeHashFor } from '@/lib/codeHash'
+import { batchQuery } from '@/lib/batchQuery'
+import { codeHashFor, codeHashesFor } from '@/lib/codeHash'
 import { errorMessage } from '@/lib/errors'
 import { covers, withPermit, type Permit } from '@/lib/permit'
 
@@ -81,6 +82,31 @@ export async function queryTokenInfo(
   return info
 }
 
+/** A balance reply, read into an outcome. */
+function balanceOutcome(reply: BalanceReply | undefined): BalanceOutcome {
+  // A rejected permit comes back as a normal reply carrying an error object,
+  // not as a thrown exception — so this branch is not optional.
+  if (reply?.viewing_key_error) {
+    return {
+      status: 'unauthorized',
+      message: reply.viewing_key_error.msg ?? 'The token rejected this permit.'
+    }
+  }
+
+  const amount = reply?.balance?.amount
+  if (typeof amount !== 'string') {
+    return { status: 'error', message: `Unexpected reply: ${JSON.stringify(reply).slice(0, 160)}` }
+  }
+
+  return { status: 'ok', amount }
+}
+
+function balanceQuery(auth: Snip20Auth): object {
+  return auth.kind === 'permit'
+    ? withPermit(auth.permit, { balance: {} })
+    : { balance: { address: auth.address, key: auth.key } }
+}
+
 export async function queryBalance(
   client: SecretNetworkClient,
   auth: Snip20Auth,
@@ -93,27 +119,10 @@ export async function queryBalance(
     const reply = (await client.query.compute.queryContract({
       contract_address: contractAddress,
       code_hash: codeHash,
-      query:
-        auth.kind === 'permit'
-          ? withPermit(auth.permit, { balance: {} })
-          : { balance: { address: auth.address, key: auth.key } }
+      query: balanceQuery(auth)
     })) as BalanceReply
 
-    // A rejected permit comes back as a normal reply carrying an error object,
-    // not as a thrown exception — so this branch is not optional.
-    if (reply?.viewing_key_error) {
-      return {
-        status: 'unauthorized',
-        message: reply.viewing_key_error.msg ?? 'The token rejected this permit.'
-      }
-    }
-
-    const amount = reply?.balance?.amount
-    if (typeof amount !== 'string') {
-      return { status: 'error', message: `Unexpected reply: ${JSON.stringify(reply).slice(0, 160)}` }
-    }
-
-    return { status: 'ok', amount }
+    return balanceOutcome(reply)
   } catch (error) {
     // Via the helper: a contract rejecting the permit comes back as secretjs's
     // thrown JSON body, which "[object Object]" hid — classifying a permit
@@ -141,6 +150,57 @@ export async function queryBalances(
     contractAddresses.map(async (address) => [address, await queryBalance(client, auth, address)] as const)
   )
   return new Map(entries)
+}
+
+/**
+ * `queryBalances` for many tokens at once, through the batch router
+ * (`lib/batchQuery.ts`): the code hashes in parallel — plain reads, cheap —
+ * then the balances a few dozen per request instead of one each. Each token
+ * still gets its own outcome, exactly as `queryBalance` would give it.
+ *
+ * Measured on a registry sweep, one request per token was the slow part: 67
+ * encrypted queries against a public node took about 25 seconds.
+ */
+export async function queryBalancesBatched(
+  client: SecretNetworkClient,
+  auth: Snip20Auth,
+  contractAddresses: string[],
+  onProgress?: (done: number, total: number) => void
+): Promise<Map<string, BalanceOutcome>> {
+  const outcomes = new Map<string, BalanceOutcome>()
+  const asked = contractAddresses.filter((address) => {
+    if (auth.kind === 'permit' && !covers(auth.permit, address)) {
+      outcomes.set(address, { status: 'not-covered' })
+      return false
+    }
+    return true
+  })
+
+  const hashes = await codeHashesFor(client, asked)
+  const query = balanceQuery(auth)
+  const answers = await batchQuery(
+    client,
+    asked
+      .filter((address) => hashes.has(address))
+      .map((address) => ({ id: address, contract: { address, codeHash: hashes.get(address)! }, query })),
+    { size: 20, onChunk: onProgress }
+  )
+
+  for (const address of asked) {
+    const answer = answers.get(address)
+    if (!hashes.has(address)) {
+      outcomes.set(address, { status: 'error', message: 'Could not read the contract’s code hash.' })
+    } else if (!answer) {
+      outcomes.set(address, { status: 'error', message: 'No answer.' })
+    } else if (answer.ok) {
+      outcomes.set(address, balanceOutcome(answer.value as BalanceReply))
+    } else if (/unauthorized|permit|signature/i.test(answer.error)) {
+      outcomes.set(address, { status: 'unauthorized', message: answer.error })
+    } else {
+      outcomes.set(address, { status: 'error', message: answer.error })
+    }
+  }
+  return new Map(contractAddresses.map((address) => [address, outcomes.get(address)!]))
 }
 
 export interface Transfer {

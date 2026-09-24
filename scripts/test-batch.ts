@@ -1,0 +1,123 @@
+/**
+ * Tests for batched contract queries: answers come back by id through the
+ * router, a batch the node refuses is split rather than lost, and without a
+ * router every query is still answered on its own.
+ *
+ *   npm run test:batch
+ */
+
+import type { SecretNetworkClient } from 'secretjs'
+
+let passed = 0
+let failed = 0
+
+function check(name: string, condition: boolean, detail?: unknown): void {
+  if (condition) {
+    passed += 1
+    return
+  }
+  failed += 1
+  console.log(`FAIL  ${name}`)
+  if (detail !== undefined) console.log(`      ${JSON.stringify(detail)}`)
+}
+
+const ROUTER = 'secret15mkmad8ac036v4nrpcc7nk8wyr578egt077syt'
+const decode = (value: string) => JSON.parse(atob(value)) as { n?: number; fail?: boolean }
+const encode = (value: unknown) => btoa(JSON.stringify(value))
+
+interface Fake {
+  /** The router refuses batches larger than this; `0` means there is no router at all. */
+  routerLimit: number
+  routerCalls: number[]
+  singleCalls: number
+}
+
+function client(fake: Fake): SecretNetworkClient {
+  const answer = (address: string, query: { n?: number }) => ({ address, doubled: (query.n ?? 0) * 2 })
+  return {
+    query: {
+      compute: {
+        codeHashByContractAddress: async () => ({ code_hash: 'hash' }),
+        queryContract: async ({ contract_address, query }: { contract_address: string; query: Query }) => {
+          if (contract_address === ROUTER) {
+            const queries = query.batch.queries as Array<{
+              id: string
+              contract: { address: string }
+              query: string
+            }>
+            fake.routerCalls.push(queries.length)
+            if (queries.length > fake.routerLimit) throw new Error('{wasm contract} out of gas')
+            return {
+              batch: {
+                block_height: 1,
+                responses: queries.map((item) => {
+                  const inner = decode(item.query)
+                  return inner.fail
+                    ? { id: item.id, contract: item.contract, response: { system_err: 'nope' } }
+                    : {
+                        id: item.id,
+                        contract: item.contract,
+                        response: { response: encode(answer(item.contract.address, inner)) }
+                      }
+                })
+              }
+            }
+          }
+          fake.singleCalls += 1
+          if (query.fail) throw new Error('nope')
+          return answer(contract_address, query)
+        }
+      }
+    }
+  } as unknown as SecretNetworkClient
+}
+
+type Query = {
+  n?: number
+  fail?: boolean
+  batch: { queries: Array<{ id: string; contract: { address: string }; query: string }> }
+}
+
+const doubled = (result: unknown) => (result as { value?: { doubled?: number } } | undefined)?.value?.doubled
+
+const items = (count: number) =>
+  Array.from({ length: count }, (_, n) => ({
+    id: `q${n}`,
+    contract: { address: `secret1c${n}`, codeHash: 'h' },
+    query: n === 3 ? { fail: true } : { n }
+  }))
+
+{
+  const { batchQuery } = await import(`../src/lib/batchQuery.ts?${Date.now()}`)
+  const fake: Fake = { routerLimit: 100, routerCalls: [], singleCalls: 0 }
+  const results = await batchQuery(client(fake), items(30), { size: 20 })
+  check('thirty queries are two requests', fake.routerCalls.length === 2 && fake.singleCalls === 0, fake)
+  check('answers come back by id', doubled(results.get('q7')) === 14)
+  check('a failed query fails alone', results.get('q3')?.ok === false && results.get('q4')?.ok === true)
+}
+
+{
+  const { batchQuery } = await import(`../src/lib/batchQuery.ts?${Date.now() + 1}`)
+  const fake: Fake = { routerLimit: 10, routerCalls: [], singleCalls: 0 }
+  const results = await batchQuery(client(fake), items(40), { size: 40 })
+  check(
+    'a refused batch is split, not given up on',
+    fake.singleCalls === 0 && fake.routerCalls.includes(10),
+    fake
+  )
+  check(
+    'and every query is still answered',
+    [...Array(40).keys()].every((n) => results.has(`q${n}`))
+  )
+}
+
+{
+  const { batchQuery } = await import(`../src/lib/batchQuery.ts?${Date.now() + 2}`)
+  const fake: Fake = { routerLimit: 0, routerCalls: [], singleCalls: 0 }
+  const results = await batchQuery(client(fake), items(12), { size: 6 })
+  check('with no router, every query is sent on its own', fake.singleCalls >= 12, fake)
+  check('and answered', doubled(results.get('q11')) === 22)
+}
+
+console.log(`\n${passed} passed, ${failed} failed`)
+if (failed > 0) process.exit(1)

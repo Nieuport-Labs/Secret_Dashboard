@@ -1,5 +1,5 @@
 import { CheckCircle2, ChevronDown, ExternalLink, Fuel, Loader2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import AmountHero from '@/components/ui/AmountHero'
 import Button from '@/components/ui/Button'
@@ -19,11 +19,10 @@ import { useBalances } from '@/hooks/useBalances'
 import { cn } from '@/lib/cn'
 import { errorMessage } from '@/lib/errors'
 import { formatAmount, toBaseUnits } from '@/lib/format'
-import { PURCHASE_GAS, purchaseMessages, quoteForSscrt, swappableTokens } from '@/lib/gasPurchase'
+import { balancesOf, PURCHASE_GAS, purchaseMessages, quoteForSscrt, swappableTokens } from '@/lib/gasPurchase'
 import { buyGasCredit } from '@/lib/gasVault'
 import { MSG_EXECUTE_CONTRACT } from '@/lib/msgTypes'
 import { swapGas, swapMessage, type Quote } from '@/lib/shadeSwap'
-import { permitAuth } from '@/lib/snip20'
 import { broadcastTracked } from '@/lib/txProgress'
 import { transactionsCovered, useFeePayer } from '@/store/feePayer'
 import { useSettings } from '@/store/settings'
@@ -87,6 +86,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
   const [swappable, setSwappable] = useState<string[]>([])
   /** Still finding which tokens could pay — the pool list and the permit's tokens. */
   const [listing, setListing] = useState(false)
+  const [held, setHeld] = useState<Map<string, bigint>>(new Map())
   const [quote, setQuote] = useState<QuoteState>({ kind: 'none' })
 
   // Which private tokens could pay, which needs the permit to read them at all.
@@ -94,10 +94,14 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
     if (!queryClient || !permit) return
     let cancelled = false
     setListing(true)
-    void swappableTokens(queryClient, permit)
-      .then((tokens) => {
-        if (!cancelled) setSwappable(tokens)
-      })
+    void (async () => {
+      const tokens = await swappableTokens(queryClient, permit)
+      if (cancelled) return
+      setSwappable(tokens)
+      // Every balance in one request through the batch router.
+      const balances = await balancesOf(queryClient, permit, [SSCRT_ADDRESS, ...tokens])
+      if (!cancelled) setHeld(new Map([...balances].filter(([, amount]) => amount > 0n)))
+    })()
       .catch(() => undefined)
       .finally(() => {
         if (!cancelled) setListing(false)
@@ -107,22 +111,11 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
     }
   }, [queryClient, permit])
 
-  const contracts = useMemo(() => [SSCRT_ADDRESS, ...swappable], [swappable])
-  const balances = useBalances(permit ? permitAuth(permit) : undefined, undefined, contracts)
+  // SCRT itself, public, and its price — no private token is read here.
+  const balances = useBalances(undefined)
   // Until both the candidates and their balances are in, the picker is not
   // the whole list — say so rather than show a short one as if it were.
-  const loadingTokens =
-    Boolean(permit) && (listing || balances.loading || (contracts.length > 0 && balances.tokens.length === 0))
-
-  const held = useMemo(() => {
-    const map = new Map<string, bigint>()
-    for (const row of balances.tokens) {
-      if (row.outcome.status === 'ok' && BigInt(row.outcome.amount) > 0n) {
-        map.set(row.token.address, BigInt(row.outcome.amount))
-      }
-    }
-    return map
-  }, [balances.tokens])
+  const loadingTokens = Boolean(permit) && listing
 
   let baseUnits: string | undefined
   let amountError: string | undefined
@@ -207,7 +200,9 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
         const route = swapping && quote.kind === 'ready' ? quote.quote : undefined
         // The swap promises `credits` of sSCRT at least; the unwrap and the
         // purchase then spend exactly that.
-        const swap = route ? await swapMessage(address, route.route, route.amountIn, credits) : undefined
+        const swap = route
+          ? await swapMessage(queryClient, address, route.route, route.amountIn, credits)
+          : undefined
         const messages = await purchaseMessages(
           queryClient,
           address,

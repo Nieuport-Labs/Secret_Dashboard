@@ -1,5 +1,7 @@
 import type { SecretNetworkClient } from 'secretjs'
 
+import { mapWithLimit } from '@/lib/concurrency'
+
 /**
  * Code hashes, read from the chain rather than hardcoded.
  *
@@ -49,13 +51,18 @@ export async function codeHashesFor(
   client: SecretNetworkClient,
   addresses: string[]
 ): Promise<Map<string, string>> {
-  const results = await Promise.allSettled(
-    addresses.map(async (address) => [address, await codeHashFor(client, address)] as const)
+  // A dozen at a time: plain reads, but a registry is ninety of them and a
+  // public node rate-limits a burst like that.
+  const results = await mapWithLimit(addresses, 12, (address) =>
+    codeHashFor(client, address).then(
+      (hash) => [address, hash] as const,
+      () => undefined
+    )
   )
 
   const hashes = new Map<string, string>()
   for (const result of results) {
-    if (result.status === 'fulfilled') hashes.set(result.value[0], result.value[1])
+    if (result) hashes.set(result[0], result[1])
   }
   return hashes
 }

@@ -84,7 +84,7 @@ export async function paymentMessages(
 
   if (source.kind === 'swap') {
     // At least the invoice amount comes back, or the router refuses the trade.
-    messages.push(await swapMessage(sender, source.quote.route, source.quote.amountIn, amount))
+    messages.push(await swapMessage(client, sender, source.quote.route, source.quote.amountIn, amount))
     msgTypes.push(MSG_EXECUTE_CONTRACT)
     gasLimit += swapGas(source.quote.route)
   }

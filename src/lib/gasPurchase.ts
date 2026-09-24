@@ -2,8 +2,18 @@ import type { Msg, SecretNetworkClient } from 'secretjs'
 
 import { DENOM, GAS, GAS_VAULT_ADDRESS } from '@/chains/secret4'
 import { codeHashFor } from '@/lib/codeHash'
-import { covers, type Permit } from '@/lib/permit'
-import { findRoutes, listPairs, quoteExactOut, type Quote, type Route } from '@/lib/shadeSwap'
+import { batchQuery } from '@/lib/batchQuery'
+import { covers, withPermit, type Permit } from '@/lib/permit'
+import {
+  findRoutes,
+  listPairs,
+  pairsOf,
+  quoteOut,
+  reservesFor,
+  type Quote,
+  type Reserves,
+  type Route
+} from '@/lib/shadeSwap'
 import { redeemMsg } from '@/lib/snip20'
 import { allTokenAddresses, SSCRT_ADDRESS, STKD_SCRT_ADDRESS } from '@/tokens/registry'
 
@@ -98,10 +108,32 @@ export async function swappableTokens(
 }
 
 /**
+ * The cheapest way along `routes` to get `amount` out, padded by the slippage
+ * its own price impact calls for — so `amount` is what the swap can promise as
+ * its minimum. Pure arithmetic on reserves already read: the impact and the
+ * padded figure come from the same read, not two.
+ */
+export function bestExactOut(
+  routes: Route[],
+  reserves: Map<string, Reserves>,
+  amount: bigint
+): PaddedQuote | undefined {
+  const cheapest = (candidates: Route[], out: bigint) =>
+    candidates
+      .map((route) => quoteOut(route, reserves, out))
+      .filter((quote): quote is Quote => quote !== undefined)
+      .sort((a, b) => (a.amountIn === b.amountIn ? 0 : a.amountIn < b.amountIn ? -1 : 1))[0]
+
+  const bare = cheapest(routes, amount)
+  if (!bare) return undefined
+  const slippageBps = slippageFor(bare.impactBps)
+  const padded = cheapest([bare.route], (amount * 10_000n) / (10_000n - slippageBps))
+  return padded ? { ...padded, slippageBps } : undefined
+}
+
+/**
  * What it costs in `token` to get `amount` of `target` out, slippage
- * included: the quote targets `amount` plus the slippage margin, so `amount`
- * is what the swap can promise as its minimum. The cheapest of up to four
- * routes.
+ * included. Up to four routes, every pool on them read in one request.
  */
 export async function quoteInto(
   client: SecretNetworkClient,
@@ -109,19 +141,59 @@ export async function quoteInto(
   target: string,
   amount: bigint
 ): Promise<PaddedQuote | undefined> {
-  const pairs = await listPairs(client)
-  const cheapest = async (routes: Route[], out: bigint) =>
-    (await Promise.all(routes.map((route) => quoteExactOut(client, route, out).catch(() => undefined))))
-      .filter((quote): quote is Quote => quote !== undefined)
-      .sort((a, b) => (a.amountIn === b.amountIn ? 0 : a.amountIn < b.amountIn ? -1 : 1))[0]
+  const routes = findRoutes(await listPairs(client), token, target).slice(0, 4)
+  if (routes.length === 0) return undefined
+  return bestExactOut(routes, await reservesFor(client, pairsOf(routes)), amount)
+}
 
-  // The trade as asked, to see how much it moves the price; then the same
-  // route again, padded by the slippage that impact calls for.
-  const bare = await cheapest(findRoutes(pairs, token, target).slice(0, 4), amount)
-  if (!bare) return undefined
-  const slippageBps = slippageFor(bare.impactBps)
-  const padded = await cheapest([bare.route], (amount * 10_000n) / (10_000n - slippageBps))
-  return padded ? { ...padded, slippageBps } : undefined
+/**
+ * Private balances of several tokens, in one request through the batch
+ * router, by the permit. Code hashes come from the ShadeSwap pair list where
+ * it has them — the factory reads them off the chain — and are looked up
+ * otherwise. A token whose balance could not be read is left out, never
+ * reported as zero.
+ */
+export async function balancesOf(
+  client: SecretNetworkClient,
+  permit: Permit,
+  tokens: string[]
+): Promise<Map<string, bigint>> {
+  const known = new Map<string, string>()
+  for (const pair of await listPairs(client).catch(() => [])) {
+    known.set(pair.token0.address, pair.token0.codeHash)
+    known.set(pair.token1.address, pair.token1.codeHash)
+  }
+  const covered = tokens.filter((token) => covers(permit, token))
+  const hashes = await Promise.all(
+    covered.map(
+      async (token) => known.get(token) ?? (await codeHashFor(client, token).catch(() => undefined))
+    )
+  )
+
+  const answers = await batchQuery(
+    client,
+    covered.flatMap((token, index) =>
+      hashes[index]
+        ? [
+            {
+              id: token,
+              contract: { address: token, codeHash: hashes[index]! },
+              query: withPermit(permit, { balance: {} })
+            }
+          ]
+        : []
+    )
+  )
+
+  const balances = new Map<string, bigint>()
+  for (const token of covered) {
+    const answer = answers.get(token)
+    const amount = answer?.ok
+      ? (answer.value as { balance?: { amount?: string } })?.balance?.amount
+      : undefined
+    if (typeof amount === 'string') balances.set(token, BigInt(amount))
+  }
+  return balances
 }
 
 /** `quoteInto` for sSCRT, which is what gas credits are bought with. */

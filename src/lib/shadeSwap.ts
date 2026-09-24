@@ -1,6 +1,8 @@
 import type { Msg, SecretNetworkClient } from 'secretjs'
 
 import { withGasBuffer } from '@/chains/secret4'
+import { batchQuery } from '@/lib/batchQuery'
+import { codeHashFor } from '@/lib/codeHash'
 
 /**
  * Just enough of ShadeSwap to turn a token into sSCRT inside another
@@ -27,16 +29,12 @@ interface ContractRef {
   codeHash: string
 }
 
-/** Mainnet, from shade.js `docs/contracts.md`. */
-export const SHADESWAP_FACTORY: ContractRef = {
-  address: 'secret1ja0hcwvy76grqkpgwznxukgd7t8a8anmmx05pp',
-  codeHash: '2ad4ed2a4a45fd6de3daca9541ba82c26bb66c76d1c3540de39b509abd26538e'
-}
-
-export const SHADESWAP_ROUTER: ContractRef = {
-  address: 'secret1nrnh30ant2dplrlvqjgmddg4fntllwlm0pnhss',
-  codeHash: 'd13768344dfa03118f2ae8f4cf7e114dbad722ba8dd93a67f1f024441a07991a'
-}
+/**
+ * Mainnet addresses, from shade.js `docs/contracts.md`. Their code hashes are
+ * read from the chain like every other one (`lib/codeHash.ts`), not copied.
+ */
+export const SHADESWAP_FACTORY = 'secret1ja0hcwvy76grqkpgwznxukgd7t8a8anmmx05pp'
+export const SHADESWAP_ROUTER = 'secret1nrnh30ant2dplrlvqjgmddg4fntllwlm0pnhss'
 
 /** shade.js `MsgCost`: a base plus a fixed cost per constant-product hop. */
 const SWAP_GAS_BASE = 300_000
@@ -48,7 +46,7 @@ export interface Pair {
   token1: ContractRef
 }
 
-interface Reserves {
+export interface Reserves {
   amount0: bigint
   amount1: bigint
   /** Total fee as a fraction, lp + dao. */
@@ -93,38 +91,103 @@ interface PairInfoReply {
 }
 
 const PAGE = 30
-const MAX_PAGES = 20
+/** Pages asked for in one batch; another batch follows only if the last page was full. */
+const PAGES_PER_BATCH = 8
+const MAX_PAGES = 40
+
+const STORAGE_KEY = 'secret-dashboard:shadeswap-pairs:v1'
+/** A stored list younger than this is used as it is; an older one is used and refreshed behind. */
+const FRESH_MS = 24 * 60 * 60_000
 
 let pairsCache: Promise<Pair[]> | undefined
 
+function stored(): { at: number; pairs: Pair[] } | undefined {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? (JSON.parse(raw) as { at: number; pairs: Pair[] }) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function store(pairs: Pair[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ at: Date.now(), pairs }))
+  } catch {
+    // Only a cache.
+  }
+}
+
+function toPairs(reply: FactoryPairsReply | undefined): { pairs: Pair[]; count: number } {
+  const entries = reply?.list_a_m_m_pairs?.amm_pairs ?? []
+  const pairs: Pair[] = []
+  for (const entry of entries) {
+    const [a, b, stable] = entry.pair
+    if (!entry.enabled || stable || !a.custom_token || !b.custom_token) continue
+    pairs.push({
+      contract: { address: entry.address, codeHash: entry.code_hash },
+      token0: { address: a.custom_token.contract_addr, codeHash: a.custom_token.token_code_hash },
+      token1: { address: b.custom_token.contract_addr, codeHash: b.custom_token.token_code_hash }
+    })
+  }
+  return { pairs, count: entries.length }
+}
+
+/** The factory's pages, several per request through the batch router. */
+async function fetchPairs(client: SecretNetworkClient): Promise<Pair[]> {
+  const factory = { address: SHADESWAP_FACTORY, codeHash: await codeHashFor(client, SHADESWAP_FACTORY) }
+  const pairs: Pair[] = []
+  for (let first = 0; first < MAX_PAGES; first += PAGES_PER_BATCH) {
+    const pages = Array.from({ length: PAGES_PER_BATCH }, (_, index) => first + index)
+    const answers = await batchQuery(
+      client,
+      pages.map((page) => ({
+        id: String(page),
+        contract: factory,
+        query: { list_a_m_m_pairs: { pagination: { start: page * PAGE, limit: PAGE } } }
+      }))
+    )
+    let full = true
+    for (const page of pages) {
+      const answer = answers.get(String(page))
+      if (!answer?.ok) throw new Error('The ShadeSwap factory did not list its pairs.')
+      const { pairs: found, count } = toPairs(answer.value as FactoryPairsReply)
+      pairs.push(...found)
+      if (count < PAGE) {
+        full = false
+        break
+      }
+    }
+    if (!full) break
+  }
+  return pairs
+}
+
 /**
- * Every enabled constant-product pair the factory knows. Cached for the page:
- * pairs are added rarely, and the reserves — which do change — are read fresh
- * for every quote.
+ * Every enabled constant-product pair the factory knows.
+ *
+ * Pairs are added rarely, so the list is kept in the browser and used at once
+ * on the next visit — refreshed in the background once it is a day old. The
+ * reserves, which do change, are always read fresh for a quote.
  */
 export function listPairs(client: SecretNetworkClient): Promise<Pair[]> {
-  pairsCache ??= (async () => {
-    const pairs: Pair[] = []
-    for (let page = 0; page < MAX_PAGES; page += 1) {
-      const reply = (await client.query.compute.queryContract({
-        contract_address: SHADESWAP_FACTORY.address,
-        code_hash: SHADESWAP_FACTORY.codeHash,
-        query: { list_a_m_m_pairs: { pagination: { start: page * PAGE, limit: PAGE } } }
-      })) as FactoryPairsReply
-      const batch = reply?.list_a_m_m_pairs?.amm_pairs ?? []
-      for (const entry of batch) {
-        const [a, b, stable] = entry.pair
-        if (!entry.enabled || stable || !a.custom_token || !b.custom_token) continue
-        pairs.push({
-          contract: { address: entry.address, codeHash: entry.code_hash },
-          token0: { address: a.custom_token.contract_addr, codeHash: a.custom_token.token_code_hash },
-          token1: { address: b.custom_token.contract_addr, codeHash: b.custom_token.token_code_hash }
-        })
-      }
-      if (batch.length < PAGE) break
-    }
-    return pairs
-  })().catch((error: unknown) => {
+  if (pairsCache) return pairsCache
+
+  const refresh = () =>
+    fetchPairs(client).then((pairs) => {
+      store(pairs)
+      pairsCache = Promise.resolve(pairs)
+      return pairs
+    })
+
+  const kept = stored()
+  if (kept && kept.pairs.length > 0) {
+    pairsCache = Promise.resolve(kept.pairs)
+    if (Date.now() - kept.at > FRESH_MS) void refresh().catch(() => undefined)
+    return pairsCache
+  }
+
+  pairsCache = refresh().catch((error: unknown) => {
     // A failed read is not a list with nothing in it; try again next time.
     pairsCache = undefined
     throw error
@@ -163,14 +226,9 @@ export function findRoutes(pairs: Pair[], from: string, to: string): Route[] {
   return routes
 }
 
-async function reserves(client: SecretNetworkClient, pair: Pair): Promise<Reserves> {
-  const reply = (await client.query.compute.queryContract({
-    contract_address: pair.contract.address,
-    code_hash: pair.contract.codeHash,
-    query: { get_pair_info: {} }
-  })) as PairInfoReply
+function parseReserves(reply: PairInfoReply): Reserves | undefined {
   const info = reply?.get_pair_info
-  if (!info) throw new Error('The pool did not describe itself.')
+  if (!info) return undefined
   const { lp_fee: lp, shade_dao_fee: dao } = info.fee_info
   return {
     amount0: BigInt(info.amount_0),
@@ -178,6 +236,34 @@ async function reserves(client: SecretNetworkClient, pair: Pair): Promise<Reserv
     feeNum: BigInt(lp.nom) * BigInt(dao.denom) + BigInt(dao.nom) * BigInt(lp.denom),
     feeDen: BigInt(lp.denom) * BigInt(dao.denom)
   }
+}
+
+/** The pools' reserves as they are now, by pair address — every pool in one request. */
+export async function reservesFor(
+  client: SecretNetworkClient,
+  pairs: Pair[]
+): Promise<Map<string, Reserves>> {
+  const unique = [...new Map(pairs.map((pair) => [pair.contract.address, pair])).values()]
+  const answers = await batchQuery(
+    client,
+    unique.map((pair) => ({
+      id: pair.contract.address,
+      contract: pair.contract,
+      query: { get_pair_info: {} }
+    }))
+  )
+  const found = new Map<string, Reserves>()
+  for (const pair of unique) {
+    const answer = answers.get(pair.contract.address)
+    const parsed = answer?.ok ? parseReserves(answer.value as PairInfoReply) : undefined
+    if (parsed) found.set(pair.contract.address, parsed)
+  }
+  return found
+}
+
+/** Every pair a set of routes passes through. */
+export function pairsOf(routes: Route[]): Pair[] {
+  return routes.flatMap((route) => route.map((hop) => hop.pair))
 }
 
 /** Reserves oriented along a hop: what goes in, what comes out. */
@@ -233,15 +319,19 @@ export interface Quote {
   impactBps: number
 }
 
-async function routeReserves(client: SecretNetworkClient, route: Route) {
-  return Promise.all(route.map(async (hop) => oriented(hop, await reserves(client, hop.pair))))
+type Leg = ReturnType<typeof oriented>
+
+function legsOf(route: Route, reserves: Map<string, Reserves>): Leg[] | undefined {
+  const legs: Leg[] = []
+  for (const hop of route) {
+    const found = reserves.get(hop.pair.contract.address)
+    if (!found) return undefined
+    legs.push(oriented(hop, found))
+  }
+  return legs
 }
 
-function impact(
-  legs: Awaited<ReturnType<typeof routeReserves>>,
-  amountIn: bigint,
-  amountOut: bigint
-): number {
+function impact(legs: Leg[], amountIn: bigint, amountOut: bigint): number {
   // What `amountIn` would buy at the pools' current price, fees included.
   let spot = amountIn * 10n ** 18n
   for (const leg of legs) spot = (spot * leg.output * (leg.feeDen - leg.feeNum)) / (leg.input * leg.feeDen)
@@ -250,25 +340,23 @@ function impact(
   return Number(((spot - amountOut) * 10_000n) / spot)
 }
 
-/** What `amountIn` buys along `route`, on the reserves as they are now. */
-export async function quoteExactIn(
-  client: SecretNetworkClient,
-  route: Route,
-  amountIn: bigint
-): Promise<Quote> {
-  const legs = await routeReserves(client, route)
+/** What `amountIn` buys along `route`, on reserves already read. */
+export function quoteIn(route: Route, reserves: Map<string, Reserves>, amountIn: bigint): Quote | undefined {
+  const legs = legsOf(route, reserves)
+  if (!legs) return undefined
   let amount = amountIn
   for (const leg of legs) amount = swapOut(leg.input, leg.output, amount, leg.feeNum, leg.feeDen)
   return { route, amountIn, amountOut: amount, impactBps: impact(legs, amountIn, amount) }
 }
 
 /** What has to go in along `route` for `amountOut` to come out, or `undefined` past the pools' depth. */
-export async function quoteExactOut(
-  client: SecretNetworkClient,
+export function quoteOut(
   route: Route,
+  reserves: Map<string, Reserves>,
   amountOut: bigint
-): Promise<Quote | undefined> {
-  const legs = await routeReserves(client, route)
+): Quote | undefined {
+  const legs = legsOf(route, reserves)
+  if (!legs) return undefined
   let amount: bigint | undefined = amountOut
   for (const leg of [...legs].reverse()) {
     amount = swapIn(leg.input, leg.output, amount, leg.feeNum, leg.feeDen)
@@ -293,6 +381,7 @@ function base64Json(value: unknown): string {
  * the path and the minimum return. The output comes back to the sender.
  */
 export async function swapMessage(
+  client: SecretNetworkClient,
   sender: string,
   route: Route,
   amountIn: bigint,
@@ -323,8 +412,8 @@ export async function swapMessage(
     code_hash: first.codeHash,
     msg: {
       send: {
-        recipient: SHADESWAP_ROUTER.address,
-        recipient_code_hash: SHADESWAP_ROUTER.codeHash,
+        recipient: SHADESWAP_ROUTER,
+        recipient_code_hash: await codeHashFor(client, SHADESWAP_ROUTER),
         amount: amountIn.toString(),
         msg: base64Json(swap)
       }
