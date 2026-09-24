@@ -1,10 +1,12 @@
-import { ChevronDown, ExternalLink, Fuel } from 'lucide-react'
+import { ArrowLeftRight, CheckCircle2, ChevronDown, ExternalLink, Fuel } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
+import AmountHero from '@/components/ui/AmountHero'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { PickerDialog } from '@/components/ui/Picker'
 import {
+  DECIMALS,
   DENOM,
   DISPLAY_DENOM,
   GAS,
@@ -14,6 +16,7 @@ import {
 } from '@/chains/secret4'
 import { usePermit } from '@/hooks/usePermit'
 import { useBalances } from '@/hooks/useBalances'
+import { cn } from '@/lib/cn'
 import { errorMessage } from '@/lib/errors'
 import { formatAmount, toBaseUnits } from '@/lib/format'
 import {
@@ -29,6 +32,7 @@ import { swapGas, swapMessage, type Quote } from '@/lib/shadeSwap'
 import { permitAuth } from '@/lib/snip20'
 import { broadcastTracked } from '@/lib/txProgress'
 import { transactionsCovered, useFeePayer } from '@/store/feePayer'
+import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 import { privateSymbol, SSCRT_ADDRESS, tokenByAddress, tokenImageUrl } from '@/tokens/registry'
 
@@ -69,7 +73,7 @@ export default function BuyCreditsModal({ open, onClose }: Props) {
       open={open}
       onClose={onClose}
       title="Buy gas credits"
-      description="Pay in and the vault contract covers your transaction fees, from its balance rather than yours."
+      description="The vault contract covers your transaction fees, from its balance rather than yours."
     >
       {/* Its own component so it mounts with the dialog: nothing is read, and
           no balance swept, while the dialog is closed. */}
@@ -85,6 +89,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
   const granterFor = useFeePayer((state) => state.granterFor)
   const refreshGrants = useFeePayer((state) => state.refresh)
   const { permit } = usePermit()
+  const currency = useSettings((state) => state.currency)
 
   const [amount, setAmount] = useState('1')
   const [payWith, setPayWith] = useState<string>(NATIVE)
@@ -258,10 +263,25 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
     }
   }
 
-  const covered = baseUnits ? transactionsCovered(BigInt(baseUnits)) : 0
+  const covered = baseUnits && !amountError ? transactionsCovered(BigInt(baseUnits)) : 0
+
+  // SCRT's price, for the money view of the amount: the wallet's own SCRT
+  // already carries one, so no second price request.
+  const scrtPrice =
+    balances.native && balances.nativeFiat !== undefined && BigInt(balances.native) > 0n
+      ? balances.nativeFiat / (Number(balances.native) / 10 ** DECIMALS)
+      : undefined
 
   const options = [
-    { id: NATIVE, label: DISPLAY_DENOM, detail: 'Public balance' },
+    {
+      id: NATIVE,
+      label: DISPLAY_DENOM,
+      detail:
+        balances.native !== undefined
+          ? `Balance ${formatAmount(balances.native)} · public`
+          : 'Public balance',
+      image: '/img/secret-mark.svg'
+    },
     ...[SSCRT_ADDRESS, ...swappable]
       .filter((token) => held.has(token))
       .map((token) => {
@@ -269,21 +289,25 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
         return {
           id: token,
           label: info ? privateSymbol(info) : token,
-          detail: `${formatAmount(held.get(token)!.toString(), { decimals: info?.decimals ?? 6 })} held${
-            token === SSCRT_ADDRESS ? '' : ' · swapped on ShadeSwap'
+          detail: `Balance ${formatAmount(held.get(token)!.toString(), { decimals: info?.decimals ?? 6 })}${
+            token === SSCRT_ADDRESS ? ' · unwrapped' : ' · swapped on ShadeSwap'
           }`,
           image: info ? tokenImageUrl(info) : undefined
         }
       })
   ]
+  const selected = options.find((option) => option.id === payWith) ?? options[0]
 
   if (status.kind === 'done') {
     return (
       <div className="flex flex-col gap-4">
-        <p className="text-base">
-          Bought {amount} {DISPLAY_DENOM} of credit. It applies to your next transaction automatically while
-          your fee setting is Auto.
-        </p>
+        <div className="flex items-start gap-3">
+          <CheckCircle2 size={18} aria-hidden className="mt-0.5 shrink-0 text-positive" />
+          <p className="text-base">
+            Bought {amount} {DISPLAY_DENOM} of credit. It pays for your next transactions automatically while
+            your fee setting is Auto.
+          </p>
+        </div>
         <a
           className="inline-flex items-center gap-1.5 text-base text-accent underline underline-offset-4"
           href={explorerTxUrl(status.hash)}
@@ -293,7 +317,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
           View transaction
           <ExternalLink size={14} aria-hidden />
         </a>
-        <Button variant="primary" onClick={onClose}>
+        <Button variant="secondary" shape="control" onClick={onClose}>
           Done
         </Button>
       </div>
@@ -301,80 +325,57 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-2">
-        <label htmlFor="credit-amount" className="text-base font-medium">
-          Amount
-        </label>
-        <div className="flex items-center gap-2 rounded-control border border-border bg-surface px-3 py-2.5">
-          <input
-            id="credit-amount"
-            inputMode="decimal"
-            value={amount}
-            onChange={(event) => setAmount(event.target.value)}
-            className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-text-faint"
-            placeholder="0.0"
-          />
-          <span className="shrink-0 text-base text-text-muted">{DISPLAY_DENOM}</span>
+    <>
+      {/* The amount, first and largest — the same card Send opens with. */}
+      <div className="flex flex-col gap-4 rounded-card border border-border bg-surface p-4">
+        <span className="text-label text-text-muted">You&rsquo;re buying</span>
+        <AmountHero
+          amount={amount}
+          onAmount={setAmount}
+          symbol={DISPLAY_DENOM}
+          decimals={DECIMALS}
+          unitPrice={scrtPrice}
+          currency={currency}
+        />
+        {/* Round amounts rather than a share of a balance: what is bought is
+            credit, and the balance it comes out of depends on the token below. */}
+        <div className="flex items-center justify-between gap-3">
+          <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-label text-text-muted">
+            <Fuel size={14} aria-hidden className="shrink-0" />
+            {amountError ? 'Enter an amount' : `≈ ${covered} transactions`}
+          </span>
+          <div className="flex shrink-0 gap-1">
+            {PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setAmount(preset)}
+                className={cn(
+                  'state-layer rounded-pill border border-border px-2.5 py-1 text-label font-medium',
+                  amount === preset ? 'bg-accent-container text-accent' : 'text-text-muted'
+                )}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="flex gap-2">
-          {PRESETS.map((preset) => (
-            <Button key={preset} variant="soft" shape="control" size="sm" onClick={() => setAmount(preset)}>
-              {preset}
-            </Button>
-          ))}
-        </div>
-        {amountError ? (
-          <p className="text-base text-negative" role="alert">
-            {amountError}
-          </p>
-        ) : (
-          <p className="flex items-center gap-2 text-base text-text-muted">
-            <Fuel size={16} aria-hidden />
-            Roughly {covered} transactions
-          </p>
-        )}
       </div>
 
-      <div className="flex flex-col gap-2">
-        <span className="text-base font-medium">Pay with</span>
-        <button
-          type="button"
-          onClick={() => setPicking(true)}
-          aria-haspopup="dialog"
-          className="state-layer flex items-center gap-2 rounded-control border border-border bg-surface px-3 py-2.5 text-left"
-        >
-          {payToken ? (
-            <img src={tokenImageUrl(payToken)} alt="" className="size-5 shrink-0 rounded-pill" />
-          ) : null}
-          <span className="min-w-0 flex-1 text-base">{paySymbol}</span>
-          <ChevronDown size={14} aria-hidden className="text-text-muted" />
-        </button>
-        {!permit ? (
-          <p className="text-sm text-text-faint">
-            Sign the query permit (in Settings) to pay with a private token.
-          </p>
-        ) : null}
-        {swapping && !amountError ? (
-          <p className="text-sm text-text-muted">
-            {quote.kind === 'loading'
-              ? 'Getting a price from ShadeSwap…'
-              : quote.kind === 'ready'
-                ? `About ${formatAmount(quote.quote.amountIn.toString(), {
-                    decimals: payToken?.decimals ?? 6
-                  })} ${paySymbol}, swapped for sSCRT and unwrapped into the purchase — all in one transaction. At most 1% worse, or it does not go through.`
-                : null}
-          </p>
-        ) : null}
-        {payWith === SSCRT_ADDRESS ? (
-          <p className="text-sm text-text-muted">Unwrapped into the purchase in the same transaction.</p>
-        ) : null}
-        {payError ? (
-          <p className="text-base text-negative" role="alert">
-            {payError}
-          </p>
-        ) : null}
-      </div>
+      {/* What pays for it, as a row that is itself the picker — as in Send. */}
+      <button
+        type="button"
+        onClick={() => setPicking(true)}
+        aria-haspopup="dialog"
+        className="state-layer -mt-2 flex items-center gap-3 rounded-card border border-border bg-surface px-4 py-3 text-left"
+      >
+        {selected.image ? <img src={selected.image} alt="" className="size-8 shrink-0 rounded-pill" /> : null}
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="text-base font-medium">Pay with {selected.label}</span>
+          <span className="truncate text-label text-text-faint">{selected.detail}</span>
+        </span>
+        <ChevronDown size={16} aria-hidden className="shrink-0 text-text-muted" />
+      </button>
 
       <PickerDialog
         open={picking}
@@ -385,24 +386,43 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
         onChange={(id) => setPayWith(id)}
       />
 
-      <dl className="flex flex-col gap-1 text-base">
-        <div className="flex justify-between gap-4">
-          <dt className="text-text-muted">Vault balance</dt>
-          <dd>
-            {vaultBalance === undefined ? 'Unavailable' : `${formatAmount(vaultBalance)} ${DISPLAY_DENOM}`}
-          </dd>
-        </div>
-        <div className="flex justify-between gap-4">
-          <dt className="text-text-muted">Network fee for this purchase</dt>
-          <dd>paid separately</dd>
-        </div>
-      </dl>
+      {amountError || payError ? (
+        <span className="-mt-2 text-base text-negative" role="alert">
+          {amountError ?? payError}
+        </span>
+      ) : null}
 
-      {/* Both of these are ways people lose track of what a grant does. */}
-      <p className="text-sm text-text-faint">
-        Credits pay fees only. They are not a token, cannot be sent on, and a private SNIP-20 token cannot pay
-        gas on this chain in the first place — which is why one is turned into SCRT on the way in.
+      {/* What will happen, stated before the button, as Send does. */}
+      <p className="flex items-start gap-2 text-label text-text-muted">
+        {swapping ? (
+          <>
+            <ArrowLeftRight size={14} aria-hidden className="mt-px shrink-0" />
+            {quote.kind === 'ready'
+              ? `About ${formatAmount(quote.quote.amountIn.toString(), {
+                  decimals: payToken?.decimals ?? 6
+                })} ${paySymbol}, swapped for sSCRT on ShadeSwap and unwrapped into the purchase — one transaction. At most 1% worse, or it does not go through.`
+              : quote.kind === 'loading'
+                ? 'Getting a price from ShadeSwap…'
+                : `Swapped for sSCRT on ShadeSwap and unwrapped into the purchase, in one transaction.`}
+          </>
+        ) : (
+          <>
+            <Fuel size={14} aria-hidden className="mt-px shrink-0 text-accent" />
+            {payWith === SSCRT_ADDRESS ? 'Unwrapped into the purchase in the same transaction. ' : ''}
+            Credits pay fees only — they are not a token and cannot be sent on. The vault holds{' '}
+            {vaultBalance === undefined
+              ? 'an unknown amount'
+              : `${formatAmount(vaultBalance)} ${DISPLAY_DENOM}`}{' '}
+            backing every credit it has issued.
+          </>
+        )}
       </p>
+
+      {!permit ? (
+        <p className="-mt-2 text-label text-text-faint">
+          Sign the query permit in Settings to pay with a private token.
+        </p>
+      ) : null}
 
       {status.kind === 'failed' ? (
         <p className="break-address text-base text-negative" role="alert">
@@ -413,12 +433,17 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
       <Button
         variant="primary"
         block
+        size="lg"
         loading={status.kind === 'sending'}
         disabled={!ready}
         onClick={() => void buy()}
       >
-        {client ? 'Buy credits' : 'Connect a wallet first'}
+        {!client
+          ? 'Connect a wallet first'
+          : !amount
+            ? 'Enter an amount'
+            : `Buy ${amount} ${DISPLAY_DENOM} of credit`}
       </Button>
-    </div>
+    </>
   )
 }
