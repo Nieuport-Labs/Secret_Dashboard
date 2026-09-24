@@ -119,7 +119,7 @@ function body(signedAt: number, extra: Partial<PreferencesRecordBody> = {}): Pre
     read.record?.data === first.data && read.record.signature === first.signature
   )
 
-  const tampered = { ...first, data: first.data.replace('"easy"', '"export"') }
+  const tampered = { ...first, data: first.data.replace('"easy"', '"expert"') }
   check('edited data after signing is refused', (await post(tampered)).status === 401)
 }
 
@@ -127,7 +127,7 @@ function body(signedAt: number, extra: Partial<PreferencesRecordBody> = {}): Pre
   const forged = await sign(
     mallory.signer,
     mallory.address,
-    body(now + 1, { preferences: { gas: 'scrt', assets: 'export' } })
+    body(now + 1, { preferences: { gas: 'scrt', assets: 'expert' } })
   )
   check('another key cannot answer for me', (await post(forged)).status === 401)
 }
@@ -175,7 +175,7 @@ function body(signedAt: number, extra: Partial<PreferencesRecordBody> = {}): Pre
   const newer = await sign(
     alice.signer,
     alice.address,
-    body(now + 10, { preferences: { gas: 'scrt', assets: 'export' } })
+    body(now + 10, { preferences: { gas: 'scrt', assets: 'expert' } })
   )
   check('a newer answer replaces the old one', (await post(newer)).status === 200)
 }

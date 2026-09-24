@@ -8,14 +8,14 @@
  *
  * Signed for the same reason a profile is: the store is keyed by address, and
  * without a signature anyone could answer for anyone — flip a stranger into
- * export mode, or off the gas refill they chose.
+ * expert mode, or off the gas refill they chose.
  */
 
 /**
  * Who keeps the account able to pay fees.
  *
- * `autorefill`: the dashboard tops up gas credits so a transaction never stalls
- * on fees. `scrt`: fees come out of the account's own SCRT, and watching that
+ * `autorefill`: the dashboard keeps the account's gas credits at 5 or more, so
+ * a transaction never stalls on fees. `scrt`: fees come out of the account's own SCRT, and watching that
  * balance (and any gas credits) is the user's job.
  */
 export type GasMode = 'autorefill' | 'scrt'
@@ -23,11 +23,10 @@ export type GasMode = 'autorefill' | 'scrt'
 /**
  * How much of the asset machinery is on screen.
  *
- * `easy`: SCRT and private tokens, nothing more. `export`: also unwrapping
- * non-SCRT assets back to their public form, which is what taking them off
- * Secret Network needs.
+ * `easy`: SCRT and private tokens, nothing more. `expert`: also unwrapping
+ * non-SCRT assets back to their public state. Bridging works the same in both.
  */
-export type AssetMode = 'easy' | 'export'
+export type AssetMode = 'easy' | 'expert'
 
 export interface Preferences {
   gas: GasMode
@@ -58,7 +57,7 @@ export interface SignedPreferencesRecord {
 }
 
 const GAS_MODES: readonly GasMode[] = ['autorefill', 'scrt']
-const ASSET_MODES: readonly AssetMode[] = ['easy', 'export']
+const ASSET_MODES: readonly AssetMode[] = ['easy', 'expert']
 
 /** Parse and check a body. Returns the reason it is unusable, or the body. */
 export function parsePreferencesBody(data: string): PreferencesRecordBody | string {

@@ -16,8 +16,8 @@ import { useWallet } from '@/store/wallet'
  *
  * Only the answers are collected here. Nothing in the app acts on them yet.
  *
- * Closing the dialog without answering is allowed and means "not now": it
- * stays closed for this visit and asks again on the next one.
+ * It cannot be skipped: there is no close button, and neither the scrim nor
+ * Escape closes it. Disconnecting the wallet is the only other way out.
  */
 export default function PreferencesOnboarding() {
   const address = useWallet((state) => (state.status === 'connected' ? state.address : undefined))
@@ -25,7 +25,6 @@ export default function PreferencesOnboarding() {
   const remember = usePreferencesStore((state) => state.remember)
 
   const [open, setOpen] = useState(false)
-  const [dismissed, setDismissed] = useState<string>()
   const [step, setStep] = useState<0 | 1>(0)
   const [gas, setGas] = useState<GasMode>()
   const [saving, setSaving] = useState(false)
@@ -36,7 +35,7 @@ export default function PreferencesOnboarding() {
     setStep(0)
     setGas(undefined)
     setError(undefined)
-    if (!address || dismissed === address) return
+    if (!address) return
 
     let current = true
     void syncPreferences(address).then((result) => {
@@ -45,14 +44,9 @@ export default function PreferencesOnboarding() {
     return () => {
       current = false
     }
-  }, [address, dismissed])
+  }, [address])
 
   if (!address || !walletId) return null
-
-  const close = () => {
-    setOpen(false)
-    setDismissed(address)
-  }
 
   const finish = async (assets: AssetMode) => {
     if (!gas) return
@@ -86,17 +80,12 @@ export default function PreferencesOnboarding() {
 
   if (step === 0) {
     return (
-      <Modal
-        open={open}
-        onClose={close}
-        title="How should fees be paid?"
-        description="Step 1 of 2. You can change this later."
-      >
+      <Modal open={open} title="How should fees be paid?" description="Step 1 of 2.">
         <div className="flex flex-col gap-2">
           <ChoiceCard
             icon={Fuel}
             title="Auto-refill gas credits"
-            description="Gas credits are topped up for you, so a transaction never stalls on fees."
+            description="The app keeps your gas credits topped up, never below 5, so a transaction never stalls on fees."
             recommended
             onClick={() => {
               setGas('autorefill')
@@ -120,10 +109,9 @@ export default function PreferencesOnboarding() {
   return (
     <Modal
       open={open}
-      onClose={close}
       onBack={saving ? undefined : () => setStep(0)}
       title="How do you want to use it?"
-      description="Step 2 of 2. You can change this later."
+      description="Step 2 of 2."
     >
       <div className="flex flex-col gap-2">
         <ChoiceCard
@@ -134,9 +122,9 @@ export default function PreferencesOnboarding() {
         />
         <ChoiceCard
           icon={PackageOpen}
-          title="Export mode"
-          description={`Also unwrap non-${DISPLAY_DENOM} assets, to take them out of Secret Network.`}
-          onClick={saving ? undefined : () => void finish('export')}
+          title="Expert mode"
+          description={`Lets you unwrap non-${DISPLAY_DENOM} assets to their public state.`}
+          onClick={saving ? undefined : () => void finish('expert')}
         />
       </div>
       {saving ? <p className="text-base text-text-muted">Confirm in your wallet — it is free.</p> : null}
