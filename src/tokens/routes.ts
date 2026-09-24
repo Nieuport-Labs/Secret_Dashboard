@@ -1,4 +1,6 @@
-import { DENOM } from '@/chains/secret4'
+// Relative, with the extension: `middleware.ts` imports this file too, and runs
+// as native ESM where the `@/` alias does not exist.
+import { DENOM } from '../chains/secret4.js'
 
 /**
  * Which tokens can travel between which chains, and under what denomination.

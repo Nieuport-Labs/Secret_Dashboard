@@ -153,6 +153,8 @@ export async function GET(request: Request) {
   let subtitle: string
   let avatar: { initial: string; hue: number } | undefined
   let dateRange: string | undefined
+  let titleSize = TITLE_FONT_SIZE
+  let payButton = false
 
   if (kind === 'proposal') {
     const id = url.searchParams.get('id') ?? ''
@@ -170,17 +172,31 @@ export async function GET(request: Request) {
     title = shorten(address, 14, 8)
     subtitle = 'Send SCRT or a private token on Secret Network'
     avatar = { initial: address.slice(7, 8).toUpperCase() || '?', hue: hueFor(address) }
+  } else if (kind === 'invoice') {
+    // `middleware.ts` has already checked the address, the asset and the
+    // amount before pointing a preview here; the limits below only keep a
+    // hand-typed URL to this endpoint from drawing outside the canvas.
+    const amount = truncate(url.searchParams.get('amount') ?? '', 16)
+    const symbol = truncate(url.searchParams.get('symbol') ?? '', 10)
+    title = `${amount} ${symbol}`
+    titleSize = 88
+    eyebrow = {
+      label: url.searchParams.get('private') === '1' ? 'Private invoice' : 'Invoice',
+      color: ACCENT
+    }
+    subtitle = `to ${shorten(url.searchParams.get('to') ?? '', 12, 6)}`
+    payButton = true
   } else {
     title = 'Secret Dashboard'
     subtitle = 'Wallet, bridge, staking and the Secret dApp ecosystem'
   }
 
   // Vertical anchors for the content block — fixed, not computed. There are
-  // only three layouts, each reads fine at these numbers on a 630px canvas,
+  // only four layouts, each reads fine at these numbers on a 630px canvas,
   // and there is no text-measurement engine here to lay it out properly.
   const CONTENT_TOP = 262
-  const TITLE_Y = 414
-  const SUBTITLE_Y = TITLE_Y + 50
+  const TITLE_Y = payButton ? 404 : 414
+  const SUBTITLE_Y = TITLE_Y + (payButton ? 58 : 50)
   const DATE_Y = SUBTITLE_Y + 44
 
   const eyebrowSvg = eyebrow
@@ -207,6 +223,13 @@ export async function GET(request: Request) {
 
   const dateSvg = dateRange
     ? `<text x="${PAD}" y="${DATE_Y}" font-family="Inter" font-weight="600" font-size="21" fill="${TEXT_FAINT}" letter-spacing="0.3">${escapeXml(dateRange.toUpperCase())}</text>`
+    : ''
+
+  // Drawn, not clickable — no link card has buttons. The whole card opens the
+  // pay page, and this says that is what it is for.
+  const payButtonSvg = payButton
+    ? `<rect x="${PAD}" y="${SUBTITLE_Y + 34}" width="220" height="72" rx="36" fill="${ACCENT}" />
+       <text x="${PAD + 110}" y="${SUBTITLE_Y + 81}" text-anchor="middle" font-family="Inter" font-weight="700" font-size="30" fill="${TEXT}">Pay</text>`
     : ''
 
   const badgeLabel = 'Secret Network'
@@ -248,9 +271,10 @@ export async function GET(request: Request) {
     ${eyebrowSvg}
     ${avatarSvg}
 
-    <text x="${PAD}" y="${TITLE_Y}" font-family="Inter" font-weight="700" font-size="${TITLE_FONT_SIZE}" fill="${TEXT}">${escapeXml(title)}</text>
+    <text x="${PAD}" y="${TITLE_Y}" font-family="Inter" font-weight="700" font-size="${titleSize}" fill="${TEXT}">${escapeXml(title)}</text>
     <text x="${PAD}" y="${SUBTITLE_Y}" font-family="Inter" font-weight="400" font-size="27" fill="${TEXT_MUTED}">${escapeXml(subtitle)}</text>
     ${dateSvg}
+    ${payButtonSvg}
   </svg>`
 
   const png = new Resvg(svg, {
