@@ -153,5 +153,54 @@ const items = (count: number) =>
   )
 }
 
+/* Hedged reads --------------------------------------------------------------- */
+
+{
+  const { hedged } = await import('../src/lib/concurrency.ts')
+  const after = <T>(ms: number, value: T) => new Promise<T>((resolve) => setTimeout(() => resolve(value), ms))
+  const good = (answer: string) => answer !== 'bad'
+  let seconds = 0
+  const second = (ms: number, value: string) => () => {
+    seconds += 1
+    return after(ms, value)
+  }
+
+  seconds = 0
+  check(
+    'a quick answer needs no second request',
+    (await hedged(() => after(5, 'a'), second(5, 'b'), 50, good)) === 'a' && seconds === 0
+  )
+
+  seconds = 0
+  check(
+    'a slow one is overtaken by the hedge',
+    (await hedged(() => after(300, 'a'), second(5, 'b'), 20, good)) === 'b' && seconds === 1
+  )
+
+  seconds = 0
+  check(
+    'a failed first answer hedges at once',
+    (await hedged(() => after(5, 'bad'), second(5, 'b'), 1_000, good)) === 'b'
+  )
+
+  check(
+    'when both fail, the first answer stands',
+    (await hedged(() => after(5, 'bad'), second(5, 'bad'), 10, good)) === 'bad'
+  )
+
+  const thrown = await hedged(() => Promise.reject(new Error('down')), second(5, 'b'), 1_000, good).catch(
+    () => 'rejected'
+  )
+  check('a first request that throws still gets its hedge', thrown === 'b')
+
+  const both = await hedged(
+    () => Promise.reject(new Error('down')),
+    () => Promise.reject(new Error('also down')),
+    10,
+    good
+  ).catch(() => 'rejected')
+  check('and two that throw reject rather than hang', both === 'rejected')
+}
+
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)

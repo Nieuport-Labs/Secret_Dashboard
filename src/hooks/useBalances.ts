@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { queryAllBalances } from '@/lib/bank'
-import { mapWithLimit } from '@/lib/concurrency'
+import { hedged, mapWithLimit } from '@/lib/concurrency'
 import { errorMessage } from '@/lib/errors'
 import { fiatValue } from '@/lib/format'
 import { fetchPrices } from '@/lib/prices'
@@ -67,11 +67,24 @@ function rememberBalances(address: string, rows: TokenBalance[], sweep: boolean)
 const SCRT_PRICE_ID = 'secret'
 
 /**
- * How many contract reads run at once. Deliberately modest: the chain has two
- * working public providers, and a sweep of the whole registry is 96 encrypted
- * queries.
+ * How many contract reads run at once, per LCD.
+ *
+ * Measured on secret-4 (2026-09): the public LCDs speak HTTP/2, so the
+ * browser's six-per-host limit does not apply and every read shares one
+ * connection. A read takes 230–475 ms, nearly all of it the node running the
+ * query in its enclave, so the sweep's length is how many rounds it takes —
+ * 67 tokens six at a time was eleven rounds. Sixteen is four or five, and
+ * still modest enough that a node does not start refusing.
  */
-const QUERY_CONCURRENCY = 6
+const QUERY_CONCURRENCY = 16
+
+/**
+ * A read still unanswered after this long is asked a second time, of another
+ * node where there is one, and whichever answer comes first is used. Most
+ * reads take a quarter of a second; a few took over two, and a sweep is only
+ * as fast as its slowest read. The second request is only ever sent for those.
+ */
+const HEDGE_AFTER_MS = 1_000
 
 /**
  * Balances are re-read on this interval regardless of push notifications.
@@ -303,10 +316,9 @@ export function useBalances(auth: Snip20Auth | undefined, owner?: string, contra
       setScrtPrice(prices.get(SCRT_PRICE_ID))
 
       /*
-       * Spread across every LCD that answers, a lane of six each: a public
-       * node queues encrypted queries past a handful, so two providers finish
-       * a sweep in about half the time one does. A read another node could not
-       * answer is asked once more of the main one before it counts as failed.
+       * Spread across every LCD that answers, a lane each: two providers finish
+       * a sweep in about half the time one does. A read that is slow or fails
+       * is asked again of the next node (`hedged`) before it counts as failed.
        */
       const pool = await queryClientPool()
       const lanes = pool.length > 0 ? pool : [client]
@@ -318,10 +330,17 @@ export function useBalances(auth: Snip20Auth | undefined, owner?: string, contra
               contracts.filter((_, index) => index % lanes.length === lane),
               QUERY_CONCURRENCY,
               async (contract) => {
-                let outcome = await queryBalance(laneClient, auth!, contract)
-                if (outcome.status === 'error' && laneClient !== client) {
-                  outcome = await queryBalance(client, auth!, contract)
-                }
+                // The backup asks the next node along, or the same one again
+                // when it is the only one — a slow answer is often one busy
+                // backend behind a load balancer, not the whole provider.
+                const backup = lanes[(lane + 1) % lanes.length]
+                const outcome = await hedged(
+                  () => queryBalance(laneClient, auth!, contract),
+                  () => queryBalance(backup, auth!, contract),
+                  HEDGE_AFTER_MS,
+                  // A permit problem is an answer, not a slow node.
+                  (answer) => answer.status !== 'error'
+                )
                 done += 1
                 if (!cancelled && sweep) setScanProgress([done, contracts.length])
                 return [contract, outcome] as const
