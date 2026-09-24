@@ -155,7 +155,7 @@ async function refillRider(
   gasLimit: number,
   msgTypes: string[]
 ): Promise<Rider | undefined> {
-  const refill = await refillFor(address)
+  const refill = await refillFor(address, { gasLimit, msgTypes })
   if (!refill || !(await samePayer(address, gasLimit, msgTypes, refill.gas))) return undefined
 
   return {

@@ -277,6 +277,9 @@ export async function quoteExactOut(
   return { route, amountIn: amount, amountOut, impactBps: impact(legs, amount, amountOut) }
 }
 
+/** The most a swap here can take: two hops, the longest route `findRoutes` builds. */
+export const MAX_SWAP_GAS = withGasBuffer(SWAP_GAS_BASE + SWAP_GAS_PER_HOP * 2)
+
 export function swapGas(route: Route): number {
   return withGasBuffer(SWAP_GAS_BASE + SWAP_GAS_PER_HOP * route.length)
 }

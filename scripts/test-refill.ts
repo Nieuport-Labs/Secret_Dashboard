@@ -8,7 +8,7 @@
 // zustand's persist reads `window.localStorage`; nothing here needs it to work.
 Object.defineProperty(globalThis, 'window', { configurable: true, value: globalThis })
 
-const { CREDIT_FLOOR, SCRT_RESERVE, splitRefill } = await import('../src/lib/autoRefill.ts')
+const { CREDIT_FLOOR, splitRefill } = await import('../src/lib/autoRefill.ts')
 const { canUnwrap } = await import('../src/store/settings.ts')
 const { SSCRT_ADDRESS } = await import('../src/tokens/registry.ts')
 const { findRoutes, swapIn, swapOut } = await import('../src/lib/shadeSwap.ts')
@@ -37,14 +37,21 @@ const SCRT = 1_000_000n
   check('some sSCRT, the rest from SCRT', is(split(2n, 100n), 2n * SCRT, 3n * SCRT, 0n))
   check('no sSCRT: all 5 from SCRT', is(split(0n, 100n), 0n, 5n * SCRT, 0n))
   check(
-    'SCRT keeps its reserve, and the rest is short',
-    is(split(1n, 2n), 1n * SCRT, 2n * SCRT - SCRT_RESERVE, 2n * SCRT + SCRT_RESERVE)
+    'SCRT is spent to the last unit, nothing held back',
+    is(split(1n, 2n), 1n * SCRT, 2n * SCRT, 2n * SCRT)
   )
   check(
     'nothing at all: all 5 short, which is the swap or the notice',
     is(split(0n, 0n), 0n, 0n, CREDIT_FLOOR)
   )
-  check('dust under the reserve is left alone', splitRefill(0n, SCRT_RESERVE - 1n).fromScrt === 0n)
+  check(
+    "except this transaction's own fee, when the wallet pays it",
+    splitRefill(0n, 1n * SCRT, 50_000n).fromScrt === 1n * SCRT - 50_000n
+  )
+  check(
+    'and a balance smaller than that fee spends nothing',
+    splitRefill(0n, 10_000n, 50_000n).fromScrt === 0n
+  )
 }
 
 const ATOM = 'secret19e75l25r6sa6nhdf4lggjmgpw0vmpfvsw5cnpe'

@@ -1,7 +1,9 @@
 import type { Msg } from 'secretjs'
 
-import { GAS } from '@/chains/secret4'
+import { GAS, GAS_PRICE_USCRT } from '@/chains/secret4'
 import { queryNativeBalance } from '@/lib/bank'
+import { estimateFee } from '@/lib/feegrant-sdk'
+import { MSG_EXECUTE_CONTRACT } from '@/lib/msgTypes'
 
 import {
   MAX_IMPACT_BPS,
@@ -12,7 +14,15 @@ import {
   swappableTokens
 } from '@/lib/gasPurchase'
 import { loadPermit, type Permit } from '@/lib/permit'
-import { findRoutes, listPairs, quoteExactIn, swapGas, swapMessage, type Quote } from '@/lib/shadeSwap'
+import {
+  findRoutes,
+  listPairs,
+  MAX_SWAP_GAS,
+  quoteExactIn,
+  swapGas,
+  swapMessage,
+  type Quote
+} from '@/lib/shadeSwap'
 import { permitAuth, queryBalance, queryBalances } from '@/lib/snip20'
 import { useFeePayer, vaultCredit } from '@/store/feePayer'
 import { useNotifications } from '@/store/notifications'
@@ -31,7 +41,7 @@ import { SSCRT_ADDRESS } from '@/tokens/registry'
  * It is paid for from, in order (`splitRefill`):
  *
  * 1. sSCRT, unwrapped in the same transaction;
- * 2. public SCRT, less a small reserve for fees;
+ * 2. public SCRT — all of it, since the credits are what pays fees from now on;
  * 3. whatever is still missing, by swapping another token for sSCRT on
  *    ShadeSwap first (`planSwap` picks which).
  *
@@ -78,23 +88,21 @@ export interface Refill {
 }
 
 /**
- * Public SCRT a refill never spends. Credits pay the fees once they exist, but
- * this transaction's own fee may still come out of the balance — and running
- * the wallet to zero is how the next thing someone tries fails for a reason
- * that looks unrelated.
- */
-export const SCRT_RESERVE = 200_000n
-
-/**
- * Where a 5 SCRT refill comes from: sSCRT first, then public SCRT above the
- * reserve, and `short` is what neither covers — the part a swap can buy.
+ * Where a 5 SCRT refill comes from: sSCRT first, then public SCRT, and `short`
+ * is what neither covers — the part a swap can buy.
+ *
+ * No SCRT is held back for later fees; that is what the credits are for. The
+ * one exception is `feeFromBalance`: when the credits are too low to pay even
+ * for this transaction, its fee comes out of the SCRT balance before any
+ * message runs, and spending that too would sink the transaction.
  */
 export function splitRefill(
   sscrt: bigint,
-  scrt: bigint
+  scrt: bigint,
+  feeFromBalance = 0n
 ): { fromSscrt: bigint; fromScrt: bigint; short: bigint } {
   const fromSscrt = sscrt < CREDIT_FLOOR ? sscrt : CREDIT_FLOOR
-  const spare = scrt > SCRT_RESERVE ? scrt - SCRT_RESERVE : 0n
+  const spare = scrt > feeFromBalance ? scrt - feeFromBalance : 0n
   const left = CREDIT_FLOOR - fromSscrt
   const fromScrt = spare < left ? spare : left
   return { fromSscrt, fromScrt, short: left - fromScrt }
@@ -196,7 +204,10 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
  * due or it cannot be worked out. Anything it cannot read — the grant list, the
  * sSCRT balance — means no refill rather than a guess.
  */
-export async function refillFor(address: string): Promise<Refill | undefined> {
+export async function refillFor(
+  address: string,
+  bundle: { gasLimit: number; msgTypes: string[] }
+): Promise<Refill | undefined> {
   if (useSettings.getState().gasMode !== 'autorefill') return undefined
   if (Date.now() < pausedUntil) return undefined
 
@@ -221,7 +232,12 @@ export async function refillFor(address: string): Promise<Refill | undefined> {
   }
   const scrt = BigInt(await queryNativeBalance(queryClient, address))
 
-  const { fromSscrt, fromScrt, short } = splitRefill(sscrt, scrt)
+  // Who will pay this transaction's fee, judged on the largest it can get.
+  const largest = bundle.gasLimit + REFILL_GAS + MAX_SWAP_GAS
+  const walletPays = !useFeePayer.getState().granterFor(largest, [...bundle.msgTypes, MSG_EXECUTE_CONTRACT])
+  const feeFromBalance = walletPays ? BigInt(estimateFee(largest, GAS_PRICE_USCRT)) : 0n
+
+  const { fromSscrt, fromScrt, short } = splitRefill(sscrt, scrt, feeFromBalance)
 
   // Still short: buy the rest by swapping something else, in this same
   // transaction. The unwrap then covers the sSCRT held plus what the swap is
