@@ -2,8 +2,8 @@ import type { Msg, SecretNetworkClient } from 'secretjs'
 
 import { DENOM, GAS, GAS_VAULT_ADDRESS } from '@/chains/secret4'
 import { codeHashFor } from '@/lib/codeHash'
-import { batchQuery } from '@/lib/batchQuery'
-import { covers, withPermit, type Permit } from '@/lib/permit'
+import { mapWithLimit } from '@/lib/concurrency'
+import { covers, type Permit } from '@/lib/permit'
 import {
   findRoutes,
   listPairs,
@@ -14,7 +14,8 @@ import {
   type Reserves,
   type Route
 } from '@/lib/shadeSwap'
-import { redeemMsg } from '@/lib/snip20'
+import { permitAuth, queryBalance, redeemMsg } from '@/lib/snip20'
+import { loadWatchlist } from '@/lib/watchlist'
 import { allTokenAddresses, SSCRT_ADDRESS, STKD_SCRT_ADDRESS } from '@/tokens/registry'
 
 /**
@@ -147,52 +148,32 @@ export async function quoteInto(
 }
 
 /**
- * Private balances of several tokens, in one request through the batch
- * router, by the permit. Code hashes come from the ShadeSwap pair list where
- * it has them — the factory reads them off the chain — and are looked up
- * otherwise. A token whose balance could not be read is left out, never
- * reported as zero.
+ * Private balances of the tokens among `tokens` this account is known to
+ * hold — the wallet's watchlist, filled by its balance sweeps — plus
+ * `always`, which is read regardless. Not the whole list: every balance is an
+ * encrypted query of its own (a permit is too large to batch, see
+ * `lib/batchQuery.ts`), and reading dozens of tokens someone never held is
+ * most of the wait for nothing. A token whose balance could not be read is
+ * left out, never reported as zero.
  */
 export async function balancesOf(
   client: SecretNetworkClient,
   permit: Permit,
-  tokens: string[]
+  owner: string,
+  tokens: string[],
+  always: string[] = []
 ): Promise<Map<string, bigint>> {
-  const known = new Map<string, string>()
-  for (const pair of await listPairs(client).catch(() => [])) {
-    known.set(pair.token0.address, pair.token0.codeHash)
-    known.set(pair.token1.address, pair.token1.codeHash)
-  }
-  const covered = tokens.filter((token) => covers(permit, token))
-  const hashes = await Promise.all(
-    covered.map(
-      async (token) => known.get(token) ?? (await codeHashFor(client, token).catch(() => undefined))
-    )
+  const watched = new Set(loadWatchlist(owner))
+  const asked = [...new Set([...always, ...tokens.filter((token) => watched.has(token))])].filter((token) =>
+    covers(permit, token)
   )
-
-  const answers = await batchQuery(
-    client,
-    covered.flatMap((token, index) =>
-      hashes[index]
-        ? [
-            {
-              id: token,
-              contract: { address: token, codeHash: hashes[index]! },
-              query: withPermit(permit, { balance: {} })
-            }
-          ]
-        : []
-    )
-  )
+  const outcomes = await mapWithLimit(asked, 6, (token) => queryBalance(client, permitAuth(permit), token))
 
   const balances = new Map<string, bigint>()
-  for (const token of covered) {
-    const answer = answers.get(token)
-    const amount = answer?.ok
-      ? (answer.value as { balance?: { amount?: string } })?.balance?.amount
-      : undefined
-    if (typeof amount === 'string') balances.set(token, BigInt(amount))
-  }
+  asked.forEach((token, index) => {
+    const outcome = outcomes[index]
+    if (outcome.status === 'ok') balances.set(token, BigInt(outcome.amount))
+  })
   return balances
 }
 

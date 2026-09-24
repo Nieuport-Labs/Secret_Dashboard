@@ -91,7 +91,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
 
   // Which private tokens could pay, which needs the permit to read them at all.
   useEffect(() => {
-    if (!queryClient || !permit) return
+    if (!queryClient || !permit || !address) return
     let cancelled = false
     setListing(true)
     void (async () => {
@@ -99,7 +99,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
       if (cancelled) return
       setSwappable(tokens)
       // Every balance in one request through the batch router.
-      const balances = await balancesOf(queryClient, permit, [SSCRT_ADDRESS, ...tokens])
+      const balances = await balancesOf(queryClient, permit, address, tokens, [SSCRT_ADDRESS])
       if (!cancelled) setHeld(new Map([...balances].filter(([, amount]) => amount > 0n)))
     })()
       .catch(() => undefined)
@@ -109,7 +109,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
     return () => {
       cancelled = true
     }
-  }, [queryClient, permit])
+  }, [queryClient, permit, address])
 
   // SCRT itself, public, and its price — no private token is read here.
   const balances = useBalances(undefined)

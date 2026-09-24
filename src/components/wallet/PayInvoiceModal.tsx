@@ -101,7 +101,7 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
   const direct = useAssetBalance(asset)
 
   useEffect(() => {
-    if (!queryClient || !permit || !token || !otherWays) return
+    if (!queryClient || !permit || !address || !token || !otherWays) return
     let cancelled = false
     setListing(true)
     void (async () => {
@@ -109,7 +109,7 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
       if (cancelled) return
       setSwappable(tokens)
       // Every balance in one request through the batch router.
-      const balances = await balancesOf(queryClient, permit, [token, ...tokens])
+      const balances = await balancesOf(queryClient, permit, address, tokens, [token])
       if (!cancelled) setHeld(new Map([...balances].filter(([, amount]) => amount > 0n)))
     })()
       .catch(() => undefined)
@@ -119,7 +119,7 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
     return () => {
       cancelled = true
     }
-  }, [queryClient, permit, token, otherWays])
+  }, [queryClient, permit, address, token, otherWays])
 
   // Until both the candidates and their balances are in, the picker is not
   // the whole list — say so rather than show a short one as if it were.

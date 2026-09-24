@@ -1,6 +1,7 @@
 import type { SecretNetworkClient } from 'secretjs'
 
 import { codeHashFor } from '@/lib/codeHash'
+import { mapWithLimit } from '@/lib/concurrency'
 
 /**
  * Many contract queries in one request, through Shade's Batch Query Router.
@@ -11,9 +12,16 @@ import { codeHashFor } from '@/lib/codeHash'
  * that runs a list of queries against other contracts and returns every answer
  * in one reply, so twenty become one round trip.
  *
- * Shade's own client uses it the same way, for pair data and for private
- * SNIP-20 queries (shade.js `batchQuery$`). A query carrying a permit works
- * through it too: the token checks the permit's signature, not who asked.
+ * Shade's own client uses it the same way, for pair data (shade.js
+ * `batchQuery$`).
+ *
+ * Only for small queries. secretjs sends a contract query as a GET with the
+ * encrypted query in the URL, and the batch is one query: its URL holds every
+ * query in it, base64'd twice over and encrypted. A permit names every token
+ * it covers, which makes one permit query several kB on its own — twenty of
+ * them made a URL public nodes refuse outright, with nothing but "Failed to
+ * fetch" to show for it. So batches are sized by how long their URL will be,
+ * not by count, and a query too big to share a URL goes on its own.
  *
  * It is an optimisation only. If the router cannot be reached or refuses the
  * batch, every query is sent on its own instead, as before, so nothing depends
@@ -33,6 +41,14 @@ const ROUTER = 'secret15mkmad8ac036v4nrpcc7nk8wyr578egt077syt'
 const BATCH_SIZE = 40
 /** Below this, a refused batch is not split further but sent query by query. */
 const SMALLEST_SPLIT = 4
+/**
+ * Characters of encoded queries per batch. Encryption and a second base64
+ * roughly double it on the way into the URL, which then stays well under the
+ * 8 kB many servers stop at.
+ */
+const URL_BUDGET = 3_000
+/** Queries sent on their own run a few at a time, as the rest of the app's reads do. */
+const SINGLE_CONCURRENCY = 6
 
 export interface BatchItem {
   id: string
@@ -130,8 +146,27 @@ async function run(
       routerDown = true
     }
   }
-  const single = await Promise.all(chunk.map((item) => one(client, item)))
+  const single = await mapWithLimit(chunk, SINGLE_CONCURRENCY, (item) => one(client, item))
   chunk.forEach((item, index) => results.set(item.id, single[index]))
+}
+
+/** Chunks no longer than `size` queries or `URL_BUDGET` characters; an oversized query stands alone. */
+function chunksOf(items: BatchItem[], size: number): BatchItem[][] {
+  const chunks: BatchItem[][] = []
+  let current: BatchItem[] = []
+  let length = 0
+  for (const item of items) {
+    const itemLength = encode(item.query).length + encode(item.id).length + 200
+    if (current.length > 0 && (current.length >= size || length + itemLength > URL_BUDGET)) {
+      chunks.push(current)
+      current = []
+      length = 0
+    }
+    current.push(item)
+    length += itemLength
+  }
+  if (current.length > 0) chunks.push(current)
+  return chunks
 }
 
 /**
@@ -148,16 +183,12 @@ export async function batchQuery(
   const results = new Map<string, BatchResult>()
   if (items.length === 0) return results
 
-  const chunks: BatchItem[][] = []
-  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size))
-
   let done = 0
-  await Promise.all(
-    chunks.map(async (chunk) => {
-      await run(client, chunk, results)
-      done += chunk.length
-      onChunk?.(done, items.length)
-    })
-  )
+  // A few requests at a time, whatever they carry.
+  await mapWithLimit(chunksOf(items, size), 3, async (chunk) => {
+    await run(client, chunk, results)
+    done += chunk.length
+    onChunk?.(done, items.length)
+  })
   return results
 }

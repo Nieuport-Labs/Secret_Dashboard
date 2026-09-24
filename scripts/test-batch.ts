@@ -91,7 +91,11 @@ const items = (count: number) =>
   const { batchQuery } = await import(`../src/lib/batchQuery.ts?${Date.now()}`)
   const fake: Fake = { routerLimit: 100, routerCalls: [], singleCalls: 0 }
   const results = await batchQuery(client(fake), items(30), { size: 20 })
-  check('thirty queries are two requests', fake.routerCalls.length === 2 && fake.singleCalls === 0, fake)
+  check(
+    'thirty queries are a few requests, not thirty',
+    fake.routerCalls.length <= 3 && fake.singleCalls === 0,
+    fake
+  )
   check('answers come back by id', doubled(results.get('q7')) === 14)
   check('a failed query fails alone', results.get('q3')?.ok === false && results.get('q4')?.ok === true)
 }
@@ -102,7 +106,7 @@ const items = (count: number) =>
   const results = await batchQuery(client(fake), items(40), { size: 40 })
   check(
     'a refused batch is split, not given up on',
-    fake.singleCalls === 0 && fake.routerCalls.includes(10),
+    fake.routerCalls.some((n) => n > 10) && fake.routerCalls.some((n) => n > 1 && n <= 10),
     fake
   )
   check(
@@ -117,6 +121,36 @@ const items = (count: number) =>
   const results = await batchQuery(client(fake), items(12), { size: 6 })
   check('with no router, every query is sent on its own', fake.singleCalls >= 12, fake)
   check('and answered', doubled(results.get('q11')) === 22)
+}
+
+{
+  const { batchQuery } = await import(`../src/lib/batchQuery.ts?${Date.now() + 3}`)
+  const fake: Fake = { routerLimit: 100, routerCalls: [], singleCalls: 0 }
+  // A permit names every token it covers: several kB on its own.
+  const permit = 'x'.repeat(4_000)
+  const big = Array.from({ length: 5 }, (_, n) => ({
+    id: `p${n}`,
+    contract: { address: `secret1p${n}`, codeHash: 'h' },
+    query: { n, permit }
+  }))
+  const results = await batchQuery(client(fake), big)
+  check(
+    'a query too long to share a URL is never batched',
+    fake.routerCalls.length === 0 && fake.singleCalls === 5,
+    fake
+  )
+  check('and still answered', doubled(results.get('p4')) === 8)
+}
+
+{
+  const { batchQuery } = await import(`../src/lib/batchQuery.ts?${Date.now() + 4}`)
+  const fake: Fake = { routerLimit: 100, routerCalls: [], singleCalls: 0 }
+  await batchQuery(client(fake), items(200))
+  check(
+    'small queries share requests, a URL-sized handful each',
+    fake.routerCalls.length > 1 && fake.routerCalls.every((n) => n <= 40),
+    fake.routerCalls
+  )
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

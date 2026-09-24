@@ -157,6 +157,7 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
     balancesOf(
       queryClient,
       permit,
+      address,
       routable.map((candidate) => candidate.token)
     ),
     reservesFor(queryClient, pairsOf(routable.flatMap((candidate) => candidate.routes)))

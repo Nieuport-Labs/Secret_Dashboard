@@ -1,7 +1,6 @@
 import type { SecretNetworkClient } from 'secretjs'
 
-import { batchQuery } from '@/lib/batchQuery'
-import { codeHashFor, codeHashesFor } from '@/lib/codeHash'
+import { codeHashFor } from '@/lib/codeHash'
 import { errorMessage } from '@/lib/errors'
 import { covers, withPermit, type Permit } from '@/lib/permit'
 
@@ -150,57 +149,6 @@ export async function queryBalances(
     contractAddresses.map(async (address) => [address, await queryBalance(client, auth, address)] as const)
   )
   return new Map(entries)
-}
-
-/**
- * `queryBalances` for many tokens at once, through the batch router
- * (`lib/batchQuery.ts`): the code hashes in parallel — plain reads, cheap —
- * then the balances a few dozen per request instead of one each. Each token
- * still gets its own outcome, exactly as `queryBalance` would give it.
- *
- * Measured on a registry sweep, one request per token was the slow part: 67
- * encrypted queries against a public node took about 25 seconds.
- */
-export async function queryBalancesBatched(
-  client: SecretNetworkClient,
-  auth: Snip20Auth,
-  contractAddresses: string[],
-  onProgress?: (done: number, total: number) => void
-): Promise<Map<string, BalanceOutcome>> {
-  const outcomes = new Map<string, BalanceOutcome>()
-  const asked = contractAddresses.filter((address) => {
-    if (auth.kind === 'permit' && !covers(auth.permit, address)) {
-      outcomes.set(address, { status: 'not-covered' })
-      return false
-    }
-    return true
-  })
-
-  const hashes = await codeHashesFor(client, asked)
-  const query = balanceQuery(auth)
-  const answers = await batchQuery(
-    client,
-    asked
-      .filter((address) => hashes.has(address))
-      .map((address) => ({ id: address, contract: { address, codeHash: hashes.get(address)! }, query })),
-    { size: 20, onChunk: onProgress }
-  )
-
-  for (const address of asked) {
-    const answer = answers.get(address)
-    if (!hashes.has(address)) {
-      outcomes.set(address, { status: 'error', message: 'Could not read the contract’s code hash.' })
-    } else if (!answer) {
-      outcomes.set(address, { status: 'error', message: 'No answer.' })
-    } else if (answer.ok) {
-      outcomes.set(address, balanceOutcome(answer.value as BalanceReply))
-    } else if (/unauthorized|permit|signature/i.test(answer.error)) {
-      outcomes.set(address, { status: 'unauthorized', message: answer.error })
-    } else {
-      outcomes.set(address, { status: 'error', message: answer.error })
-    }
-  }
-  return new Map(contractAddresses.map((address) => [address, outcomes.get(address)!]))
 }
 
 export interface Transfer {
