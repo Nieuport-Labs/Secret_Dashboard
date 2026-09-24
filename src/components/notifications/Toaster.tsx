@@ -28,7 +28,7 @@ export default function Toaster() {
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed inset-x-4 bottom-24 z-40 flex flex-col items-end gap-2.5 lg:inset-x-auto lg:bottom-6 lg:right-6"
+      className="pointer-events-none fixed inset-x-4 bottom-24 z-40 flex flex-col items-end gap-2.5 lg:inset-x-auto lg:bottom-6 lg:right-6 lg:w-[360px]"
     >
       {transactions.map((tx) => (
         <TxCard key={tx.id} tx={tx} onDismiss={() => dismissTx(tx.id)} />
@@ -44,7 +44,7 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
   const navigate = useNavigate()
 
   return (
-    <div className="glass-panel pointer-events-auto w-full max-w-[340px] rounded-card p-4 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
+    <div className="glass-panel pointer-events-auto w-full rounded-card p-4 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
       {toast.kind === 'error' ? (
         <div className="flex items-start gap-2.5">
           <AlertCircle size={16} aria-hidden className="mt-px shrink-0 text-negative" />
@@ -115,7 +115,7 @@ function TxCard({ tx, onDismiss }: { tx: TrackedTx; onDismiss: () => void }) {
   const settled = tx.status === 'done'
 
   return (
-    <div className="glass-panel pointer-events-auto w-full max-w-[360px] rounded-card p-4 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
+    <div className="glass-panel pointer-events-auto w-full rounded-card p-4 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
       <div className="flex items-start gap-2.5">
         {failed ? (
           <AlertCircle size={16} aria-hidden className="mt-0.5 shrink-0 text-negative" />
