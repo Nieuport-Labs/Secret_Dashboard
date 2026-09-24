@@ -1,15 +1,18 @@
-import { CheckCircle2, ExternalLink, Eye, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ExternalLink, Eye, Loader2, ShieldCheck } from 'lucide-react'
 import { useEffect, useId, useMemo, useState } from 'react'
 
-import AmountField from '@/components/ui/AmountField'
+import AmountHero from '@/components/ui/AmountHero'
 import Button from '@/components/ui/Button'
-import Drawer from '@/components/ui/Drawer'
+import Modal from '@/components/ui/Modal'
+import { PickerDialog } from '@/components/ui/Picker'
+import ShareSlider from '@/components/ui/ShareSlider'
 import { DECIMALS, DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import { isValidBech32 } from '@/lib/bech32'
 import { cn } from '@/lib/cn'
-import { toBaseUnits } from '@/lib/format'
+import { formatAmount, fromBaseUnits, toBaseUnits } from '@/lib/format'
 import type { Balances } from '@/hooks/useBalances'
 import { useWalletActions } from '@/hooks/useWalletActions'
+import { useSettings } from '@/store/settings'
 import { privateSymbol, tokenImageUrl } from '@/tokens/registry'
 
 interface Props {
@@ -48,10 +51,32 @@ interface Sendable {
   private: boolean
   /** Bank denomination, on the public ones. */
   denom?: string
+  /** Price of one whole unit in the chosen currency; absent when unpriced. */
+  unitPrice?: number
 }
 
 /**
- * Sending, from the panel rather than a page of its own.
+ * One unit's price, recovered from what the balance is worth.
+ *
+ * `useBalances` prices holdings, not units, and dividing back out is cheaper
+ * than a second price query that could disagree with the figure on the wallet
+ * screen. A zero or unpriced balance gives no price, and the fiat view is then
+ * simply not offered.
+ */
+function unitPriceOf(amount: string, decimals: number, fiat: number | undefined): number | undefined {
+  if (fiat === undefined) return undefined
+  const units = Number(fromBaseUnits(amount, decimals))
+  return units > 0 ? fiat / units : undefined
+}
+
+/**
+ * Sending, from a dialog rather than a page of its own.
+ *
+ * Laid out the way Uniswap's send is, because it puts the one number that
+ * matters first and largest: the amount, centred, with the asset under it and
+ * the recipient in a card of its own below. Separate cards rather than one
+ * column of labelled fields, so the eye lands on the figure before it reads
+ * anything else.
  *
  * Public and private sit in one list because from here they are the same task,
  * but they are not the same transaction and the difference is the one thing
@@ -74,6 +99,8 @@ export default function SendPanel({
   const [assetId, setAssetId] = useState(NATIVE_ID)
   const [recipient, setRecipient] = useState(prefilled ?? '')
   const [amount, setAmount] = useState('')
+  const [picking, setPicking] = useState(false)
+  const currency = useSettings((state) => state.currency)
 
   // A panel that reopens showing the last transfer's receipt is a panel that
   // looks like it is about to send it again.
@@ -108,7 +135,8 @@ export default function SendPanel({
         amount: held.amount,
         decimals: native ? DECIMALS : held.token!.decimals,
         private: false,
-        denom: held.denom
+        denom: held.denom,
+        unitPrice: unitPriceOf(held.amount, native ? DECIMALS : held.token!.decimals, held.fiat)
       })
     }
 
@@ -121,18 +149,22 @@ export default function SendPanel({
         image: tokenImageUrl(row.token),
         amount: row.outcome.amount,
         decimals: row.token.decimals,
-        private: true
+        private: true,
+        unitPrice: unitPriceOf(row.outcome.amount, row.token.decimals, row.fiat)
       })
     }
 
     return rows
   }, [balances.publicBalances, balances.tokens])
 
+  const loadingTokens = balances.loading || balances.scanning
+
   const options = sendable.map((row) => ({
     id: row.id,
     label: row.symbol,
     detail: row.detail,
-    image: row.image
+    image: row.image,
+    meta: formatAmount(row.amount, { decimals: row.decimals })
   }))
 
   const selected = sendable.find((row) => row.id === assetId) ?? sendable[0]
@@ -141,7 +173,7 @@ export default function SendPanel({
   const symbol = selected?.symbol ?? DISPLAY_DENOM
   const image = selected?.image
   const available = selected?.amount
-
+  const unitPrice = selected?.unitPrice
   let base = '0'
   let amountError: string | undefined
   try {
@@ -170,7 +202,7 @@ export default function SendPanel({
   }
 
   return (
-    <Drawer open={open} onClose={onClose} title="Send">
+    <Modal open={open} onClose={onClose} title="Send">
       {actions.state.kind === 'done' ? (
         <Receipt
           hash={actions.state.hash}
@@ -184,55 +216,119 @@ export default function SendPanel({
         />
       ) : (
         <>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-label text-text-muted">To</span>
-            <input
-              value={recipient}
-              onChange={(event) => setRecipient(event.target.value)}
-              placeholder="secret1…"
-              spellCheck={false}
-              autoComplete="off"
-              /*
-                `readOnly` rather than `disabled`: a disabled field is dropped
-                from the tab order and read out as unavailable, when what is
-                true here is that the address is settled — it should still be
-                reachable, selectable and copyable.
-              */
-              readOnly={recipientLocked}
-              aria-describedby={recipientLocked ? lockedNoteId : undefined}
-              className={cn(
-                'break-address rounded-control border border-border px-3 py-2.5 font-mono text-sm outline-none placeholder:text-text-faint',
-                recipientLocked ? 'cursor-default bg-transparent text-text-muted' : 'bg-surface'
-              )}
+          {/* The amount, first and largest. */}
+          <div className="flex flex-col gap-4 rounded-card border border-border bg-surface p-4">
+            <span className="text-label text-text-muted">You&rsquo;re sending</span>
+            <AmountHero
+              amount={amount}
+              onAmount={setAmount}
+              symbol={symbol}
+              decimals={decimals}
+              unitPrice={unitPrice}
+              currency={currency}
             />
-            {recipientLocked ? (
-              <span id={lockedNoteId} className="text-label text-text-faint">
-                Set by the profile you opened this from.
-              </span>
-            ) : null}
-            {recipientError ? (
-              <span className="text-label text-negative" role="alert">
-                {recipientError}
-              </span>
-            ) : null}
-          </label>
+            <ShareSlider
+              amount={amount}
+              onAmount={setAmount}
+              available={available}
+              decimals={decimals}
+              invalid={Boolean(amountError)}
+            />
+          </div>
 
-          <AmountField
-            amount={amount}
-            onAmount={setAmount}
-            symbol={symbol}
-            image={image}
-            available={available}
-            decimals={decimals}
-            error={amountError}
+          {/*
+            The asset, as a row that is itself the picker. While the balances
+            are still being read it says so: on a tip from a profile the form
+            opens the moment the wallet connects, before anything is known, and
+            an empty row with no explanation reads as "you hold nothing".
+          */}
+          <button
+            type="button"
+            onClick={() => setPicking(true)}
+            disabled={options.length === 0 && !loadingTokens}
+            aria-haspopup="dialog"
+            className="state-layer -mt-2 flex items-center gap-3 rounded-card border border-border bg-surface px-4 py-3 text-left disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {image ? <img src={image} alt="" className="size-8 shrink-0 rounded-pill" /> : null}
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-base font-medium">{symbol}</span>
+              <span className="truncate text-label text-text-faint">
+                {loadingTokens && available === undefined
+                  ? 'Loading your tokens…'
+                  : available !== undefined
+                    ? `Balance ${formatAmount(available, { decimals })}`
+                    : (selected?.detail ?? 'Choose an asset')}
+              </span>
+            </span>
+            {loadingTokens ? (
+              <Loader2
+                size={16}
+                aria-label="Loading your tokens"
+                className="shrink-0 animate-spin text-text-muted"
+              />
+            ) : (
+              <ChevronDown size={16} aria-hidden className="shrink-0 text-text-muted" />
+            )}
+          </button>
+
+          <PickerDialog
+            open={picking}
+            onClose={() => setPicking(false)}
+            label="Asset"
             options={options}
-            optionsLabel="Asset"
+            loading={loadingTokens ? 'Loading your tokens…' : undefined}
             value={assetId}
-            onSelect={(id) => {
+            onChange={(id) => {
               setAssetId(id)
               setAmount('')
             }}
           />
+
+          {amountError ? (
+            <span className="-mt-2 text-base text-negative" role="alert">
+              {amountError}
+            </span>
+          ) : null}
+
+          {/*
+            A locked recipient — a tip from someone's profile — is not shown:
+            the page the dialog opened over already names who is being paid,
+            and repeating the address here is only more to read.
+          */}
+          {recipientLocked ? null : (
+            <label className="-mt-2 flex flex-col gap-1.5 rounded-card border border-border bg-surface px-4 py-3">
+              <span className="text-label text-text-muted">To</span>
+              <input
+                value={recipient}
+                onChange={(event) => setRecipient(event.target.value)}
+                placeholder="Wallet address (secret1…)"
+                spellCheck={false}
+                autoComplete="off"
+                /*
+                  `readOnly` rather than `disabled`: a disabled field is dropped
+                  from the tab order and read out as unavailable, when what is
+                  true here is that the address is settled — it should still be
+                  reachable, selectable and copyable.
+                */
+                readOnly={recipientLocked}
+                aria-describedby={recipientLocked ? lockedNoteId : undefined}
+                className={cn(
+                  'break-address bg-transparent font-mono text-sm outline-none placeholder:font-sans placeholder:text-text-faint',
+                  recipientLocked && 'cursor-default text-text-muted'
+                )}
+              />
+              {recipientLocked ? (
+                <span id={lockedNoteId} className="text-label text-text-faint">
+                  Set by the profile you opened this from.
+                </span>
+              ) : null}
+              {recipientError ? (
+                <span className="text-label text-negative" role="alert">
+                  {recipientError}
+                </span>
+              ) : null}
+            </label>
+          )}
 
           {/*
             Which of the two transactions this is. Someone reaching for a
@@ -269,11 +365,11 @@ export default function SendPanel({
             disabled={!ready}
             onClick={submit}
           >
-            Send {symbol}
+            {!trimmed ? 'Enter a recipient' : !amount ? 'Enter an amount' : `Send ${symbol}`}
           </Button>
         </>
       )}
-    </Drawer>
+    </Modal>
   )
 }
 

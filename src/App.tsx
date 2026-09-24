@@ -28,6 +28,7 @@ const Network = lazy(() => import('@/pages/network/Network'))
 const Powertools = lazy(() => import('@/pages/powertools/Powertools'))
 const Onboarding = lazy(() => import('@/pages/onboarding/Onboarding'))
 const Profile = lazy(() => import('@/pages/profile/Profile'))
+const Pay = lazy(() => import('@/pages/pay/Pay'))
 const Validator = lazy(() => import('@/pages/validator/Validator'))
 const ValidatorStats = lazy(() => import('@/pages/validator/ValidatorStats'))
 const NewMultisig = lazy(() => import('@/pages/multisig/NewMultisig'))
@@ -101,6 +102,17 @@ export default function App() {
         element={
           <Suspense fallback={null}>
             <Profile />
+          </Suspense>
+        }
+      />
+
+      {/* An invoice — see `lib/invoice.ts`. Outside the shell like a profile,
+          and for the same visitor. */}
+      <Route
+        path="/pay/:address"
+        element={
+          <Suspense fallback={null}>
+            <Pay />
           </Suspense>
         }
       />

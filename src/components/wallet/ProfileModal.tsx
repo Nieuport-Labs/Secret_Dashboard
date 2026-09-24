@@ -1,15 +1,13 @@
-import { Check, Clock, Copy, ExternalLink, Globe, Loader2, Trash2 } from 'lucide-react'
+import { Check, ChevronDown, Clock, Copy, ExternalLink, Loader2, Trash2 } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 import { useState, type ReactNode } from 'react'
 
-import Avatar from '@/components/wallet/Avatar'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { explorerTxUrl } from '@/chains/secret4'
 import { cn } from '@/lib/cn'
-import { errorMessage } from '@/lib/errors'
 import { shortenAddress } from '@/lib/format'
 import { LIMITS, LINK_KINDS } from '@/lib/profile'
-import { clearProfileImage, saveProfileImage, toAvatarDataUrl } from '@/lib/profileImage'
 import { profileUrl } from '@/lib/profileLink'
 import { useOwnProfile } from '@/hooks/useOwnProfile'
 
@@ -29,49 +27,22 @@ interface Props {
  *
  * A dialog rather than a page because it is reached from the account chip in
  * the header, which is on every screen — sending someone to a settings route to
- * change their picture and then leaving them there is how an edit becomes a
+ * change their name and then leaving them there is how an edit becomes a
  * detour. It is also where the shareable link now lives, having been moved out
  * of Receive: the link is about who you are, Receive is about being paid, and
  * having the link in both places meant neither was where people looked.
  *
- * Every field here is public, and the dialog says so rather than assuming it is
- * obvious. On a chain whose entire premise is that balances are nobody's
- * business, a form that quietly publishes a name would be a betrayal of the
- * only expectation the user arrived with.
+ * Every field here is public, and each one carries a badge saying so rather
+ * than assuming it is obvious. On a chain whose entire premise is that balances
+ * are nobody's business, a form that quietly publishes a name would be a
+ * betrayal of the only expectation the user arrived with.
  */
 export default function ProfileModal({ open, onClose, address }: Props) {
   const { draft, update, revert, save, clear, writeNow, loading, state, dirty, published, pending, onchain } =
     useOwnProfile()
 
-  const [imageError, setImageError] = useState<string | undefined>()
-  const [encoding, setEncoding] = useState(false)
   const [copied, setCopied] = useState(false)
-
-  /*
-   * One picture, two copies, one action. The 64px one is what goes on chain and
-   * what strangers see; the sharp 256px one stays in IndexedDB for this
-   * browser's own header. Writing both here is what stops the two drifting into
-   * the state where the owner sees one avatar and everybody else sees another.
-   */
-  const pick = async (file: File) => {
-    setImageError(undefined)
-    setEncoding(true)
-    try {
-      const encoded = await toAvatarDataUrl(file)
-      await saveProfileImage(address, file)
-      update({ avatar: encoded })
-    } catch (caught) {
-      setImageError(errorMessage(caught))
-    } finally {
-      setEncoding(false)
-    }
-  }
-
-  const removeImage = async () => {
-    setImageError(undefined)
-    await clearProfileImage(address)
-    update({ avatar: '' })
-  }
+  const [linksOpen, setLinksOpen] = useState(false)
 
   const copyLink = async () => {
     try {
@@ -108,112 +79,147 @@ export default function ProfileModal({ open, onClose, address }: Props) {
   const valueFor = (kind: string) => draft.links.find((link) => link.kind === kind)?.value ?? ''
 
   const saving = state.kind === 'sending'
+  const filledLinks = LINK_KINDS.filter((kind) => valueFor(kind.kind).trim() !== '')
 
   return (
-    <Modal open={open} onClose={onClose} title="Profile" size="lg">
+    <Modal open={open} onClose={onClose} title="Profile" size="xl">
       {/*
-        Stated once, at the top, before anything has been typed. Per-field
-        badges below repeat it where the decision is actually made, because a
-        banner read on the way in is forgotten by the third field.
+        Two columns once there is room for them: the code and link that hand
+        the page out on the left, what it says about you on the right.
+        One column on a phone, in the same order.
       */}
-      <div className="flex items-start gap-2.5 rounded-card border border-border bg-surface p-3">
-        <Globe size={16} aria-hidden className="mt-0.5 shrink-0 text-text-muted" />
-        <p className="text-sm text-text-muted">
-          Everything here is <span className="font-semibold text-text">public</span>. Anyone with your address
-          can read it. Once it is written on chain, that transaction stays there — including after you clear
-          it. Your balances and activity are not part of this and stay private.
-        </p>
-      </div>
+      <div className="grid gap-5 md:grid-cols-[240px_minmax(0,1fr)]">
+        <div className="flex flex-col gap-4">
+          {/*
+            The picture is edited on the wallet page only. Here the space goes
+            to the thing this dialog is for handing out: a code that opens the
+            public page. On white whatever the theme — scanners need the light
+            modules lighter than the dark ones. Not masked by privacy mode, for
+            the same reason the link beneath it is not.
+          */}
+          <div className="w-full rounded-card bg-white p-3">
+            <QRCodeSVG
+              value={profileUrl(address)}
+              size={300}
+              level="M"
+              bgColor="#ffffff"
+              fgColor="#000000"
+              className="h-auto w-full"
+              title={`Profile link for ${address}`}
+            />
+          </div>
 
-      <div className="flex flex-col items-center gap-3">
-        <Avatar
-          address={address}
-          url={draft.avatar || undefined}
-          size={96}
-          onPick={(file) => void pick(file)}
-          onRemove={draft.avatar ? () => void removeImage() : undefined}
-          saving={encoding}
-        />
-        <p className="text-label text-text-faint">
-          Stored at 64px inside the profile itself, so the picture travels with the link instead of depending
-          on an image host.
-        </p>
-      </div>
+          {/*
+            Moved here from Receive. It belongs with the things that decide what
+            the page it opens will say — a link is worth sharing in proportion
+            to what is behind it, and that is edited right beside it.
+          */}
+          <div className="flex flex-col gap-2 rounded-card border border-border p-3">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <span className="text-label text-text-muted">Your public link</span>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => void copyLink()}
+                  className="state-layer flex items-center gap-1.5 rounded-control px-2 py-1 text-base text-text-muted"
+                >
+                  {copied ? (
+                    <Check size={16} aria-hidden className="text-positive" />
+                  ) : (
+                    <Copy size={16} aria-hidden />
+                  )}
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+                <a
+                  href={profileUrl(address)}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="state-layer flex items-center gap-1.5 rounded-control px-2 py-1 text-base text-text-muted"
+                >
+                  <ExternalLink size={16} aria-hidden />
+                  Open
+                </a>
+              </div>
+            </div>
+            {/* Not masked by privacy mode: the owner is looking at their own link in
+                order to hand it out, and a redacted string cannot be checked. */}
+            <p className="break-address font-mono text-sm text-text-faint">{profileUrl(address)}</p>
+          </div>
+        </div>
 
-      {imageError ? (
-        <p className="text-sm text-negative" role="alert">
-          {imageError}
-        </p>
-      ) : null}
-
-      <div className="flex flex-col gap-3">
-        <Field label="Name" hint={`${draft.name.length}/${LIMITS.name}`}>
-          <input
-            value={draft.name}
-            onChange={(event) => update({ name: event.target.value.slice(0, LIMITS.name) })}
-            placeholder={shortenAddress(address)}
-            className={INPUT}
-          />
-        </Field>
-
-        <Field label="Bio" hint={`${draft.bio.length}/${LIMITS.bio}`}>
-          <textarea
-            value={draft.bio}
-            onChange={(event) => update({ bio: event.target.value.slice(0, LIMITS.bio) })}
-            rows={3}
-            placeholder="A line about you."
-            className={cn(INPUT, 'resize-none')}
-          />
-        </Field>
-
-        {LINK_KINDS.map((kind) => (
-          <Field key={kind.kind} label={kind.label}>
+        <div className="flex flex-col gap-3">
+          <Field label="Name" hint={`${draft.name.length}/${LIMITS.name}`}>
             <input
-              value={valueFor(kind.kind)}
-              onChange={(event) => setLink(kind.kind, event.target.value.slice(0, LIMITS.linkValue))}
-              placeholder={kind.placeholder}
-              spellCheck={false}
+              value={draft.name}
+              onChange={(event) => update({ name: event.target.value.slice(0, LIMITS.name) })}
+              placeholder={shortenAddress(address)}
               className={INPUT}
             />
           </Field>
-        ))}
-      </div>
 
-      {/*
-        Moved here from Receive. It belongs with the things that decide what the
-        page it opens will say — a link is worth sharing in proportion to what
-        is behind it, and that is edited two inches above.
-      */}
-      <div className="flex flex-col gap-2 rounded-card border border-border p-3">
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-label text-text-muted">Your public link</span>
-          <div className="flex shrink-0 items-center gap-1">
+          <Field label="Bio" hint={`${draft.bio.length}/${LIMITS.bio}`}>
+            <textarea
+              value={draft.bio}
+              onChange={(event) => update({ bio: event.target.value.slice(0, LIMITS.bio) })}
+              rows={3}
+              placeholder="A line about you."
+              className={cn(INPUT, 'resize-none')}
+            />
+          </Field>
+
+          {/*
+            Collapsed by default: five rows of mostly-empty handles would
+            otherwise be the bulk of the form. The header says which are
+            filled, so nothing set is hidden without a trace.
+          */}
+          <div className="rounded-card border border-border">
             <button
               type="button"
-              onClick={() => void copyLink()}
-              className="state-layer flex items-center gap-1.5 rounded-control px-2 py-1 text-base text-text-muted"
+              onClick={() => setLinksOpen((current) => !current)}
+              aria-expanded={linksOpen}
+              aria-controls="profile-links"
+              className="state-layer flex w-full items-center justify-between gap-3 rounded-card px-3 py-2.5 text-left"
             >
-              {copied ? (
-                <Check size={16} aria-hidden className="text-positive" />
-              ) : (
-                <Copy size={16} aria-hidden />
-              )}
-              {copied ? 'Copied' : 'Copy'}
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="flex items-center gap-2 text-sm text-text-muted">
+                  Social links
+                  <span className="rounded-pill border border-border px-1.5 py-px text-label text-text-faint">
+                    Public
+                  </span>
+                </span>
+                <span className="truncate text-label text-text-faint">
+                  {filledLinks.length === 0
+                    ? 'None added'
+                    : filledLinks.map((kind) => kind.label).join(' · ')}
+                </span>
+              </span>
+              <ChevronDown
+                size={16}
+                aria-hidden
+                className={cn(
+                  'shrink-0 text-text-muted transition-transform duration-short',
+                  linksOpen && 'rotate-180'
+                )}
+              />
             </button>
-            <a
-              href={profileUrl(address)}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="state-layer flex items-center gap-1.5 rounded-control px-2 py-1 text-base text-text-muted"
-            >
-              <ExternalLink size={16} aria-hidden />
-              Open
-            </a>
+
+            {linksOpen ? (
+              <div id="profile-links" className="grid gap-3 px-3 pb-3 pt-1 sm:grid-cols-2">
+                {LINK_KINDS.map((kind) => (
+                  <Field key={kind.kind} label={kind.label}>
+                    <input
+                      value={valueFor(kind.kind)}
+                      onChange={(event) => setLink(kind.kind, event.target.value.slice(0, LIMITS.linkValue))}
+                      placeholder={kind.placeholder}
+                      spellCheck={false}
+                      className={INPUT}
+                    />
+                  </Field>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
-        {/* Not masked by privacy mode: the owner is looking at their own link in
-            order to hand it out, and a redacted string cannot be checked. */}
-        <p className="break-address font-mono text-sm text-text-faint">{profileUrl(address)}</p>
       </div>
 
       <div className="flex flex-col gap-2.5">
@@ -253,7 +259,7 @@ export default function ProfileModal({ open, onClose, address }: Props) {
             size="lg"
             block
             loading={saving}
-            disabled={!dirty || loading || encoding}
+            disabled={!dirty || loading}
             onClick={() => void save()}
           >
             {saving ? 'Saving…' : 'Save profile'}

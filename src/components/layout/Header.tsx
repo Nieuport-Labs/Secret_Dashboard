@@ -5,7 +5,7 @@ import ArrivalsChip from '@/components/wallet/ArrivalsChip'
 import Button from '@/components/ui/Button'
 import GasCreditsChip from '@/components/gas/GasCreditsChip'
 import PrivacyToggle from '@/components/layout/PrivacyToggle'
-import SettingsDrawer from '@/components/settings/SettingsDrawer'
+import SettingsModal from '@/components/settings/SettingsModal'
 import WalletChip from '@/components/layout/WalletChip'
 import { useConnectDialog } from '@/store/connectDialog'
 import { useWallet } from '@/store/wallet'
@@ -81,7 +81,7 @@ export default function Header() {
         </>
       )}
 
-      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

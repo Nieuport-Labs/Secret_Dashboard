@@ -14,8 +14,10 @@ interface Props {
    * `lg` is for a dialog that is a form rather than a decision — a column of
    * labelled fields reads badly at the width of a confirmation. Everything
    * else stays at the narrower default, which is the width the design uses.
+   * `xl` is for a form with enough in it to lay out in two columns on a wide
+   * screen; it still collapses to one on a phone.
    */
-  size?: 'md' | 'lg'
+  size?: 'md' | 'lg' | 'xl'
   /** Rendered beside the heading — a validator's avatar, say. Decorative: the
    *  accessible name still comes from `title` alone. */
   icon?: ReactNode
@@ -80,7 +82,7 @@ export default function Modal({
         className={cn(
           'glass-panel relative flex max-h-[calc(100dvh-2rem)] w-full flex-col gap-5 overflow-y-auto rounded-card p-5 outline-none',
           'motion-safe:animate-[modal-in_var(--duration-medium)_var(--ease-emphasised)]',
-          size === 'lg' ? 'max-w-[560px]' : 'max-w-[420px]'
+          size === 'xl' ? 'max-w-[880px]' : size === 'lg' ? 'max-w-[560px]' : 'max-w-[420px]'
         )}
       >
         {/* Never squeezed by a tall body — the heading is the dialog's label. */}

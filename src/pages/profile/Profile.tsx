@@ -5,8 +5,9 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
-import Private from '@/components/ui/Private'
-import Avatar from '@/components/wallet/Avatar'
+import PublicWalletCorner from '@/components/layout/PublicWalletCorner'
+import ConnectToSendModal from '@/components/wallet/ConnectToSendModal'
+import InvoiceModal from '@/components/wallet/InvoiceModal'
 import SendPanel from '@/components/wallet/SendPanel'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { isValidBech32 } from '@/lib/bech32'
@@ -14,7 +15,6 @@ import { cn } from '@/lib/cn'
 import { shortenAddress } from '@/lib/format'
 import { linkHref, LINK_KINDS, type ProfileLink } from '@/lib/profile'
 import { profileUrl } from '@/lib/profileLink'
-import { WALLETS, type WalletId } from '@/lib/wallet'
 import { useBalances } from '@/hooks/useBalances'
 import { usePermit } from '@/hooks/usePermit'
 import { useProfileIdentity } from '@/hooks/useProfileIdentity'
@@ -81,11 +81,6 @@ export default function Profile() {
 
   const hidden = usePrivacy((state) => state.hidden)
   const connected = useWallet((state) => state.address)
-  const status = useWallet((state) => state.status)
-  const walletId = useWallet((state) => state.walletId)
-  const walletError = useWallet((state) => state.error)
-  const notInstalled = useWallet((state) => state.notInstalled)
-  const connectWallet = useWallet((state) => state.connectWallet)
 
   const identity = useProfileIdentity(address)
 
@@ -93,7 +88,8 @@ export default function Profile() {
   const isSelf = Boolean(connected) && connected === address
 
   const [tipping, setTipping] = useState(false)
-  const [target, setTarget] = useState<Target>('link')
+  const [tippingByPhone, setTippingByPhone] = useState(false)
+  const [target, setTarget] = useState<Target>('address')
   const [copied, setCopied] = useState(false)
 
   /*
@@ -148,13 +144,11 @@ export default function Profile() {
     )
   }
 
-  const link = profileUrl(address)
-  const value = target === 'link' ? link : address
-  const connecting = status === 'connecting'
+  const value = target === 'link' ? profileUrl(address) : address
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(value)
+      await navigator.clipboard.writeText(address)
       setCopied(true)
       setTimeout(() => setCopied(false), 1600)
     } catch {
@@ -164,48 +158,69 @@ export default function Profile() {
 
   return (
     <div className="flex min-h-dvh flex-col px-4 py-6">
-      {/* The only way out, and small on purpose — this page belongs to the
-          person it names, not to the dashboard hosting it. */}
-      <Link
-        to="/wallet"
-        className="state-layer mx-auto flex w-fit items-center gap-2 rounded-pill px-2.5 py-1.5 text-text-faint hover:text-text-muted"
-      >
-        <img src="/img/logo-mark.svg" alt="" className="h-5 w-[19px]" />
-        <span className="text-label">Secret Dashboard</span>
-      </Link>
+      <PublicWalletCorner />
 
-      <div className="mx-auto flex w-full max-w-[380px] flex-1 flex-col items-center justify-center gap-5 py-8 text-center">
-        <Avatar address={address} url={identity.avatarUrl} size={88} />
+      {/*
+        Two columns once there is room: the code on the left, who this is and
+        what you can do for them on the right. The switch sits in a row of its
+        own above the code, so the name lines up with the top of the code
+        rather than with the switch. On a phone it is one column, identity
+        first, so the name is the first thing read.
+      */}
+      <div className="mx-auto grid w-full max-w-[860px] flex-1 content-center gap-x-12 gap-y-8 pb-[12vh] pt-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-start md:gap-y-4">
+        <div className="flex min-w-0 flex-col items-center gap-5 text-center md:col-start-2 md:row-start-2 md:items-start md:text-left">
+          <h1 className="text-display break-words">{identity.name ?? shortenAddress(address, 10, 6)}</h1>
 
-        <h1 className="text-display">{identity.name ?? shortenAddress(address, 10, 6)}</h1>
+          {identity.bio ? <p className="text-balance text-base text-text-muted">{identity.bio}</p> : null}
 
-        {identity.bio ? <p className="text-balance text-base text-text-muted">{identity.bio}</p> : null}
+          {identity.links.length > 0 ? (
+            <div className="flex flex-wrap items-center justify-center gap-2 md:justify-start">
+              {identity.links.map((link) => (
+                <LinkChip key={link.kind} link={link} />
+              ))}
+            </div>
+          ) : null}
 
-        {identity.links.length > 0 ? (
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            {identity.links.map((link) => (
-              <LinkChip key={link.kind} link={link} />
-            ))}
-          </div>
-        ) : null}
+          {isSelf ? (
+            // Offering to tip yourself is nonsense, and someone opening their own
+            // link is here to check what everyone else will see.
+            <p className="text-base text-text-muted">
+              This is your profile. Share it and anyone can send you {DISPLAY_DENOM}.
+            </p>
+          ) : (
+            /*
+              Offered whether or not a wallet is connected. Connecting is the
+              first step of the tip itself, not something the page asks of
+              everyone who opens it — most visitors are here to read, not pay.
+            */
+            <Button
+              variant="primary"
+              size="lg"
+              icon={<HandCoins size={16} aria-hidden />}
+              onClick={() => setTipping(true)}
+            >
+              Send a tip
+            </Button>
+          )}
+
+          <p className="text-balance text-label text-text-faint">
+            Anyone can open this page. It shows this address and nothing about what is held there.
+          </p>
+        </div>
 
         {/*
-          Two things worth handing to someone, and they are not
-          interchangeable: the link opens this page, the address is what a
-          wallet scans. One control switches both the code and what the button
-          copies, so there is never a QR showing one thing and a button
-          copying the other.
-        */}
-        <div className="flex items-center gap-1 rounded-pill border border-border p-1">
-          {(['link', 'address'] as Target[]).map((option) => (
+            Two things worth handing to someone, and they are not
+            interchangeable: the link opens this page, the address is what a
+            wallet scans. The switch changes only the code; the row beneath it
+            is always the address, since that is what gets pasted into a send.
+          */}
+        <div className="flex items-center gap-1 justify-self-center rounded-pill border border-border p-1 md:col-start-1 md:row-start-1 md:justify-self-start">
+          {(['address', 'link'] as Target[]).map((option) => (
             <button
               key={option}
               type="button"
               aria-pressed={target === option}
-              onClick={() => {
-                setTarget(option)
-                setCopied(false)
-              }}
+              onClick={() => setTarget(option)}
               className={cn(
                 'state-layer rounded-pill px-4 py-1.5 text-sm font-medium capitalize',
                 'transition-colors duration-[var(--duration-short)] ease-[var(--ease-standard)]',
@@ -217,123 +232,102 @@ export default function Profile() {
           ))}
         </div>
 
-        {/*
-          The QR stays on white whatever the theme. Scanners rely on the light
-          modules being lighter than the dark ones, and inverting a code is the
-          one "dark mode everywhere" decision that stops it working.
-        */}
-        {hidden ? (
-          <div className="flex w-full max-w-[260px] items-center justify-center gap-2 rounded-card bg-surface px-4 py-10 text-text-muted">
-            <EyeOff size={16} aria-hidden />
-            <span className="text-base">Hidden</span>
-          </div>
-        ) : (
-          <div className="w-full max-w-[260px] rounded-card bg-white p-4">
-            <QRCodeSVG
-              value={value}
-              size={300}
-              level="M"
-              bgColor="#ffffff"
-              fgColor="#000000"
-              className="h-auto w-full"
-              title={target === 'link' ? `Profile link for ${address}` : `Secret Network address ${address}`}
-            />
-          </div>
-        )}
+        <div className="flex flex-col items-center gap-4 md:col-start-1 md:row-start-2">
+          {/*
+            The QR stays on white whatever the theme. Scanners rely on the light
+            modules being lighter than the dark ones, and inverting a code is the
+            one "dark mode everywhere" decision that stops it working.
+          */}
+          {hidden ? (
+            <div className="flex w-full max-w-[260px] items-center justify-center gap-2 rounded-card bg-surface px-4 py-10 text-text-muted">
+              <EyeOff size={16} aria-hidden />
+              <span className="text-base">Hidden</span>
+            </div>
+          ) : (
+            <div className="w-full max-w-[260px] rounded-card bg-white p-4">
+              <QRCodeSVG
+                value={value}
+                size={300}
+                level="M"
+                bgColor="#ffffff"
+                fgColor="#000000"
+                className="h-auto w-full"
+                title={
+                  target === 'link' ? `Profile link for ${address}` : `Secret Network address ${address}`
+                }
+              />
+            </div>
+          )}
 
-        <button
-          type="button"
-          onClick={() => void copy()}
-          className="state-layer flex w-full min-w-0 flex-col items-center gap-1.5 rounded-control px-3 py-2 text-text-muted"
-        >
-          <span className="break-address min-w-0 font-mono text-sm">
-            <Private mask={target === 'link' ? profileUrl(shortenAddress(address)) : shortenAddress(address)}>
-              {value}
-            </Private>
-          </span>
-          <span className="flex items-center gap-1.5 text-label">
-            {copied ? (
-              <>
-                <Check size={13} aria-hidden className="text-positive" />
-                Copied
-              </>
-            ) : (
-              <>
-                <Copy size={13} aria-hidden />
-                Copy {target}
-              </>
-            )}
-          </span>
-        </button>
-
-        {isSelf ? (
-          // Offering to tip yourself is nonsense, and someone opening their own
-          // link is here to check what everyone else will see.
-          <p className="text-base text-text-muted">
-            This is your profile. Share it and anyone can send you {DISPLAY_DENOM}.
-          </p>
-        ) : connected ? (
-          <Button
-            variant="primary"
-            size="lg"
-            icon={<HandCoins size={16} aria-hidden />}
-            onClick={() => setTipping(true)}
+          {/*
+            One row, as wide as the code above it. The address is shortened
+            rather than wrapped over three lines — the button copies all of it.
+            `shortenAddress` also masks itself in privacy mode.
+          */}
+          <button
+            type="button"
+            onClick={() => void copy()}
+            className="state-layer flex w-full max-w-[260px] min-w-0 items-center justify-between gap-3 rounded-control px-3 py-2 text-text-muted"
           >
-            Send a tip
-          </Button>
-        ) : (
-          /*
-            Connecting happens here rather than on the wallet screen. Sending
-            someone away to connect and trusting them to find their way back is
-            where a tip stops happening — and with no shell around this page,
-            "go to the wallet" would also be a one-way door.
-          */
-          <div className="flex w-full flex-col gap-2.5">
-            {(['keplr', 'starshell'] as WalletId[]).map((id) => (
-              <Button
-                key={id}
-                variant="secondary"
-                size="lg"
-                block
-                loading={connecting && walletId === id}
-                disabled={connecting}
-                onClick={() => void connectWallet(id)}
-                icon={<img src={WALLETS[id].icon} alt="" className="size-6 rounded-pill" />}
-              >
-                Connect {WALLETS[id].name} to tip
-              </Button>
-            ))}
-
-            {/* A missing extension is a next step, not a fault, so it gets a
-                link rather than a red message. */}
-            {status === 'error' && walletError ? (
-              <p className="text-base text-text-muted" role="status">
-                {walletError}{' '}
-                {notInstalled && walletId ? (
-                  <a
-                    className="text-accent underline underline-offset-4"
-                    href={WALLETS[walletId].installUrl}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                  >
-                    Install {WALLETS[walletId].name}
-                  </a>
-                ) : null}
-              </p>
-            ) : null}
-          </div>
-        )}
-
-        <p className="text-balance text-label text-text-faint">
-          Anyone can open this page. It shows this address and nothing about what is held there.
-        </p>
+            <span className="min-w-0 truncate font-mono text-sm">{shortenAddress(address, 12, 6)}</span>
+            <span className="flex shrink-0 items-center gap-1.5 text-label">
+              {copied ? (
+                <Check size={13} aria-hidden className="text-positive" />
+              ) : (
+                <Copy size={13} aria-hidden />
+              )}
+              {copied ? 'Copied' : 'Copy'}
+              <span className="sr-only">address</span>
+            </span>
+          </button>
+        </div>
       </div>
 
+      {/* The only way out, small and at the foot on purpose — this page
+          belongs to the person it names, not to the dashboard hosting it. */}
+      <Link
+        to="/wallet"
+        className="state-layer mx-auto flex w-fit items-center gap-2 rounded-pill px-2.5 py-1.5 text-text-faint hover:text-text-muted"
+      >
+        <img src="/img/logo-mark.svg" alt="" className="h-5 w-[19px]" />
+        <span className="text-label">Secret Dashboard</span>
+      </Link>
+
       {/*
-        Rendered only once there is a wallet to send from: the panel's send path
-        returns silently without a connected client, so opening it while
-        disconnected would show a form that quietly does nothing.
+        The tip is one flow in two steps. Without a wallet it opens on the
+        choice of one; the moment the connection lands `connected` is set and
+        the same open state carries straight on into the send form — no second
+        click, no trip to the wallet screen. The send form itself is rendered
+        only once there is a wallet to send from: its send path returns
+        silently without a connected client.
       */}
+      {!isSelf && !connected ? (
+        <ConnectToSendModal
+          open={tipping}
+          onClose={() => setTipping(false)}
+          title="Send a tip"
+          message={`Connect a wallet to send ${DISPLAY_DENOM}.`}
+          qrLabel="Tip with QR code"
+          onQr={() => {
+            setTipping(false)
+            setTippingByPhone(true)
+          }}
+        />
+      ) : null}
+
+      {/* The tip from a phone: choose an asset and an amount, then scan the
+          payment URI. Back returns to the choice of wallet. */}
+      <InvoiceModal
+        open={tippingByPhone}
+        onClose={() => setTippingByPhone(false)}
+        onBack={() => {
+          setTippingByPhone(false)
+          setTipping(true)
+        }}
+        address={address}
+        purpose="phone"
+      />
+
       {connected && !isSelf ? (
         <SendPanel
           open={tipping}
