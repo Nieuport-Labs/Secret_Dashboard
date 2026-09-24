@@ -5,7 +5,9 @@ import { codeHashFor } from '@/lib/codeHash'
 import { mapWithLimit } from '@/lib/concurrency'
 import { covers, type Permit } from '@/lib/permit'
 import {
+  bestSimulated,
   findRoutes,
+  isSimulated,
   listPairs,
   pairsOf,
   quoteOut,
@@ -90,8 +92,8 @@ export async function purchaseMessages(
 
 /**
  * Tokens that can be swapped for `target` (sSCRT unless said otherwise):
- * covered by the permit, so their balance can be read, with a constant-product
- * route, and not stkd-SCRT — a staking position someone chose, not spare change.
+ * covered by the permit, so their balance can be read, with a route there,
+ * and not stkd-SCRT — a staking position someone chose, not spare change.
  */
 export async function swappableTokens(
   client: SecretNetworkClient,
@@ -133,8 +135,32 @@ export function bestExactOut(
 }
 
 /**
+ * `bestExactOut` over every kind of route: constant-product ones by
+ * arithmetic, and those through a stable pool by asking the router
+ * (`bestSimulated`) — which only goes as far as it has to, to beat them.
+ */
+export async function bestExactOutAnywhere(
+  client: SecretNetworkClient,
+  routes: Route[],
+  reserves: Map<string, Reserves>,
+  amount: bigint
+): Promise<PaddedQuote | undefined> {
+  const local = bestExactOut(
+    routes.filter((route) => !isSimulated(route)),
+    reserves,
+    amount
+  )
+  const stable = routes.filter(isSimulated)
+  if (stable.length === 0) return local
+  const simulated = await bestSimulated(client, stable, reserves, amount, slippageFor, local?.amountIn).catch(
+    () => undefined
+  )
+  return simulated && (!local || simulated.amountIn < local.amountIn) ? simulated : local
+}
+
+/**
  * What it costs in `token` to get `amount` of `target` out, slippage
- * included. Up to four routes, every pool on them read in one request.
+ * included. Every pool on every route read in one request.
  */
 export async function quoteInto(
   client: SecretNetworkClient,
@@ -142,9 +168,9 @@ export async function quoteInto(
   target: string,
   amount: bigint
 ): Promise<PaddedQuote | undefined> {
-  const routes = findRoutes(await listPairs(client), token, target).slice(0, 4)
+  const routes = findRoutes(await listPairs(client), token, target)
   if (routes.length === 0) return undefined
-  return bestExactOut(routes, await reservesFor(client, pairsOf(routes)), amount)
+  return bestExactOutAnywhere(client, routes, await reservesFor(client, pairsOf(routes)), amount)
 }
 
 /**

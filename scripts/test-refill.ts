@@ -11,7 +11,8 @@ Object.defineProperty(globalThis, 'window', { configurable: true, value: globalT
 const { CREDIT_FLOOR, splitRefill } = await import('../src/lib/autoRefill.ts')
 const { canUnwrap } = await import('../src/store/settings.ts')
 const { SSCRT_ADDRESS } = await import('../src/tokens/registry.ts')
-const { findRoutes, swapIn, swapOut } = await import('../src/lib/shadeSwap.ts')
+const { bestSimulated, findRoutes, quoteOut, swapIn, swapMessage, swapOut } =
+  await import('../src/lib/shadeSwap.ts')
 
 let passed = 0
 let failed = 0
@@ -87,7 +88,8 @@ check('asking for the whole pool is refused', swapIn(X, Y, Y, FEE_NUM, FEE_DEN) 
   const pair = (address: string, a: string, b: string) => ({
     contract: ref(address),
     token0: ref(a),
-    token1: ref(b)
+    token1: ref(b),
+    stable: false
   })
   const pairs = [
     pair('p1', 'ATOM', 'SILK'),
@@ -112,6 +114,138 @@ check('asking for the whole pool is refused', swapIn(X, Y, Y, FEE_NUM, FEE_DEN) 
     routes.every((route) => route[0].from.address === 'ATOM')
   )
   check('a token with no way there has no route', findRoutes(pairs, 'OSMO', 'SSCRT').length === 0)
+}
+
+{
+  const ref = (address: string) => ({ address, codeHash: 'h' })
+  const pair = (address: string, a: string, b: string, stable = false) => ({
+    contract: ref(address),
+    token0: ref(a),
+    token1: ref(b),
+    stable
+  })
+  // USDC to ATOM the way ShadeSwap has it: the direct pool is empty, and the
+  // way through is a stable pool into SILK, or three constant-product hops.
+  const pairs = [
+    pair('direct', 'USDC', 'ATOM'),
+    pair('usdc-silk', 'USDC', 'SILK', true),
+    pair('silk-atom', 'SILK', 'ATOM'),
+    pair('usdc-sscrt', 'USDC', 'SSCRT'),
+    pair('sscrt-silk', 'SSCRT', 'SILK')
+  ]
+  const routes = findRoutes(pairs, 'USDC', 'ATOM')
+  check(
+    'routes go up to three hops',
+    routes.some((route) => route.length === 3),
+    routes.length
+  )
+  check(
+    'shortest first',
+    routes.every((route, index) => index === 0 || routes[index - 1].length <= route.length)
+  )
+  check(
+    'and never through the same token twice',
+    routes.every((route) => new Set(route.map((hop) => hop.to.address)).size === route.length)
+  )
+
+  const reserves = new Map(
+    pairs.map((p) => [
+      p.contract.address,
+      {
+        amount0: p.contract.address === 'direct' ? 0n : 10n ** 12n,
+        amount1: p.contract.address === 'direct' ? 0n : 10n ** 12n,
+        feeNum: 3n,
+        feeDen: 1000n
+      }
+    ])
+  )
+  const viaStable = routes.find((route) => route.some((hop) => hop.pair.stable))!
+  check(
+    'arithmetic does not price a route through a stable pool',
+    quoteOut(viaStable, reserves, 1000n) === undefined
+  )
+  const direct = routes.find((route) => route.length === 1)!
+  check('nor through an empty pool', quoteOut(direct, reserves, 1000n) === undefined)
+
+  // A fake router: a curve that is not constant-product, with a fee.
+  const ROUTER = 'secret1nrnh30ant2dplrlvqjgmddg4fntllwlm0pnhss'
+  const BATCH = 'secret15mkmad8ac036v4nrpcc7nk8wyr578egt077syt'
+  const curve = (amountIn: bigint) => (amountIn * 1_950n) / 1_000n - (amountIn * amountIn) / 10n ** 9n
+  let simulations = 0
+  type SimQuery = { swap_simulation: { offer: { amount: string } } }
+  const answer = (query: SimQuery) => {
+    simulations += 1
+    return {
+      swap_simulation: {
+        result: { return_amount: curve(BigInt(query.swap_simulation.offer.amount)).toString() }
+      }
+    }
+  }
+  const client = {
+    query: {
+      compute: {
+        codeHashByContractAddress: async ({ contract_address }: { contract_address: string }) => ({
+          code_hash: contract_address === 'USDC' ? 'current' : 'h'
+        }),
+        queryContract: async ({
+          contract_address,
+          query
+        }: {
+          contract_address: string
+          query: { batch: { queries: Array<{ id: string; query: string }> } } & SimQuery
+        }) => {
+          if (contract_address === BATCH) {
+            return {
+              batch: {
+                responses: query.batch.queries.map((item: { id: string; query: string }) => ({
+                  id: item.id,
+                  response: {
+                    response: btoa(JSON.stringify(answer(JSON.parse(atob(item.query)) as SimQuery)))
+                  }
+                }))
+              }
+            }
+          }
+          if (contract_address === ROUTER) return answer(query)
+          throw new Error('unexpected ' + contract_address)
+        }
+      }
+    }
+  } as unknown as import('secretjs').SecretNetworkClient
+
+  const target = 5_000_000n
+  const quote = await bestSimulated(client, [viaStable], reserves, target, () => 100n)
+  const out = quote ? curve(quote.amountIn) : 0n
+  check(
+    'a stable route is priced by the router: enough comes out, padded by the slippage, and not much more',
+    quote !== undefined &&
+      quote.amountOut === (target * 10_000n) / 9_900n &&
+      out >= quote.amountOut &&
+      (out - quote.amountOut) * 10_000n <= quote.amountOut * 30n,
+    { amountIn: quote?.amountIn.toString(), out: out.toString(), simulations }
+  )
+  check('in a few requests', simulations <= 6, simulations)
+  check(
+    'and not at all past the first, when it cannot beat what arithmetic found',
+    (await bestSimulated(client, [viaStable], reserves, target, () => 100n, 1_000n)) === undefined
+  )
+
+  const message = (await swapMessage(client, 'secret1me', viaStable, 100n, 90n)) as unknown as {
+    contractAddress: string
+    codeHash: string
+    msg: { send: { msg: string } }
+  }
+  const path = (
+    JSON.parse(atob(message.msg.send.msg)) as {
+      swap_tokens_for_exact: { path: Array<{ token0: { code_hash: string } }> }
+    }
+  ).swap_tokens_for_exact.path
+  check(
+    "the swap goes to the token under its current code hash, not the pair's old record of it",
+    message.contractAddress === 'USDC' && message.codeHash === 'current',
+    message
+  )
+  check("while the path keeps the pair's record, which the router checks", path[0].token0.code_hash === 'h')
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

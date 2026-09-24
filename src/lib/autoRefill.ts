@@ -7,7 +7,7 @@ import { MSG_EXECUTE_CONTRACT } from '@/lib/msgTypes'
 
 import {
   balancesOf,
-  bestExactOut,
+  bestExactOutAnywhere,
   PURCHASE_GAS,
   purchaseMessages,
   slippageFor,
@@ -148,7 +148,7 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
   const pairs = await listPairs(queryClient)
   const routable = (await swappableTokens(queryClient, permit)).map((token) => ({
     token,
-    routes: findRoutes(pairs, token, SSCRT_ADDRESS).slice(0, 4)
+    routes: findRoutes(pairs, token, SSCRT_ADDRESS)
   }))
   if (routable.length === 0) return undefined
 
@@ -180,7 +180,7 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
 
   for (const { balance, best, routes } of valued) {
     // Enough to cover `need` with room for slippage: pay only for that.
-    const exact = bestExactOut(routes, reserves, need)
+    const exact = await bestExactOutAnywhere(queryClient, routes, reserves, need)
 
     if (exact && exact.amountIn <= balance) {
       return {

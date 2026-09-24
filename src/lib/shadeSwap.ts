@@ -13,12 +13,15 @@ import { codeHashFor } from '@/lib/codeHash'
  * rather than depending on it: shade.js brings its own copy of secretjs and
  * rxjs, which is a lot of bundle for three messages.
  *
- * Only constant-product pools are used. Their output is exact arithmetic on
- * the reserves, done here in integers; stable pools price through an oracle
- * and an iterative solver, and getting that slightly wrong is how a swap
- * fails or overpays. A token whose only route is through a stable pool is
- * simply not a candidate. Routes are one hop, or two through any token that
- * pairs with both ends.
+ * Constant-product pools are priced here: their output is exact arithmetic
+ * on the reserves, done in integers, with no request beyond reading them.
+ * Stable pools price through an oracle and an iterative solver, and getting
+ * that slightly wrong is how a swap fails or overpays — so a route through
+ * one is priced by the chain itself, with the router's own `swap_simulation`
+ * (`quoteOutSimulated`). Some tokens have no other way in: every ATOM pool
+ * with real depth is a stable one.
+ *
+ * Routes are up to three hops, through any tokens that pair up.
  *
  * Nothing here trusts its own arithmetic with the user's money: every swap
  * carries a minimum return, and the router refuses to trade below it.
@@ -39,11 +42,29 @@ export const SHADESWAP_ROUTER = 'secret1nrnh30ant2dplrlvqjgmddg4fntllwlm0pnhss'
 /** shade.js `MsgCost`: a base plus a fixed cost per constant-product hop. */
 const SWAP_GAS_BASE = 300_000
 const SWAP_GAS_PER_HOP = 345_000
+/**
+ * What a stable hop costs on top: shade.js adds its oracles' reads (about
+ * 240k each, two per pool) and the solver's iterations (2,250 each).
+ */
+const STABLE_HOP_EXTRA_GAS = 1_000_000
+/** The longest route `findRoutes` builds. */
+const MAX_HOPS = 3
+/** Routes considered per quote, shortest first; their pools are read in one request. */
+const MAX_ROUTES = 16
+/** Stable routes priced by simulation per quote, all in the first request. */
+const MAX_SIMULATED_ROUTES = 6
 
 export interface Pair {
   contract: ContractRef
+  /**
+   * The code hashes here are the pair's own record of its tokens, which the
+   * router checks a swap's path against — not necessarily a token's current
+   * hash, if it has been migrated since. Anything sent to the token itself
+   * uses `codeHashFor`.
+   */
   token0: ContractRef
   token1: ContractRef
+  stable: boolean
 }
 
 export interface Reserves {
@@ -95,7 +116,7 @@ const PAGE = 30
 const PAGES_PER_BATCH = 8
 const MAX_PAGES = 40
 
-const STORAGE_KEY = 'secret-dashboard:shadeswap-pairs:v1'
+const STORAGE_KEY = 'secret-dashboard:shadeswap-pairs:v2'
 /** A stored list younger than this is used as it is; an older one is used and refreshed behind. */
 const FRESH_MS = 24 * 60 * 60_000
 
@@ -123,11 +144,12 @@ function toPairs(reply: FactoryPairsReply | undefined): { pairs: Pair[]; count: 
   const pairs: Pair[] = []
   for (const entry of entries) {
     const [a, b, stable] = entry.pair
-    if (!entry.enabled || stable || !a.custom_token || !b.custom_token) continue
+    if (!entry.enabled || !a.custom_token || !b.custom_token) continue
     pairs.push({
       contract: { address: entry.address, codeHash: entry.code_hash },
       token0: { address: a.custom_token.contract_addr, codeHash: a.custom_token.token_code_hash },
-      token1: { address: b.custom_token.contract_addr, codeHash: b.custom_token.token_code_hash }
+      token1: { address: b.custom_token.contract_addr, codeHash: b.custom_token.token_code_hash },
+      stable
     })
   }
   return { pairs, count: entries.length }
@@ -164,7 +186,7 @@ async function fetchPairs(client: SecretNetworkClient): Promise<Pair[]> {
 }
 
 /**
- * Every enabled constant-product pair the factory knows.
+ * Every enabled pair the factory knows, stable ones included.
  *
  * Pairs are added rarely, so the list is kept in the browser and used at once
  * on the next visit — refreshed in the background once it is a day old. The
@@ -201,29 +223,36 @@ function other(pair: Pair, token: string): ContractRef | undefined {
   return undefined
 }
 
-/** Routes from `from` to `to`: every direct pair, then every two-hop path. */
+/**
+ * Routes from `from` to `to`, up to `MAX_HOPS` long, never through the same
+ * token twice — shortest first, and at most `MAX_ROUTES` of them.
+ */
 export function findRoutes(pairs: Pair[], from: string, to: string): Route[] {
   const routes: Route[] = []
-  const touching = (token: string) => pairs.filter((pair) => other(pair, token))
-
-  for (const pair of touching(from)) {
-    const next = other(pair, from)!
-    const fromRef = pair.token0.address === from ? pair.token0 : pair.token1
-    if (next.address === to) {
-      routes.push([{ pair, from: fromRef, to: next }])
-      continue
-    }
-    for (const second of touching(next.address)) {
-      if (second === pair) continue
-      const end = other(second, next.address)!
-      if (end.address === to)
-        routes.push([
-          { pair, from: fromRef, to: next },
-          { pair: second, from: next, to: end }
-        ])
+  const byToken = new Map<string, Pair[]>()
+  for (const pair of pairs) {
+    for (const token of [pair.token0.address, pair.token1.address]) {
+      byToken.set(token, [...(byToken.get(token) ?? []), pair])
     }
   }
-  return routes
+
+  const walk = (at: string, path: Hop[], seen: Set<string>) => {
+    for (const pair of byToken.get(at) ?? []) {
+      const next = other(pair, at)!
+      if (seen.has(next.address)) continue
+      const hop = { pair, from: pair.token0.address === at ? pair.token0 : pair.token1, to: next }
+      if (next.address === to) routes.push([...path, hop])
+      else if (path.length + 1 < MAX_HOPS)
+        walk(next.address, [...path, hop], new Set([...seen, next.address]))
+    }
+  }
+  walk(from, [], new Set([from]))
+
+  return routes.sort((a, b) => a.length - b.length).slice(0, MAX_ROUTES)
+}
+
+export function isSimulated(route: Route): boolean {
+  return route.some((hop) => hop.pair.stable)
 }
 
 function parseReserves(reply: PairInfoReply): Reserves | undefined {
@@ -321,7 +350,9 @@ export interface Quote {
 
 type Leg = ReturnType<typeof oriented>
 
+/** The route's pools as arithmetic — none, if it passes through a stable pool, which this cannot price. */
 function legsOf(route: Route, reserves: Map<string, Reserves>): Leg[] | undefined {
+  if (isSimulated(route)) return undefined
   const legs: Leg[] = []
   for (const hop of route) {
     const found = reserves.get(hop.pair.contract.address)
@@ -365,11 +396,181 @@ export function quoteOut(
   return { route, amountIn: amount, amountOut, impactBps: impact(legs, amount, amountOut) }
 }
 
-/** The most a swap here can take: two hops, the longest route `findRoutes` builds. */
-export const MAX_SWAP_GAS = withGasBuffer(SWAP_GAS_BASE + SWAP_GAS_PER_HOP * 2)
+/**
+ * The most a swap here can take: the longest route `findRoutes` builds, with
+ * all but one hop stable — a route can hardly pass through three stable pools
+ * without a token repeating.
+ */
+export const MAX_SWAP_GAS = withGasBuffer(
+  SWAP_GAS_BASE + SWAP_GAS_PER_HOP * MAX_HOPS + STABLE_HOP_EXTRA_GAS * (MAX_HOPS - 1)
+)
 
 export function swapGas(route: Route): number {
-  return withGasBuffer(SWAP_GAS_BASE + SWAP_GAS_PER_HOP * route.length)
+  const stableHops = route.filter((hop) => hop.pair.stable).length
+  return withGasBuffer(SWAP_GAS_BASE + SWAP_GAS_PER_HOP * route.length + STABLE_HOP_EXTRA_GAS * stableHops)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Pricing by simulation, for routes through stable pools                      */
+/* -------------------------------------------------------------------------- */
+
+function tokenType(token: ContractRef) {
+  return { custom_token: { contract_addr: token.address, token_code_hash: token.codeHash } }
+}
+
+interface SimulationReply {
+  swap_simulation?: { result?: { return_amount?: string } }
+}
+
+/**
+ * What each `amountIn` returns along its route, as the router works it out —
+ * every one in a single request. `undefined` for a route it would not price.
+ */
+export async function simulate(
+  client: SecretNetworkClient,
+  trades: Array<{ route: Route; amountIn: bigint }>
+): Promise<Array<bigint | undefined>> {
+  if (trades.length === 0) return []
+  const router = { address: SHADESWAP_ROUTER, codeHash: await codeHashFor(client, SHADESWAP_ROUTER) }
+  const answers = await batchQuery(
+    client,
+    trades.map(({ route, amountIn }, index) => ({
+      id: String(index),
+      contract: router,
+      query: {
+        swap_simulation: {
+          // The token as the first pool records it, which is what the router matches on.
+          offer: { token: tokenType(route[0].from), amount: amountIn.toString() },
+          path: route.map((hop) => ({
+            address: hop.pair.contract.address,
+            code_hash: hop.pair.contract.codeHash,
+            pair: [tokenType(hop.pair.token0), tokenType(hop.pair.token1), hop.pair.stable]
+          }))
+        }
+      }
+    }))
+  )
+  return trades.map((_, index) => {
+    const answer = answers.get(String(index))
+    const amount = answer?.ok
+      ? (answer.value as SimulationReply).swap_simulation?.result?.return_amount
+      : undefined
+    return amount !== undefined && /^\d+$/.test(amount) ? BigInt(amount) : undefined
+  })
+}
+
+/** Rounds of simulation before a route that has not converged is given up on. */
+const SIMULATION_ROUNDS = 6
+/** Close enough: what comes out may exceed the target by this much, in basis points. */
+const OVERSHOOT_BPS = 30n
+
+/**
+ * A first guess at what `amountOut` costs along `route`, from the pools'
+ * reserves as if every one were constant-product. For a stable pool that can be
+ * off by its tokens' exchange rate — the rounds after correct it.
+ */
+function roughIn(route: Route, reserves: Map<string, Reserves>, amountOut: bigint): bigint | undefined {
+  let amount = amountOut
+  for (const hop of [...route].reverse()) {
+    const found = reserves.get(hop.pair.contract.address)
+    if (!found) return undefined
+    const { input, output } = oriented(hop, found)
+    if (input <= 0n || output <= 0n) return undefined
+    amount = (amount * input) / output + 1n
+  }
+  return amount
+}
+
+/**
+ * What `amountOut` costs along `route`, found by asking the router: `guess`,
+ * then the guess scaled by how far it fell short or overshot, until what
+ * comes out is at least `amountOut` and not by much more. A round per request.
+ */
+async function refine(
+  client: SecretNetworkClient,
+  route: Route,
+  amountOut: bigint,
+  guess: bigint
+): Promise<bigint | undefined> {
+  for (let round = 0; round < SIMULATION_ROUNDS; round += 1) {
+    const [out] = await simulate(client, [{ route, amountIn: guess }])
+    if (out === undefined || out <= 0n) return undefined
+    if (out >= amountOut && (out - amountOut) * 10_000n <= amountOut * OVERSHOOT_BPS) return guess
+    // Aim a little over, so the next round lands on the right side of it.
+    const scaled = (guess * amountOut * (10_000n + OVERSHOOT_BPS / 3n)) / (out * 10_000n) + 1n
+    guess = scaled === guess ? scaled + 1n : scaled
+  }
+  return undefined
+}
+
+/**
+ * The cheapest of `routes` — ones through a stable pool — for `amountOut`,
+ * priced by the router, with the slippage `padFor` sets from its price impact
+ * already in: `amountOut` in the answer is the padded figure, the one a swap
+ * can promise as its minimum.
+ *
+ * Kept to as few requests as it can. One prices every route at a first guess,
+ * and at a hundredth of it for the rate the impact is measured against — enough
+ * to rank them. Only the best is refined, straight to the padded amount; and
+ * not even that when it cannot come in under `beat`, what arithmetic on a
+ * constant-product route already found.
+ */
+export async function bestSimulated(
+  client: SecretNetworkClient,
+  routes: Route[],
+  reserves: Map<string, Reserves>,
+  amountOut: bigint,
+  padFor: (impactBps: number) => bigint,
+  beat?: bigint
+): Promise<(Quote & { slippageBps: bigint }) | undefined> {
+  if (amountOut <= 0n) return undefined
+  const candidates = routes
+    .slice(0, MAX_SIMULATED_ROUTES)
+    .map((route) => ({ route, guess: roughIn(route, reserves, amountOut) }))
+    .filter((entry): entry is { route: Route; guess: bigint } => entry.guess !== undefined)
+  if (candidates.length === 0) return undefined
+
+  const probeIn = (guess: bigint) => guess / 100n + 1n
+  const outs = await simulate(client, [
+    ...candidates.map(({ route, guess }) => ({ route, amountIn: guess })),
+    ...candidates.map(({ route, guess }) => ({ route, amountIn: probeIn(guess) }))
+  ])
+  const best = candidates
+    .flatMap(({ route, guess }, index) => {
+      const out = outs[index]
+      if (out === undefined || out <= 0n) return []
+      return [
+        {
+          route,
+          estimate: (guess * amountOut) / out + 1n,
+          impactBps: simulatedImpact(guess, out, probeIn(guess), outs[candidates.length + index])
+        }
+      ]
+    })
+    .sort((a, b) => (a.estimate === b.estimate ? 0 : a.estimate < b.estimate ? -1 : 1))[0]
+  if (!best) return undefined
+
+  const slippageBps = padFor(best.impactBps)
+  const padded = (amountOut * 10_000n) / (10_000n - slippageBps)
+  const start = (best.estimate * padded) / amountOut + 1n
+  if (beat !== undefined && start > beat) return undefined
+
+  const amountIn = await refine(client, best.route, padded, start)
+  if (amountIn === undefined) return undefined
+  return { route: best.route, amountIn, amountOut: padded, impactBps: best.impactBps, slippageBps }
+}
+
+function simulatedImpact(
+  amountIn: bigint,
+  out: bigint,
+  probeIn: bigint,
+  probeOut: bigint | undefined
+): number {
+  if (!probeOut || probeOut <= 0n) return 0
+  // Rate for the trade against the rate for a sliver of it, scaled up.
+  const spot = (probeOut * amountIn) / probeIn
+  if (spot <= out) return 0
+  return Number(((spot - out) * 10_000n) / spot)
 }
 
 function base64Json(value: unknown): string {
@@ -390,6 +591,12 @@ export async function swapMessage(
   const { MsgExecuteContract } = await import('secretjs')
   const first = route[0].from
   const last = route[route.length - 1].to
+  // The pair's record of a token's hash can predate a migration (USDC's
+  // does); the token itself only answers to its current one.
+  const [tokenHash, routerHash] = await Promise.all([
+    codeHashFor(client, first.address),
+    codeHashFor(client, SHADESWAP_ROUTER)
+  ])
 
   const swap = {
     swap_tokens_for_exact: {
@@ -409,11 +616,11 @@ export async function swapMessage(
   return new MsgExecuteContract({
     sender,
     contract_address: first.address,
-    code_hash: first.codeHash,
+    code_hash: tokenHash,
     msg: {
       send: {
         recipient: SHADESWAP_ROUTER,
-        recipient_code_hash: await codeHashFor(client, SHADESWAP_ROUTER),
+        recipient_code_hash: routerHash,
         amount: amountIn.toString(),
         msg: base64Json(swap)
       }
