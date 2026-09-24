@@ -1,4 +1,4 @@
-import { ArrowLeftRight, CheckCircle2, ChevronDown, ExternalLink, Fuel } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ExternalLink, Fuel } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import AmountHero from '@/components/ui/AmountHero'
@@ -26,7 +26,7 @@ import {
   quoteForSscrt,
   swappableTokens
 } from '@/lib/gasPurchase'
-import { buyGasCredit, queryVaultStatus } from '@/lib/gasVault'
+import { buyGasCredit } from '@/lib/gasVault'
 import { MSG_EXECUTE_CONTRACT } from '@/lib/msgTypes'
 import { swapGas, swapMessage, type Quote } from '@/lib/shadeSwap'
 import { permitAuth } from '@/lib/snip20'
@@ -69,12 +69,7 @@ type QuoteState =
  */
 export default function BuyCreditsModal({ open, onClose }: Props) {
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="Buy gas credits"
-      description="The vault contract covers your transaction fees, from its balance rather than yours."
-    >
+    <Modal open={open} onClose={onClose} title="Buy gas credits">
       {/* Its own component so it mounts with the dialog: nothing is read, and
           no balance swept, while the dialog is closed. */}
       <BuyCredits onClose={onClose} />
@@ -95,26 +90,8 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
   const [payWith, setPayWith] = useState<string>(NATIVE)
   const [picking, setPicking] = useState(false)
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
-  const [vaultBalance, setVaultBalance] = useState<string | undefined>()
   const [swappable, setSwappable] = useState<string[]>([])
   const [quote, setQuote] = useState<QuoteState>({ kind: 'none' })
-
-  // What the vault holds is also the sum of every allowance it has issued and
-  // not seen spent, so this single figure says whether its grants are backed.
-  useEffect(() => {
-    if (!queryClient) return
-    let cancelled = false
-    void queryVaultStatus(queryClient, GAS_VAULT_ADDRESS)
-      .then((s) => {
-        if (!cancelled) setVaultBalance(s.balance)
-      })
-      .catch(() => {
-        if (!cancelled) setVaultBalance(undefined)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [queryClient])
 
   // Which private tokens could pay, which needs the permit to read them at all.
   useEffect(() => {
@@ -299,6 +276,15 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
       })
   ]
   const selected = options.find((option) => option.id === payWith) ?? options[0]
+  // With a swap, what it costs in the token is the one thing worth reading
+  // here, so it takes the place of the balance line.
+  const payDetail = !swapping
+    ? selected.detail
+    : quote.kind === 'ready'
+      ? `≈ ${formatAmount(quote.quote.amountIn.toString(), { decimals: payToken?.decimals ?? 6 })} ${paySymbol} · swapped on ShadeSwap`
+      : quote.kind === 'loading'
+        ? 'Getting a price…'
+        : selected.detail
 
   if (status.kind === 'done') {
     return (
@@ -374,7 +360,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
         {selected.image ? <img src={selected.image} alt="" className="size-8 shrink-0 rounded-pill" /> : null}
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="text-base font-medium">Pay with {selected.label}</span>
-          <span className="truncate text-label text-text-faint">{selected.detail}</span>
+          <span className="truncate text-label text-text-faint">{payDetail}</span>
         </span>
         <ChevronDown size={16} aria-hidden className="shrink-0 text-text-muted" />
       </button>
@@ -392,38 +378,6 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
         <span className="-mt-2 text-base text-negative" role="alert">
           {amountError ?? payError}
         </span>
-      ) : null}
-
-      {/* What will happen, stated before the button, as Send does. */}
-      <p className="flex items-start gap-2 text-label text-text-muted">
-        {swapping ? (
-          <>
-            <ArrowLeftRight size={14} aria-hidden className="mt-px shrink-0" />
-            {quote.kind === 'ready'
-              ? `About ${formatAmount(quote.quote.amountIn.toString(), {
-                  decimals: payToken?.decimals ?? 6
-                })} ${paySymbol}, swapped for sSCRT on ShadeSwap and unwrapped into the purchase — one transaction. At most 1% worse, or it does not go through.`
-              : quote.kind === 'loading'
-                ? 'Getting a price from ShadeSwap…'
-                : `Swapped for sSCRT on ShadeSwap and unwrapped into the purchase, in one transaction.`}
-          </>
-        ) : (
-          <>
-            <Fuel size={14} aria-hidden className="mt-px shrink-0 text-accent" />
-            {payWith === SSCRT_ADDRESS ? 'Unwrapped into the purchase in the same transaction. ' : ''}
-            Credits pay fees only — they are not a token and cannot be sent on. The vault holds{' '}
-            {vaultBalance === undefined
-              ? 'an unknown amount'
-              : `${formatAmount(vaultBalance)} ${DISPLAY_DENOM}`}{' '}
-            backing every credit it has issued.
-          </>
-        )}
-      </p>
-
-      {!permit ? (
-        <p className="-mt-2 text-label text-text-faint">
-          Sign the query permit in Settings to pay with a private token.
-        </p>
       ) : null}
 
       {status.kind === 'failed' ? (
