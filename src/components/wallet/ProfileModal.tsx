@@ -8,6 +8,7 @@ import { explorerTxUrl } from '@/chains/secret4'
 import { cn } from '@/lib/cn'
 import { shortenAddress } from '@/lib/format'
 import { LIMITS, LINK_KINDS } from '@/lib/profile'
+import { linkProblem, normaliseLinkValue } from '@/lib/profileRecord'
 import { profileUrl } from '@/lib/profileLink'
 import { useOwnProfile } from '@/hooks/useOwnProfile'
 
@@ -78,8 +79,15 @@ export default function ProfileModal({ open, onClose, address }: Props) {
 
   const valueFor = (kind: string) => draft.links.find((link) => link.kind === kind)?.value ?? ''
 
+  /** Judged on what would be saved, so a pasted `x.com/alice` is fine as it is. */
+  const problemFor = (kind: string): string | undefined => {
+    const value = valueFor(kind).trim()
+    return value ? linkProblem(kind, normaliseLinkValue(kind, value)) : undefined
+  }
+
   const saving = state.kind === 'sending'
   const filledLinks = LINK_KINDS.filter((kind) => valueFor(kind.kind).trim() !== '')
+  const badLinks = LINK_KINDS.filter((kind) => problemFor(kind.kind) !== undefined)
 
   return (
     <Modal open={open} onClose={onClose} title="Profile" size="xl">
@@ -187,8 +195,15 @@ export default function ProfileModal({ open, onClose, address }: Props) {
                     Public
                   </span>
                 </span>
-                <span className="truncate text-label text-text-faint">
-                  {filledLinks.length === 0
+                <span
+                  className={cn(
+                    'truncate text-label',
+                    badLinks.length > 0 ? 'text-negative' : 'text-text-faint'
+                  )}
+                >
+                  {badLinks.length > 0
+                    ? `Check ${badLinks.map((kind) => kind.label).join(', ')}`
+                    : filledLinks.length === 0
                     ? 'None added'
                     : filledLinks.map((kind) => kind.label).join(' · ')}
                 </span>
@@ -203,19 +218,29 @@ export default function ProfileModal({ open, onClose, address }: Props) {
               />
             </button>
 
-            {linksOpen ? (
+            {linksOpen || badLinks.length > 0 ? (
               <div id="profile-links" className="grid gap-3 px-3 pb-3 pt-1 sm:grid-cols-2">
-                {LINK_KINDS.map((kind) => (
-                  <Field key={kind.kind} label={kind.label}>
-                    <input
-                      value={valueFor(kind.kind)}
-                      onChange={(event) => setLink(kind.kind, event.target.value.slice(0, LIMITS.linkValue))}
-                      placeholder={kind.placeholder}
-                      spellCheck={false}
-                      className={INPUT}
-                    />
-                  </Field>
-                ))}
+                {LINK_KINDS.map((kind) => {
+                  const problem = problemFor(kind.kind)
+                  return (
+                    <Field key={kind.kind} label={kind.label} error={problem}>
+                      <input
+                        value={valueFor(kind.kind)}
+                        onChange={(event) => setLink(kind.kind, event.target.value.slice(0, LIMITS.linkValue))}
+                        // Show the tidied value once they leave the field, so what
+                        // they see is what gets published.
+                        onBlur={(event) => {
+                          const tidy = normaliseLinkValue(kind.kind, event.target.value)
+                          if (tidy !== event.target.value) setLink(kind.kind, tidy)
+                        }}
+                        placeholder={kind.placeholder}
+                        spellCheck={false}
+                        aria-invalid={problem ? true : undefined}
+                        className={cn(INPUT, problem && 'border-negative')}
+                      />
+                    </Field>
+                  )
+                })}
               </div>
             ) : null}
           </div>
@@ -259,7 +284,7 @@ export default function ProfileModal({ open, onClose, address }: Props) {
             size="lg"
             block
             loading={saving}
-            disabled={!dirty || loading}
+            disabled={!dirty || loading || badLinks.length > 0}
             onClick={() => void save()}
           >
             {saving ? 'Saving…' : 'Save profile'}
@@ -335,7 +360,17 @@ const INPUT =
  * the private half of this, when it arrives — differs by one prop rather than
  * by a redesign of the form.
  */
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+function Field({
+  label,
+  hint,
+  error,
+  children
+}: {
+  label: string
+  hint?: string
+  error?: string
+  children: ReactNode
+}) {
   return (
     <label className="flex flex-col gap-1.5">
       <span className="flex items-center justify-between gap-2">
@@ -348,6 +383,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
         {hint ? <span className="text-label text-text-faint">{hint}</span> : null}
       </span>
       {children}
+      {error ? <span className="text-label text-negative">{error[0].toUpperCase() + error.slice(1)}.</span> : null}
     </label>
   )
 }

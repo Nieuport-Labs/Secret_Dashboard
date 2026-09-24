@@ -2,6 +2,7 @@ import { CHAIN_ID } from '@/chains/secret4'
 import type { ProfileDraft } from '@/lib/profile'
 import { setProfileMsg } from '@/lib/profile'
 import {
+  linksProblem,
   parseRecordBody,
   profileProblem,
   type OffchainProfile,
@@ -57,7 +58,7 @@ export async function publishOffchain(
   profile: RecordProfile | null
 ): Promise<OffchainProfile> {
   if (profile) {
-    const problem = profileProblem(profile)
+    const problem = profileProblem(profile) ?? linksProblem(profile.links)
     if (problem) throw new Error(`This profile cannot be saved: ${problem}.`)
   }
 

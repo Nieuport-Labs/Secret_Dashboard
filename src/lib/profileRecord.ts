@@ -96,6 +96,97 @@ export function profileProblem(profile: RecordProfile): string | undefined {
   return undefined
 }
 
+/* -------------------------------------------------------------------------- */
+/* Link formats                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What each service accepts as a username, per its own sign-up rules. A handle
+ * that breaks them cannot exist there, so the link it makes would 404 on every
+ * visitor who clicked it.
+ *
+ * `hosts` are the domains whose profile URLs are unwrapped to the bare handle:
+ * people paste the address bar more often than they type a handle.
+ */
+const HANDLE_RULES: Record<string, { pattern: RegExp; hosts: string[]; problem: string }> = {
+  x: {
+    pattern: /^[A-Za-z0-9_]{1,15}$/,
+    hosts: ['x.com', 'twitter.com'],
+    problem: 'an X handle is 1–15 letters, digits or underscores'
+  },
+  telegram: {
+    pattern: /^[A-Za-z][A-Za-z0-9_]{4,31}$/,
+    hosts: ['t.me', 'telegram.me'],
+    problem: 'a Telegram username is 5–32 letters, digits or underscores, starting with a letter'
+  },
+  github: {
+    pattern: /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/,
+    hosts: ['github.com'],
+    problem: 'a GitHub username is up to 39 letters, digits or single hyphens, not at either end'
+  }
+}
+
+/** Current usernames: lowercase, digits, `_` and `.`, never `..`. Legacy `name#1234` still resolves. */
+const DISCORD = /^(?!.*\.\.)[a-z0-9_.]{2,32}$/
+const DISCORD_LEGACY = /^[^#@:]{2,32}#\d{4}$/
+
+/**
+ * What the owner meant, from what they typed: `@alice`, `x.com/alice` and
+ * `https://twitter.com/alice?s=20` are all `alice`. Anything that is not
+ * recognisably one of those is returned as typed, for `linkProblem` to explain.
+ */
+export function normaliseLinkValue(kind: string, raw: string): string {
+  const value = raw.trim()
+  const rule = HANDLE_RULES[kind]
+
+  if (rule) {
+    const url = /^(?:https?:\/\/)?(?:www\.)?([^/?#]+)\/+@?([^/?#]+)/i.exec(value)
+    if (url && rule.hosts.includes(url[1].toLowerCase())) return url[2]
+    return value.replace(/^@/, '')
+  }
+  if (kind === 'discord') return DISCORD_LEGACY.test(value) ? value : value.replace(/^@/, '').toLowerCase()
+  return value
+}
+
+/**
+ * Why a link's value is unusable, or `undefined` when it is fine. Kinds this
+ * code does not know pass: the contract stores `kind` as free text, and a newer
+ * client's services must survive an older one.
+ */
+export function linkProblem(kind: string, value: string): string | undefined {
+  const rule = HANDLE_RULES[kind]
+  if (rule) return rule.pattern.test(value) ? undefined : rule.problem
+
+  if (kind === 'discord') {
+    return DISCORD.test(value) || DISCORD_LEGACY.test(value)
+      ? undefined
+      : 'a Discord username is 2–32 lowercase letters, digits, underscores or periods'
+  }
+
+  if (kind === 'website') {
+    if (/\s/.test(value)) return 'a web address has no spaces'
+    try {
+      const url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`)
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') return 'a website must be an http(s) address'
+      if (!/^[^.]+(\.[^.]+)+$/.test(url.hostname)) return 'a website needs a full domain, like example.com'
+      return undefined
+    } catch {
+      return 'this is not a web address'
+    }
+  }
+
+  return undefined
+}
+
+/** The first link that is unusable, named, or `undefined`. */
+export function linksProblem(links: RecordLink[]): string | undefined {
+  for (const link of links) {
+    const problem = linkProblem(link.kind, link.value)
+    if (problem) return `${link.kind}: ${problem}`
+  }
+  return undefined
+}
+
 /** Parse and check a body. Returns the reason it is unusable, or the body. */
 export function parseRecordBody(data: string): ProfileRecordBody | string {
   let body: ProfileRecordBody
