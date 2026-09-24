@@ -1,5 +1,8 @@
 import type { Msg } from 'secretjs'
 
+import { GAS } from '@/chains/secret4'
+import { queryNativeBalance } from '@/lib/bank'
+
 import {
   MAX_IMPACT_BPS,
   PURCHASE_GAS,
@@ -22,15 +25,18 @@ import { SSCRT_ADDRESS } from '@/tokens/registry'
  * question, carried out.
  *
  * Whenever the account's gas credits are below 5 SCRT, the next transaction
- * it sends through `sendTx` carries two more messages: unwrap up to 5 sSCRT,
- * and pay the SCRT that frees straight into the gas vault for this address.
- * Both run inside the same transaction, after the user's own messages, so the
- * refill costs no extra prompt.
+ * it sends through `sendTx` carries a purchase of 5 SCRT of credit for this
+ * address, after the user's own messages, so the refill costs no extra prompt.
  *
- * With less than 5 sSCRT, the difference is bought first, in the same
- * transaction, by swapping another token on ShadeSwap (`planSwap` picks which).
- * With no token to swap, the refill uses what sSCRT there is; with nothing at
- * all, it says where to get some instead.
+ * It is paid for from, in order (`splitRefill`):
+ *
+ * 1. sSCRT, unwrapped in the same transaction;
+ * 2. public SCRT, less a small reserve for fees;
+ * 3. whatever is still missing, by swapping another token for sSCRT on
+ *    ShadeSwap first (`planSwap` picks which).
+ *
+ * When all of that comes to less than 5 it buys what it can; when it comes to
+ * nothing, it says where to get some instead.
  *
  * The same rules as the profile write that also rides along (see `sendTx`):
  * the refill must never be why someone's own transaction failed. So it is left
@@ -71,10 +77,27 @@ export interface Refill {
   amount: bigint
 }
 
-/** How much to refill with, given the credit left and the sSCRT held. Zero means nothing to refill with. */
-export function refillAmount(credit: bigint, sscrt: bigint): bigint | undefined {
-  if (credit >= CREDIT_FLOOR) return undefined
-  return sscrt < CREDIT_FLOOR ? sscrt : CREDIT_FLOOR
+/**
+ * Public SCRT a refill never spends. Credits pay the fees once they exist, but
+ * this transaction's own fee may still come out of the balance — and running
+ * the wallet to zero is how the next thing someone tries fails for a reason
+ * that looks unrelated.
+ */
+export const SCRT_RESERVE = 200_000n
+
+/**
+ * Where a 5 SCRT refill comes from: sSCRT first, then public SCRT above the
+ * reserve, and `short` is what neither covers — the part a swap can buy.
+ */
+export function splitRefill(
+  sscrt: bigint,
+  scrt: bigint
+): { fromSscrt: bigint; fromScrt: bigint; short: bigint } {
+  const fromSscrt = sscrt < CREDIT_FLOOR ? sscrt : CREDIT_FLOOR
+  const spare = scrt > SCRT_RESERVE ? scrt - SCRT_RESERVE : 0n
+  const left = CREDIT_FLOOR - fromSscrt
+  const fromScrt = spare < left ? spare : left
+  return { fromSscrt, fromScrt, short: left - fromScrt }
 }
 
 function noticeNoSscrt(): void {
@@ -83,7 +106,7 @@ function noticeNoSscrt(): void {
   useNotifications.getState().push({
     kind: 'gas-empty',
     message:
-      'Your gas credits are below 5 and there is nothing to refill them with — no sSCRT, and no token to swap for it. You can get SCRT/sSCRT on Shade Swap.'
+      'Your gas credits are below 5 and there is nothing to refill them with — no SCRT, no sSCRT, and no token to swap for it. You can get SCRT/sSCRT on Shade Swap.'
   })
 }
 
@@ -187,25 +210,26 @@ export async function refillFor(address: string): Promise<Refill | undefined> {
   const credit = vaultCredit(grants) ?? 0n
   if (credit >= CREDIT_FLOOR) return undefined
 
-  // sSCRT is private, so its balance needs the permit. Without one there is
-  // no way to know what is there, and the refill waits until there is.
+  // sSCRT is private, so its balance needs the permit. Without one, only the
+  // public SCRT can pay: neither sSCRT nor anything to swap can be seen.
   const permit = loadPermit(address)
-  if (!permit) return undefined
-  const balance = await queryBalance(queryClient, permitAuth(permit), SSCRT_ADDRESS)
-  if (balance.status !== 'ok') return undefined
+  let sscrt = 0n
+  if (permit) {
+    const balance = await queryBalance(queryClient, permitAuth(permit), SSCRT_ADDRESS)
+    if (balance.status !== 'ok') return undefined
+    sscrt = BigInt(balance.amount)
+  }
+  const scrt = BigInt(await queryNativeBalance(queryClient, address))
 
-  const sscrt = BigInt(balance.amount)
-  let amount = refillAmount(credit, sscrt)
-  if (amount === undefined) return undefined
+  const { fromSscrt, fromScrt, short } = splitRefill(sscrt, scrt)
 
-  // Short of 5: buy the rest by swapping something else, in this same
-  // transaction. The unwrap below then covers what is held plus what the
-  // swap is guaranteed to return.
+  // Still short: buy the rest by swapping something else, in this same
+  // transaction. The unwrap then covers the sSCRT held plus what the swap is
+  // guaranteed to return.
   const swap =
-    amount < CREDIT_FLOOR
-      ? await planSwap(address, permit, CREDIT_FLOOR - amount).catch(() => undefined)
-      : undefined
-  if (swap) amount += swap.minOut
+    short > 0n && permit ? await planSwap(address, permit, short).catch(() => undefined) : undefined
+  const unwrap = fromSscrt + (swap?.minOut ?? 0n)
+  const amount = unwrap + fromScrt
 
   if (amount === 0n) {
     noticeNoSscrt()
@@ -214,7 +238,7 @@ export async function refillFor(address: string): Promise<Refill | undefined> {
 
   return {
     amount,
-    gas: REFILL_GAS + (swap?.gas ?? 0),
-    messages: await purchaseMessages(queryClient, address, amount, swap?.message)
+    gas: (unwrap > 0n ? REFILL_GAS : GAS.buyGasCredit) + (swap?.gas ?? 0),
+    messages: await purchaseMessages(queryClient, address, { unwrap, total: amount }, swap?.message)
   }
 }

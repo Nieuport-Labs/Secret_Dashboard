@@ -223,7 +223,12 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
         // The swap promises `credits` of sSCRT at least; the unwrap and the
         // purchase then spend exactly that.
         const swap = route ? await swapMessage(address, route.route, route.amountIn, credits) : undefined
-        const messages = await purchaseMessages(queryClient, address, credits, swap)
+        const messages = await purchaseMessages(
+          queryClient,
+          address,
+          { unwrap: credits, total: credits },
+          swap
+        )
         const gasLimit = PURCHASE_GAS + (route ? swapGas(route.route) : 0)
         tx = await broadcastTracked(
           { label: `Buy ${amount} ${DISPLAY_DENOM} of gas credit`, detail: `with ${paySymbol}` },

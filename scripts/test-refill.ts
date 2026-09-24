@@ -8,7 +8,7 @@
 // zustand's persist reads `window.localStorage`; nothing here needs it to work.
 Object.defineProperty(globalThis, 'window', { configurable: true, value: globalThis })
 
-const { CREDIT_FLOOR, refillAmount } = await import('../src/lib/autoRefill.ts')
+const { CREDIT_FLOOR, SCRT_RESERVE, splitRefill } = await import('../src/lib/autoRefill.ts')
 const { canUnwrap } = await import('../src/store/settings.ts')
 const { SSCRT_ADDRESS } = await import('../src/tokens/registry.ts')
 const { findRoutes, swapIn, swapOut } = await import('../src/lib/shadeSwap.ts')
@@ -28,11 +28,24 @@ function check(name: string, condition: boolean, detail?: unknown): void {
 
 const SCRT = 1_000_000n
 
-check('5 credits or more: no refill', refillAmount(5n * SCRT, 100n * SCRT) === undefined)
-check('below 5 with plenty of sSCRT: 5 sSCRT', refillAmount(4n * SCRT, 100n * SCRT) === CREDIT_FLOOR)
-check('no credit at all: still 5, not more', refillAmount(0n, 100n * SCRT) === 5n * SCRT)
-check('less than 5 sSCRT: all of it', refillAmount(1n * SCRT, 3n * SCRT) === 3n * SCRT)
-check('no sSCRT: zero, which is the notice', refillAmount(1n * SCRT, 0n) === 0n)
+{
+  const split = (sscrt: bigint, scrt: bigint) => splitRefill(sscrt * SCRT, scrt * SCRT)
+  const is = (got: ReturnType<typeof split>, sscrt: bigint, scrt: bigint, short: bigint) =>
+    got.fromSscrt === sscrt && got.fromScrt === scrt && got.short === short
+
+  check('plenty of sSCRT: 5 of it, nothing else', is(split(100n, 100n), 5n * SCRT, 0n, 0n))
+  check('some sSCRT, the rest from SCRT', is(split(2n, 100n), 2n * SCRT, 3n * SCRT, 0n))
+  check('no sSCRT: all 5 from SCRT', is(split(0n, 100n), 0n, 5n * SCRT, 0n))
+  check(
+    'SCRT keeps its reserve, and the rest is short',
+    is(split(1n, 2n), 1n * SCRT, 2n * SCRT - SCRT_RESERVE, 2n * SCRT + SCRT_RESERVE)
+  )
+  check(
+    'nothing at all: all 5 short, which is the swap or the notice',
+    is(split(0n, 0n), 0n, 0n, CREDIT_FLOOR)
+  )
+  check('dust under the reserve is left alone', splitRefill(0n, SCRT_RESERVE - 1n).fromScrt === 0n)
+}
 
 const ATOM = 'secret19e75l25r6sa6nhdf4lggjmgpw0vmpfvsw5cnpe'
 check('easy mode unwraps sSCRT', canUnwrap('easy', SSCRT_ADDRESS))

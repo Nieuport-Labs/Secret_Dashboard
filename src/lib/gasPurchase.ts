@@ -25,14 +25,14 @@ export const MAX_IMPACT_BPS = 300
 export const PURCHASE_GAS = GAS.unwrap + GAS.buyGasCredit
 
 /**
- * Unwrap `amount` of sSCRT and buy that much credit for `address`, after
- * `swap` when there is one — it runs first, so the sSCRT it returns is in the
- * balance the unwrap draws on.
+ * Buy `total` of credit for `address`, of which `unwrap` comes out of sSCRT
+ * and the rest from the public SCRT balance. `swap`, when there is one, runs
+ * first, so the sSCRT it returns is in the balance the unwrap draws on.
  */
 export async function purchaseMessages(
   client: SecretNetworkClient,
   address: string,
-  amount: bigint,
+  { unwrap, total }: { unwrap: bigint; total: bigint },
   swap?: Msg
 ): Promise<Msg[]> {
   const { MsgExecuteContract } = await import('secretjs')
@@ -43,20 +43,24 @@ export async function purchaseMessages(
 
   return [
     ...(swap ? [swap] : []),
-    new MsgExecuteContract({
-      sender: address,
-      contract_address: SSCRT_ADDRESS,
-      code_hash: sscrtHash,
-      msg: redeemMsg(amount.toString()),
-      sent_funds: []
-    }),
+    ...(unwrap > 0n
+      ? [
+          new MsgExecuteContract({
+            sender: address,
+            contract_address: SSCRT_ADDRESS,
+            code_hash: sscrtHash,
+            msg: redeemMsg(unwrap.toString()),
+            sent_funds: []
+          })
+        ]
+      : []),
     // Runs after the unwrap above has put the SCRT in the bank balance.
     new MsgExecuteContract({
       sender: address,
       contract_address: GAS_VAULT_ADDRESS,
       code_hash: vaultHash,
       msg: { grant: { grantee: address } },
-      sent_funds: [{ denom: DENOM, amount: amount.toString() }]
+      sent_funds: [{ denom: DENOM, amount: total.toString() }]
     })
   ]
 }
