@@ -18,7 +18,7 @@
     "test:errors": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-errors.ts",
     "test:multisig": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-multisig.ts",
     "test:profile": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-profile.ts",
-    "test:preferences": "node --experimental-strip-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-preferences.ts"
+    "test:settings": "node --experimental-transform-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-settings.ts"
   },
   "dependencies": {
     "@cosmjs/amino": "^0.32.4",

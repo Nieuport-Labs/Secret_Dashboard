@@ -5,72 +5,45 @@ import ChoiceCard from '@/components/ui/ChoiceCard'
 import Modal from '@/components/ui/Modal'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { errorMessage } from '@/lib/errors'
-import type { AssetMode, GasMode } from '@/lib/preferencesRecord'
-import { canSignPreferences, sendPreferences, signPreferences } from '@/lib/preferencesServer'
-import { syncPreferences, usePreferencesStore } from '@/store/preferences'
+import type { AssetMode, GasMode } from '@/lib/settingsRecord'
+import { completeOnboarding, useSettingsSync } from '@/store/settingsSync'
 import { useWallet } from '@/store/wallet'
 
 /**
  * Two questions, asked once per account the first time it connects, in the
  * same shape as "Add an account": a dialog, two cards, pick one.
  *
- * Only the answers are collected here. Nothing in the app acts on them yet.
+ * Whether to ask is `store/settingsSync.ts`'s call — an account whose
+ * settings are on the server has answered. The answers become ordinary
+ * settings, toggled later in Settings and synced like the rest.
  *
  * It cannot be skipped: there is no close button, and neither the scrim nor
  * Escape closes it. Disconnecting the wallet is the only other way out.
  */
-export default function PreferencesOnboarding() {
+export default function FirstRunQuestions() {
   const address = useWallet((state) => (state.status === 'connected' ? state.address : undefined))
   const walletId = useWallet((state) => state.walletId)
-  const remember = usePreferencesStore((state) => state.remember)
+  const open = useSettingsSync((state) => state.needsAnswers && state.address === address)
 
-  const [open, setOpen] = useState(false)
   const [step, setStep] = useState<0 | 1>(0)
   const [gas, setGas] = useState<GasMode>()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
 
   useEffect(() => {
-    setOpen(false)
     setStep(0)
     setGas(undefined)
     setError(undefined)
-    if (!address) return
-
-    let current = true
-    void syncPreferences(address).then((result) => {
-      if (current && result === 'unanswered') setOpen(true)
-    })
-    return () => {
-      current = false
-    }
   }, [address])
 
   if (!address || !walletId) return null
 
-  const finish = async (assets: AssetMode) => {
+  const finish = async (assetMode: AssetMode) => {
     if (!gas) return
-    const preferences = { gas, assets }
-
-    // A wallet that cannot sign a message can still answer; the answers stay
-    // on this device, which is all an unsigned copy could safely be.
-    if (!canSignPreferences(walletId)) {
-      remember(address, { preferences, signedAt: Date.now() })
-      setOpen(false)
-      return
-    }
-
     setSaving(true)
     setError(undefined)
     try {
-      const signed = await signPreferences(walletId, address, preferences)
-      remember(address, { preferences, signedAt: signed.body.signedAt, unsent: signed.record })
-      setOpen(false)
-      // Not awaited by the dialog: the answers are already kept, and a refusal
-      // (an account the chain has not seen yet) is retried on the next visit.
-      void sendPreferences(signed.record)
-        .then(() => remember(address, { preferences, signedAt: signed.body.signedAt }))
-        .catch(() => undefined)
+      await completeOnboarding(walletId, address, { gasMode: gas, assetMode })
     } catch (caught) {
       setError(errorMessage(caught))
     } finally {

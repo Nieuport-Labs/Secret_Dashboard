@@ -10,6 +10,7 @@ import { useActingMode } from '@/store/accounts'
 import { useActiveMultisigConfig } from '@/store/multisig'
 import { usePrivacy } from '@/store/privacy'
 import { applyTheme, useSettings } from '@/store/settings'
+import { connectSettings, watchSettings } from '@/store/settingsSync'
 import { handleAccountChange, lastUsedWallet, useWallet } from '@/store/wallet'
 
 /**
@@ -43,6 +44,14 @@ export default function App() {
   const initQueryClient = useWallet((state) => state.initQueryClient)
 
   useEffect(() => applyTheme(theme), [theme])
+
+  // Settings follow the connected account between devices. Here rather than in
+  // the shell so the theme is right on a profile page too.
+  const syncAddress = useWallet((state) => (state.status === 'connected' ? state.address : undefined))
+  useEffect(() => watchSettings(), [])
+  useEffect(() => {
+    void connectSettings(syncAddress)
+  }, [syncAddress])
 
   /*
    * Read here and nowhere else, on purpose.

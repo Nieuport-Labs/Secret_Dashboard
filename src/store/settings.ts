@@ -2,24 +2,19 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 import { GAS_SLICE_USD } from '@/chains/osmosis'
+import type { AssetMode, FeeMode, GasMode, Theme } from '@/lib/settingsRecord'
+
+export type { AssetMode, FeeMode, GasMode, Theme }
 
 /**
  * User preferences, persisted locally.
  *
  * Everything here is a choice the user made and expects to survive a reload.
  * Nothing derived from the chain belongs in it.
+ *
+ * Most of it also follows the connected account to other devices — see
+ * `lib/settingsSync.ts` for which, and how.
  */
-
-export type Theme = 'dark' | 'light'
-
-/** Who pays transaction fees. Mirrors the fee-grant SDK's `SelectionMode`. */
-export type FeeMode =
-  /** Spend the best usable grant whenever one covers the fee. */
-  | 'auto'
-  /** Always use the grant named in `feeGranter`. */
-  | 'select'
-  /** Never spend a grant, even when one is usable. */
-  | 'off'
 
 interface SettingsState {
   theme: Theme
@@ -40,11 +35,15 @@ interface SettingsState {
   /** Size of the gas slice taken at bridge time, in USD. */
   gasSliceUsd: number
 
+  /** First-run answers. `undefined` until the account has given them. */
+  gasMode: GasMode | undefined
+  assetMode: AssetMode | undefined
+
   set: <K extends keyof SettingsValues>(key: K, value: SettingsValues[K]) => void
   reset: () => void
 }
 
-type SettingsValues = Omit<SettingsState, 'set' | 'reset'>
+export type SettingsValues = Omit<SettingsState, 'set' | 'reset'>
 
 const DEFAULTS: SettingsValues = {
   theme: 'dark',
@@ -55,7 +54,9 @@ const DEFAULTS: SettingsValues = {
   rpcOverride: '',
   notificationsEnabled: true,
   autoWrapDeposits: false,
-  gasSliceUsd: GAS_SLICE_USD
+  gasSliceUsd: GAS_SLICE_USD,
+  gasMode: undefined,
+  assetMode: undefined
 }
 
 export const useSettings = create<SettingsState>()(

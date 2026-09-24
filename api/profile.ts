@@ -27,7 +27,7 @@ import { parseRecordBody } from '../src/lib/profileRecord.js'
  * saved a profile here.
  *
  * Storage, signature checks and the "has the chain seen it" gate are shared
- * with `api/preferences.ts`, in `api/_signed.ts`.
+ * with `api/settings.ts`, in `api/_signed.ts`.
  */
 
 /** A full avatar is 12 kB of base64 inside a JSON string inside JSON. */

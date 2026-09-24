@@ -3,8 +3,9 @@ import { Secp256k1, Secp256k1Signature, sha256 } from '@cosmjs/crypto'
 import { fromBase64, toBase64, toUtf8 } from '@cosmjs/encoding'
 
 /**
- * What `api/profile.ts` and `api/preferences.ts` have in common: a record
- * signed by the account it describes (ADR-036), kept verbatim in Upstash Redis.
+ * What `api/profile.ts` and `api/settings.ts` have in common: a record the
+ * account signed (ADR-036) — directly, or by vouching for the device key that
+ * did — kept verbatim in Upstash Redis.
  *
  * The leading underscore keeps Vercel from deploying this file as a function
  * of its own.
@@ -155,4 +156,29 @@ export async function accountExists(address: string): Promise<boolean> {
     }
   }
   throw new Error('could not reach the chain to check the account')
+}
+
+/**
+ * A P-256 ECDSA signature (raw r‖s) over SHA-256 of `data`, by `publicKey`
+ * (raw, uncompressed). How a device key signs — WebCrypto on both ends, so the
+ * browser needs no crypto library to produce one.
+ */
+export async function verifyP256(publicKey: string, data: string, signature: string): Promise<boolean> {
+  try {
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(fromBase64(publicKey)),
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['verify']
+    )
+    return await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      key,
+      new Uint8Array(fromBase64(signature)),
+      new Uint8Array(toUtf8(data))
+    )
+  } catch {
+    return false
+  }
 }
