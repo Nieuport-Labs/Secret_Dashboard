@@ -9,41 +9,34 @@ import {
   redis,
   verify
 } from './_signed.js'
-import { parseRecordBody } from '../src/lib/profileRecord.js'
+import { parsePreferencesBody } from '../src/lib/preferencesRecord.js'
 
 /**
- * Off-chain profiles, for accounts that cannot pay to write one on chain yet.
+ * The answers to the first-run questions (`src/lib/preferencesRecord.ts`).
  *
- *   GET  /api/profile?address=secret1…           → { record: SignedProfileRecord | null }
- *   POST /api/profile  body: SignedProfileRecord → { ok: true } | { error }
+ *   GET  /api/preferences?address=secret1…               → { record: SignedPreferencesRecord | null }
+ *   POST /api/preferences  body: SignedPreferencesRecord → { ok: true } | { error }
  *
- * Nothing here is trusted because this server said so. Every record is an
- * ADR-036 signature by the account it describes, stored verbatim, so a reader
- * can check it without asking us. What the server adds is only a place to keep
- * it until the owner's next transaction writes it on chain (`src/lib/sendTx.ts`).
- *
- * What this costs in privacy, and the UI says so: the registry contract cannot
- * be enumerated, this store can. Whoever runs it has the list of addresses that
- * saved a profile here.
- *
- * Storage, signature checks and the "has the chain seen it" gate are shared
- * with `api/preferences.ts`, in `api/_signed.ts`.
+ * Kept here rather than only in the browser so they follow the account to
+ * another device, and so the questions are asked once per account rather than
+ * once per browser. The rules are the profile store's: signed by the account,
+ * newer wins, only accounts the chain has seen.
  */
 
-/** A full avatar is 12 kB of base64 inside a JSON string inside JSON. */
-const MAX_BODY_BYTES = 40_000
+/** Two short enums and a signature. Anything near this is not a preferences record. */
+const MAX_BODY_BYTES = 2_000
 
-const keyFor = (address: string) => `profile:v1:${address}`
+const keyFor = (address: string) => `preferences:v1:${address}`
 
 export async function GET(request: Request): Promise<Response> {
-  const params = new URL(request.url).searchParams
-
-  const address = params.get('address') ?? ''
+  const address = new URL(request.url).searchParams.get('address') ?? ''
   if (!ADDRESS.test(address)) return json({ error: 'bad address' }, 400)
 
   try {
     const raw = await redis<string | null>(['GET', keyFor(address)])
-    return json({ record: decodeStored(raw) }, 200, 'public, s-maxage=15, stale-while-revalidate=60')
+    // Not cached at the edge: an answer given a second ago on this device has
+    // to be there when the page reloads, or the questions come back.
+    return json({ record: decodeStored(raw) })
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'storage failed' }, 503)
   }
@@ -56,7 +49,7 @@ export async function POST(request: Request): Promise<Response> {
   const record = parseSigned(text)
   if (typeof record === 'string') return json({ error: record }, 400)
 
-  const body = parseRecordBody(record.data)
+  const body = parsePreferencesBody(record.data)
   if (typeof body === 'string') return json({ error: body }, 400)
   if (!ADDRESS.test(body.address)) return json({ error: 'bad address' }, 400)
   if (body.signedAt > Date.now() + MAX_CLOCK_SKEW_MS) return json({ error: 'signed in the future' }, 400)
@@ -69,13 +62,12 @@ export async function POST(request: Request): Promise<Response> {
       return json({ error: 'this account has never appeared on chain' }, 403)
     }
 
-    // Newer wins. An older signature replayed — or an older tab saving late —
-    // must not overwrite what the owner signed since.
+    // Newer wins, so a copy replayed from an older device cannot undo a change.
     const stored = decodeStored(await redis<string | null>(['GET', keyFor(body.address)]))
     if (stored) {
-      const previous = parseRecordBody(stored.data)
+      const previous = parsePreferencesBody(stored.data)
       if (typeof previous !== 'string' && previous.signedAt >= body.signedAt) {
-        return json({ error: 'a newer profile is already saved' }, 409)
+        return json({ error: 'newer preferences are already saved' }, 409)
       }
     }
 

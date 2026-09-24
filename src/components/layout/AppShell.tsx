@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import Toaster from '@/components/notifications/Toaster'
+import PreferencesOnboarding from '@/components/onboarding/PreferencesOnboarding'
 import ConnectWalletModal from '@/components/wallet/ConnectWalletModal'
 import WalletDataProvider from '@/components/wallet/WalletDataProvider'
 import TransportChip from '@/pages/multisig/components/TransportChip'
@@ -65,6 +66,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
         {/* One picker for the whole app, opened from the header and from every
             empty state that needs an account. */}
         <ConnectWalletModal />
+        {/* The first-run questions, once per account. */}
+        <PreferencesOnboarding />
         <Toaster />
       </div>
     </WalletDataProvider>
