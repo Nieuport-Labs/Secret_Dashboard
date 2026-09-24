@@ -1,10 +1,9 @@
-import { CheckCircle2, ChevronDown, ExternalLink, Eye, ShieldCheck } from 'lucide-react'
+import { ArrowDown, CheckCircle2, ChevronDown, ExternalLink, Eye, ShieldCheck } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { PickerDialog } from '@/components/ui/Picker'
-import AssetAmount from '@/components/wallet/AssetAmount'
 import { explorerTxUrl } from '@/chains/secret4'
 import { useAssetBalance } from '@/hooks/useAssetBalance'
 import { useBalances } from '@/hooks/useBalances'
@@ -66,6 +65,11 @@ export default function PayInvoiceModal({ open, onClose, invoice, onPaid }: Prop
       <PayInvoice invoice={invoice} onPaid={onPaid} />
     </Modal>
   )
+}
+
+/** A long figure is set smaller on a phone rather than cut off with an ellipsis. */
+function figureSize(amount: string): string {
+  return amount.length > 8 ? 'text-[1.5rem] sm:text-[2rem]' : 'text-[2rem]'
 }
 
 function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void }) {
@@ -196,14 +200,6 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
   const selected = options.find((option) => option.id === payWith) ?? options[0]
   const paySymbol = selected.label
 
-  const payDetail = !swapping
-    ? selected.detail
-    : quote.kind === 'ready'
-      ? `≈ ${formatAmount(quote.quote.amountIn.toString(), { decimals: payToken?.decimals ?? 6 })} ${paySymbol} · swapped on ShadeSwap`
-      : quote.kind === 'loading'
-        ? 'Getting a price…'
-        : selected.detail
-
   // Why the chosen way of paying cannot cover the invoice, if it cannot.
   let payError: string | undefined
   if (payWith === DIRECT && directHeld !== undefined && directHeld < amount)
@@ -270,50 +266,113 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
     )
   }
 
+  // What leaves the payer's wallet: the invoice amount itself, or — through a
+  // swap — the quoted cost in the chosen token.
+  const payDecimals = swapping ? (payToken?.decimals ?? 6) : asset.decimals
+  const payAmount = !swapping
+    ? invoice.amount
+    : quote.kind === 'ready'
+      ? formatAmount(quote.quote.amountIn.toString(), { decimals: payDecimals })
+      : undefined
+
+  const payBalance =
+    payWith === DIRECT
+      ? directHeld
+      : payWith === UNWRAP
+        ? token
+          ? held.get(token)
+          : undefined
+        : held.get(payWith)
+
   return (
     <>
-      {/* The amount, in the same card Send and gas credits open with — fixed
-          here, since the invoice set it. */}
-      <div className="flex flex-col gap-4 rounded-card border border-border bg-surface p-4">
-        <span className="text-label text-text-muted">You&rsquo;re paying</span>
-        <div className="flex flex-col items-center gap-2 py-3">
-          <AssetAmount amount={invoice.amount} symbol={asset.symbol} image={asset.image} layout="stacked" />
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <span className="min-w-0 truncate text-label text-text-muted">To {shortenAddress(invoice.to)}</span>
-          <span
-            className={cn(
-              'flex shrink-0 items-center gap-1 rounded-pill border border-border px-2.5 py-1 text-label font-medium',
-              asset.private ? 'text-accent' : 'text-text-muted'
+      {/*
+        Laid out as a swap, the way the wrap panel is: what leaves the wallet on
+        top, with the token picker beside it, and what the recipient gets
+        underneath. Paying in the invoice's own asset, the two are simply the
+        same figure.
+      */}
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3 rounded-card border border-border bg-surface p-4">
+          <span className="text-label text-text-muted">You pay</span>
+          <div className="flex items-center gap-3">
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate font-medium leading-tight tabular-nums',
+                figureSize(payAmount ?? ''),
+                payAmount === undefined && 'text-text-faint'
+              )}
+            >
+              {payAmount ?? (quote.kind === 'loading' ? '…' : '—')}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPicking(true)}
+              aria-haspopup="dialog"
+              aria-label={`Pay with ${selected.label}`}
+              className="state-layer flex shrink-0 items-center gap-2 rounded-pill border border-border py-1.5 pl-1.5 pr-2.5"
+            >
+              {selected.image ? (
+                <img src={selected.image} alt="" className="size-6 shrink-0 rounded-pill" />
+              ) : null}
+              <span className="text-base font-medium">{selected.label}</span>
+              <ChevronDown size={14} aria-hidden className="text-text-muted" />
+            </button>
+          </div>
+          <div className="flex items-center justify-between gap-3 text-label">
+            {!permit ? (
+              <button
+                type="button"
+                onClick={() => void direct.signPermit()}
+                disabled={direct.signing}
+                className="text-accent disabled:opacity-50"
+              >
+                {direct.signing ? 'Signing…' : 'Pay with another token'}
+              </button>
+            ) : (
+              <span className="text-text-faint">{swapping ? 'Swapped on ShadeSwap' : ''}</span>
             )}
-            title={
-              asset.private
-                ? 'A SNIP-20 transfer: the chain records a contract call, not who was paid or how much.'
-                : 'A bank transfer: the amount and both addresses are public.'
-            }
-          >
-            {asset.private ? <ShieldCheck size={12} aria-hidden /> : <Eye size={12} aria-hidden />}
-            {asset.private ? 'Private' : 'Public'}
-          </span>
+            {payBalance !== undefined ? (
+              <span className="tabular-nums text-text-faint">
+                Balance {formatAmount(payBalance.toString(), { decimals: payDecimals })}
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        <span className="mx-auto flex size-8 items-center justify-center text-text-faint">
+          <ArrowDown size={16} aria-hidden />
+        </span>
+
+        <div className="flex flex-col gap-3 rounded-card border border-border bg-surface p-4">
+          <span className="text-label text-text-muted">They receive</span>
+          <div className="flex items-center gap-3">
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate font-medium leading-tight tabular-nums',
+                figureSize(invoice.amount)
+              )}
+            >
+              {invoice.amount}
+            </span>
+            <span className="flex shrink-0 items-center gap-2 py-1.5 pr-2.5">
+              {asset.image ? <img src={asset.image} alt="" className="size-6 shrink-0 rounded-pill" /> : null}
+              <span className="text-base font-medium">{asset.symbol}</span>
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-3 text-label text-text-faint">
+            <span className="min-w-0 truncate">To {shortenAddress(invoice.to)}</span>
+            <span className="flex shrink-0 items-center gap-1">
+              {asset.private ? (
+                <ShieldCheck size={12} aria-hidden className="text-accent" />
+              ) : (
+                <Eye size={12} aria-hidden />
+              )}
+              {asset.private ? 'Private' : 'Public'}
+            </span>
+          </div>
         </div>
       </div>
-
-      {/* What pays for it — the same picker row as Send and gas credits. The
-          recipient is not repeated: the pay page behind this dialog names them,
-          with the address, and that is where it is checked. */}
-      <button
-        type="button"
-        onClick={() => setPicking(true)}
-        aria-haspopup="dialog"
-        className="state-layer -mt-2 flex items-center gap-3 rounded-card border border-border bg-surface px-4 py-3 text-left"
-      >
-        {selected.image ? <img src={selected.image} alt="" className="size-8 shrink-0 rounded-pill" /> : null}
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="text-base font-medium">Pay with {selected.label}</span>
-          <span className="truncate text-label text-text-faint">{payDetail}</span>
-        </span>
-        <ChevronDown size={16} aria-hidden className="shrink-0 text-text-muted" />
-      </button>
 
       <PickerDialog
         open={picking}
@@ -323,20 +382,6 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
         value={payWith}
         onChange={(id) => setPayWith(id)}
       />
-
-      {/* A private balance is only readable with the query permit; one
-          signature, no transaction — and it is also what lets other tokens pay. */}
-      {!permit ? (
-        <Button
-          variant="text"
-          size="sm"
-          className="-mt-3 self-center"
-          loading={direct.signing}
-          onClick={() => void direct.signPermit()}
-        >
-          Sign permit to pay with private tokens
-        </Button>
-      ) : null}
 
       {payError ? (
         <span className="-mt-2 text-base text-negative" role="alert">
