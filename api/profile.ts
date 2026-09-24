@@ -2,7 +2,11 @@ import { pubkeyToAddress, serializeSignDoc, type StdSignDoc } from '@cosmjs/amin
 import { Secp256k1, Secp256k1Signature, sha256 } from '@cosmjs/crypto'
 import { fromBase64, toBase64, toUtf8 } from '@cosmjs/encoding'
 
-import { parseRecordBody, type ProfileRecordBody, type SignedProfileRecord } from '../src/lib/profileRecord'
+import {
+  parseRecordBody,
+  type ProfileRecordBody,
+  type SignedProfileRecord
+} from '../src/lib/profileRecord.js'
 
 /**
  * Off-chain profiles, for accounts that cannot pay to write one on chain yet.

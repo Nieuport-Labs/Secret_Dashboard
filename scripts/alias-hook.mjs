@@ -30,5 +30,14 @@ export function resolve(specifier, context, nextResolve) {
     return nextResolve(withExtension(new URL(specifier, context.parentURL)).href, context)
   }
 
+  // `api/` imports app modules as `.js`, which is what Vercel's Node runtime
+  // resolves after compiling them; on disk they are still `.ts`.
+  if (specifier.startsWith('.') && context.parentURL && specifier.endsWith('.js')) {
+    const url = new URL(specifier, context.parentURL)
+    if (!existsSync(fileURLToPath(url))) {
+      return nextResolve(new URL(specifier.replace(/\.js$/, '.ts'), context.parentURL).href, context)
+    }
+  }
+
   return nextResolve(specifier, context)
 }
