@@ -50,9 +50,17 @@ export function withGasBuffer(gasLimit: number): number {
 /** Gas limits, sized per message rather than one pessimistic number, then padded by `GAS_BUFFER`. */
 const GAS_BASE = {
   send: 25_000,
-  snip20Transfer: 60_000,
-  wrap: 60_000,
-  unwrap: 60_000,
+  /**
+   * The three everyday SNIP-20 executes. Sized from what they actually cost on
+   * chain, not from the older contracts they were first measured on: the
+   * current ones (USDC, TIA, sSCRT among them) write a delayed-write buffer
+   * and notification data on every balance change, and spend 75–99k where the
+   * old ones spent under 50k. Sampled from mainnet on 2026-09-24; 60k
+   * (72k padded) ran a USDC transfer out of gas by a single unit.
+   */
+  snip20Transfer: 110_000,
+  wrap: 110_000,
+  unwrap: 110_000,
   setViewingKey: 60_000,
   revokePermit: 40_000,
   delegate: 250_000,
