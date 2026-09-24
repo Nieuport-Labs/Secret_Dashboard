@@ -4,6 +4,7 @@ import type { Msg } from 'secretjs'
 import { GAS } from '@/chains/secret4'
 import { errorMessage } from '@/lib/errors'
 import { sendTx } from '@/lib/sendTx'
+import { labelFor } from '@/lib/txProgress'
 import { execMessage } from '@/lib/authz'
 import { MSG_EDIT_VALIDATOR, MSG_EXEC, MSG_UNJAIL, MSG_WITHDRAW_COMMISSION } from '@/lib/msgTypes'
 import {
@@ -47,7 +48,7 @@ export function useValidatorAdmin(valoper: string, onSuccess?: () => void) {
         const gas = viaGrant ? gasLimit + GAS.authzExec : gasLimit
         const feeTypes = viaGrant ? [MSG_EXEC] : [msgType]
 
-        const tx = await sendTx(client, [outgoing], gas, feeTypes)
+        const tx = await sendTx(client, [outgoing], gas, feeTypes, labelFor([msgType]))
 
         if (tx.code !== 0) {
           setState({ kind: 'failed', message: tx.rawLog || `The chain rejected it (code ${tx.code}).` })

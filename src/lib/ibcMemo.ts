@@ -67,6 +67,42 @@ export function plainTransfer(receiver: string): HookedTransfer {
   return { receiver, memo: '' }
 }
 
+/**
+ * Send it to a chain in the middle first, and have that chain pass it on.
+ *
+ * Packet-forward reads `forward` from the memo of a packet it receives and
+ * sends the tokens on over `channel` to `forward.receiver`. Whatever the
+ * last hop needs in its own memo — the wrap hook, say — rides in `next`, and
+ * packet-forward sets it as the memo of the packet it sends. So `inner` is
+ * built exactly as it would be for a direct transfer and only wrapped here;
+ * rule 1 above still holds on the hop that matters, because the forwarded
+ * packet is addressed to `inner.receiver`.
+ *
+ * @param hopReceiver an address on the middle chain. Recent packet-forward
+ *   ignores it; older versions briefly hold the funds there, so it should be
+ *   the sender's own key under that chain's prefix.
+ */
+export function forwardedTransfer(
+  inner: HookedTransfer,
+  hopReceiver: string,
+  channel: string
+): HookedTransfer {
+  const next = inner.memo.trim() ? (JSON.parse(inner.memo) as unknown) : undefined
+  return {
+    receiver: hopReceiver,
+    memo: JSON.stringify({
+      forward: {
+        receiver: inner.receiver,
+        port: 'transfer',
+        channel,
+        timeout: '10m',
+        retries: 2,
+        ...(next ? { next } : {})
+      }
+    })
+  }
+}
+
 /*
  * The gas leg's swap-and-forward memo used to live here, addressed to
  * Osmosis's `crosschain-swaps` contract. It is gone: that contract resolves a

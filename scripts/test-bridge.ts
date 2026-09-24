@@ -11,7 +11,12 @@
 
 import { quoteGasSlice, shouldOfferGas, fittingGasSliceUsd } from '../src/lib/getGas.ts'
 import { wrapDepositMemo } from '../src/lib/ibcMemo.ts'
-import { parseSkipTransferMsg, planSkipAddresses } from '../src/lib/skipGo.ts'
+import {
+  parseSkipGasMsg,
+  parseSkipTransferMsg,
+  planSkipAddresses,
+  SKIP_OSMOSIS_ENTRY_POINT
+} from '../src/lib/skipGo.ts'
 import { IBC_HOOKS_WRAPPER } from '../src/chains/secret4.ts'
 
 let passed = 0
@@ -279,6 +284,74 @@ check(
 check(
   'refused for a route through any chain other than Osmosis',
   planSkipAddresses(['noble-1', 'stride-1', 'secret-4'], addresses) === undefined
+)
+
+/*
+ * The gas leg from Osmosis itself: Skip swaps there and plans a call to its
+ * entry point instead of a transfer. Shape captured from /v2/fungible/msgs on
+ * 2026-09-24. Accepted only when it is Skip's contract, this sender, exactly
+ * the slice, and ends in a transfer to this Secret address.
+ */
+
+const expected = {
+  sender: 'osmo1sender',
+  secret: 'secret1receiver',
+  denom: 'ibc/498A0751C798A0D9A389AA3691123DADA57DAA4FE165D5C75894505B876BA6E4',
+  amount: '50000'
+}
+const entryPointCall = (overrides: Record<string, unknown> = {}, receiver = 'secret1receiver') => ({
+  msgs: [
+    {
+      multi_chain_msg: {
+        chain_id: 'osmosis-1',
+        msg_type_url: '/cosmwasm.wasm.v1.MsgExecuteContract',
+        msg: JSON.stringify({
+          sender: 'osmo1sender',
+          contract: SKIP_OSMOSIS_ENTRY_POINT,
+          msg: {
+            swap_and_action: {
+              user_swap: { swap_exact_asset_in: { swap_venue_name: 'osmosis-poolmanager', operations: [] } },
+              min_asset: { native: { denom: 'ibc/0954E1C2', amount: '5677322' } },
+              post_swap_action: {
+                ibc_transfer: { ibc_info: { source_channel: 'channel-88', receiver, memo: '' } }
+              }
+            }
+          },
+          funds: [{ denom: expected.denom, amount: '50000' }],
+          ...overrides
+        })
+      }
+    }
+  ]
+})
+
+const contractLeg = parseSkipGasMsg(entryPointCall(), expected)
+check('an entry-point call from Osmosis is accepted as a contract leg', contractLeg?.kind === 'contract')
+check(
+  'its funds are exactly the slice',
+  contractLeg?.kind === 'contract' &&
+    JSON.stringify(contractLeg.funds) === JSON.stringify([{ denom: expected.denom, amount: '50000' }])
+)
+check(
+  'refused for any other contract',
+  parseSkipGasMsg(entryPointCall({ contract: 'osmo1other' }), expected) === undefined
+)
+check(
+  'refused for another signer',
+  parseSkipGasMsg(entryPointCall({ sender: 'osmo1other' }), expected) === undefined
+)
+check(
+  'refused when it spends more than the slice',
+  parseSkipGasMsg(entryPointCall({ funds: [{ denom: expected.denom, amount: '50001' }] }), expected) ===
+    undefined
+)
+check(
+  'refused when the SCRT goes anywhere but this Secret address',
+  parseSkipGasMsg(entryPointCall({}, 'secret1someoneelse'), expected) === undefined
+)
+check(
+  'a plain transfer plan still comes back as a transfer leg',
+  parseSkipGasMsg(skipMsgsResponse, expected)?.kind === 'transfer'
 )
 
 /* -------------------------------------------------------------------------- */

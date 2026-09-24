@@ -8,6 +8,7 @@ import { MSG_EXECUTE_CONTRACT } from '@/lib/msgTypes'
 import { clearProfileMsg, registryConfigured } from '@/lib/profile'
 import type { RecordProfile } from '@/lib/profileRecord'
 import { profileState, rememberWritten } from '@/lib/profileSync'
+import { labelFor, signAndBroadcast, trackTx, type TrackOptions, type TxTracker } from '@/lib/txProgress'
 import { useFeePayer } from '@/store/feePayer'
 import { useWallet } from '@/store/wallet'
 
@@ -135,30 +136,66 @@ function blamesProfile(tx: TxResponse, index: number): boolean {
   return match !== null && Number(match[1]) === index
 }
 
-function broadcast(client: SecretNetworkClient, messages: Msg[], gasLimit: number, msgTypes: string[]) {
-  return client.tx.broadcast(messages, {
-    gasLimit,
-    gasPriceInFeeDenom: GAS_PRICE_USCRT,
-    feeDenom: DENOM,
-    feeGranter: useFeePayer.getState().granterFor(gasLimit, msgTypes)
-  })
+function broadcast(
+  client: SecretNetworkClient,
+  messages: Msg[],
+  gasLimit: number,
+  msgTypes: string[],
+  tracker: TxTracker
+) {
+  return signAndBroadcast(
+    client,
+    messages,
+    {
+      gasLimit,
+      gasPriceInFeeDenom: GAS_PRICE_USCRT,
+      feeDenom: DENOM,
+      feeGranter: useFeePayer.getState().granterFor(gasLimit, msgTypes)
+    },
+    tracker
+  )
 }
 
+/**
+ * @param track what the progress card calls it; named from `msgTypes` when
+ *   omitted. One card covers the whole call, the retry below included.
+ * @param follow for a transfer the card should see arrive: called once the
+ *   transaction is confirmed, and left to finish the card itself.
+ */
 export async function sendTx(
   client: SecretNetworkClient,
   messages: Msg[],
   gasLimit: number,
-  msgTypes: string[]
+  msgTypes: string[],
+  track: TrackOptions | string = labelFor(msgTypes),
+  follow?: (tx: TxResponse, tracker: TxTracker) => void
+): Promise<TxResponse> {
+  const tracker = trackTx(track)
+  const tx = await sendTxWith(client, messages, gasLimit, msgTypes, tracker)
+  tracker.settle(tx, { continues: Boolean(follow) })
+  if (follow && tx.code === 0) follow(tx, tracker)
+  return tx
+}
+
+async function sendTxWith(
+  client: SecretNetworkClient,
+  messages: Msg[],
+  gasLimit: number,
+  msgTypes: string[],
+  tracker: TxTracker
 ): Promise<TxResponse> {
   const { address, queryClient } = useWallet.getState()
   const attached = address ? await withTimeout(attachment(address, gasLimit, msgTypes)) : undefined
 
-  if (!attached || !address || !queryClient) return broadcast(client, messages, gasLimit, msgTypes)
+  if (!attached || !address || !queryClient) return broadcast(client, messages, gasLimit, msgTypes, tracker)
 
-  const tx = await broadcast(client, [...messages, attached.message], gasLimit + attached.gas, [
-    ...msgTypes,
-    MSG_EXECUTE_CONTRACT
-  ])
+  const tx = await broadcast(
+    client,
+    [...messages, attached.message],
+    gasLimit + attached.gas,
+    [...msgTypes, MSG_EXECUTE_CONTRACT],
+    tracker
+  )
 
   if (tx.code === 0) {
     await rememberWritten(queryClient, address)
@@ -172,7 +209,7 @@ export async function sendTx(
   // cost nothing and may fit next time (usually the fee was just too big for
   // the balance); one that executed and failed is not tried again.
   if (tx.height) rememberFailed(attached.signature)
-  return broadcast(client, messages, gasLimit, msgTypes)
+  return broadcast(client, messages, gasLimit, msgTypes, tracker)
 }
 
 /**
@@ -188,12 +225,15 @@ export async function writePendingProfile(client: SecretNetworkClient): Promise<
   if (!state.pending || !state.chainKnown || !state.offchain) return undefined
 
   const written = state.offchain.body.profile
+  const tracker = trackTx('Save profile on chain')
   const tx = await broadcast(
     client,
     [await registryWrite(queryClient, address, written)],
     written ? GAS.setProfile : GAS.clearProfile,
-    [MSG_EXECUTE_CONTRACT]
+    [MSG_EXECUTE_CONTRACT],
+    tracker
   )
+  tracker.settle(tx)
 
   if (tx.code === 0) await rememberWritten(queryClient, address)
   return tx

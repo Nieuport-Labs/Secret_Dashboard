@@ -3,6 +3,7 @@ import type { SecretNetworkClient, TxResponse } from 'secretjs'
 import { DENOM, GAS_PRICE_USCRT, withGasBuffer } from '@/chains/secret4'
 import { codeHashFor } from '@/lib/codeHash'
 import { toBaseUnits as toMicroUnits } from '@/lib/format'
+import { broadcastTracked } from '@/lib/txProgress'
 
 /**
  * Client for the gas-vault contract (`contracts/gas-vault`).
@@ -52,16 +53,22 @@ export async function buyGasCredit(
 ): Promise<TxResponse> {
   const code_hash = await codeHashFor(client, contractAddress)
 
-  return client.tx.compute.executeContract(
-    {
-      sender,
-      contract_address: contractAddress,
-      code_hash,
-      msg: { grant: { grantee: grantee.trim() } },
-      // The funds land before the contract runs, so this pays for the
-      // allowance and tops the contract up in one transaction.
-      sent_funds: [{ denom: DENOM, amount: toMicroUnits(amount) }]
-    },
+  const { MsgExecuteContract } = await import('secretjs')
+
+  return broadcastTracked(
+    'Buy gas credit',
+    client,
+    [
+      new MsgExecuteContract({
+        sender,
+        contract_address: contractAddress,
+        code_hash,
+        msg: { grant: { grantee: grantee.trim() } },
+        // The funds land before the contract runs, so this pays for the
+        // allowance and tops the contract up in one transaction.
+        sent_funds: [{ denom: DENOM, amount: toMicroUnits(amount) }]
+      })
+    ],
     {
       gasLimit: GAS_BUY,
       gasPriceInFeeDenom: GAS_PRICE_USCRT,

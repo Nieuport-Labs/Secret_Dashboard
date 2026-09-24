@@ -1,4 +1,12 @@
-import { CheckCircle2, ChevronDown, ExternalLink, Eye, Loader2, ShieldCheck } from 'lucide-react'
+import {
+  ArrowLeftRight,
+  CheckCircle2,
+  ChevronDown,
+  ExternalLink,
+  Eye,
+  Loader2,
+  ShieldCheck
+} from 'lucide-react'
 import { useEffect, useId, useMemo, useState } from 'react'
 
 import AmountHero from '@/components/ui/AmountHero'
@@ -7,13 +15,14 @@ import Modal from '@/components/ui/Modal'
 import { PickerDialog } from '@/components/ui/Picker'
 import ShareSlider from '@/components/ui/ShareSlider'
 import { DECIMALS, DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
-import { isValidBech32 } from '@/lib/bech32'
+import { chainImageUrl } from '@/chains/sources'
 import { cn } from '@/lib/cn'
-import { formatAmount, fromBaseUnits, toBaseUnits } from '@/lib/format'
+import { formatAmount, fromBaseUnits, shortenAddress, toBaseUnits } from '@/lib/format'
+import { destinationOf, planIbcSend, type IbcPlan } from '@/lib/ibcSend'
 import type { Balances } from '@/hooks/useBalances'
 import { useWalletActions } from '@/hooks/useWalletActions'
 import { useSettings } from '@/store/settings'
-import { privateSymbol, tokenImageUrl } from '@/tokens/registry'
+import { privateSymbol, SSCRT_ADDRESS, tokenImageUrl } from '@/tokens/registry'
 
 interface Props {
   open: boolean
@@ -51,6 +60,8 @@ interface Sendable {
   private: boolean
   /** Bank denomination, on the public ones. */
   denom?: string
+  /** The SNIP-20 this is a form of — sSCRT for native SCRT. What bridge routes are keyed by. */
+  token: string
   /** Price of one whole unit in the chosen currency; absent when unpriced. */
   unitPrice?: number
 }
@@ -136,6 +147,7 @@ export default function SendPanel({
         decimals: native ? DECIMALS : held.token!.decimals,
         private: false,
         denom: held.denom,
+        token: native ? SSCRT_ADDRESS : held.token!.address,
         unitPrice: unitPriceOf(held.amount, native ? DECIMALS : held.token!.decimals, held.fiat)
       })
     }
@@ -150,6 +162,7 @@ export default function SendPanel({
         amount: row.outcome.amount,
         decimals: row.token.decimals,
         private: true,
+        token: row.token.address,
         unitPrice: unitPriceOf(row.outcome.amount, row.token.decimals, row.fiat)
       })
     }
@@ -159,10 +172,16 @@ export default function SendPanel({
 
   const loadingTokens = balances.loading || balances.scanning
 
+  const trimmed = recipient.trim()
+  const destination = trimmed ? destinationOf(trimmed) : undefined
+  const chain = destination?.kind === 'chain' ? destination.chain : undefined
+
   const options = sendable.map((row) => ({
     id: row.id,
     label: row.symbol,
-    detail: row.detail,
+    // While the recipient is on another chain, say up front which assets
+    // cannot get there rather than letting someone pick one and find out.
+    detail: chain && !planIbcSend(row, chain).ok ? `Cannot go to ${chain.name}` : row.detail,
     image: row.image,
     meta: formatAmount(row.amount, { decimals: row.decimals })
   }))
@@ -185,20 +204,42 @@ export default function SendPanel({
     amountError = 'More than you hold.'
   }
 
-  const trimmed = recipient.trim()
-  const recipientError =
-    trimmed.length === 0 || isValidBech32(trimmed, 'secret')
-      ? undefined
-      : trimmed.startsWith('secret1')
+  const plan: IbcPlan | undefined = chain && selected ? planIbcSend(selected, chain) : undefined
+
+  const recipientError = !destination
+    ? undefined
+    : destination.kind === 'invalid'
+      ? trimmed.startsWith('secret1')
         ? 'That address fails its checksum — a character is wrong.'
-        : `Not a Secret address. It starts with "secret1".`
+        : 'Not a valid address — a character is wrong or missing.'
+      : destination.kind === 'unknown'
+        ? `"${destination.prefix}1…" is an address on a chain this dashboard has no route to.`
+        : chain && plan && !plan.ok
+          ? `${symbol} cannot be sent to ${chain.name}. Pick another asset.`
+          : undefined
 
   const ready = Boolean(trimmed) && !recipientError && Boolean(amount) && !amountError && BigInt(base) > 0n
 
   const submit = () => {
     if (!ready || !selected) return
-    if (selected.private) void actions.sendToken(selected.id, trimmed, base)
-    else void actions.sendNative(trimmed, base, selected.denom ?? DENOM)
+    const summary = {
+      label: `Send ${amount} ${symbol}${chain ? ` to ${chain.name}` : ''}`,
+      detail: `to ${shortenAddress(trimmed)}`
+    }
+    if (chain) {
+      if (!plan?.ok) return
+      void actions.sendIbc({
+        chain,
+        recipient: trimmed,
+        denom: plan.denom,
+        amount: base,
+        channel: plan.channel,
+        unwrap: plan.unwrap,
+        forward: plan.forward,
+        summary
+      })
+    } else if (selected.private) void actions.sendToken(selected.id, trimmed, base, summary)
+    else void actions.sendNative(trimmed, base, selected.denom ?? DENOM, summary)
   }
 
   return (
@@ -206,6 +247,7 @@ export default function SendPanel({
       {actions.state.kind === 'done' ? (
         <Receipt
           hash={actions.state.hash}
+          chainName={chain?.name}
           onAgain={() => {
             setAmount('')
             // Back to the locked recipient, not to blank — "send another" from
@@ -301,7 +343,7 @@ export default function SendPanel({
               <input
                 value={recipient}
                 onChange={(event) => setRecipient(event.target.value)}
-                placeholder="Wallet address (secret1…)"
+                placeholder="Address on Secret, Cosmos Hub, Osmosis…"
                 spellCheck={false}
                 autoComplete="off"
                 /*
@@ -322,6 +364,12 @@ export default function SendPanel({
                   Set by the profile you opened this from.
                 </span>
               ) : null}
+              {chain ? (
+                <span className="flex items-center gap-1.5 text-label text-text-muted">
+                  <img src={chainImageUrl(chain)} alt="" className="size-4 shrink-0 rounded-pill" />
+                  On {chain.name}
+                </span>
+              ) : null}
               {recipientError ? (
                 <span className="text-label text-negative" role="alert">
                   {recipientError}
@@ -337,7 +385,19 @@ export default function SendPanel({
             it — so it is stated before the button, not after.
           */}
           <p className="flex items-start gap-2 text-label text-text-muted">
-            {!isPrivate ? (
+            {chain ? (
+              <>
+                <ArrowLeftRight size={14} aria-hidden className="mt-px shrink-0" />
+                {isPrivate
+                  ? `Unwrapped and sent to ${chain.name} over IBC in one transaction.`
+                  : `Sent to ${chain.name} over IBC.`}{' '}
+                {plan?.ok && plan.via
+                  ? `It goes through ${plan.via.name}, which passes it on, so it arrives as the ${symbol} ${chain.name} already knows.`
+                  : null}{' '}
+                The amount and both addresses are public on both chains. It lands once a relayer carries it,
+                usually within a minute, and comes back if nobody has in 15 minutes.
+              </>
+            ) : !isPrivate ? (
               <>
                 <Eye size={14} aria-hidden className="mt-px shrink-0" />
                 {symbol} moves through the bank module, so the amount and both addresses are public. Wrap it
@@ -365,7 +425,13 @@ export default function SendPanel({
             disabled={!ready}
             onClick={submit}
           >
-            {!trimmed ? 'Enter a recipient' : !amount ? 'Enter an amount' : `Send ${symbol}`}
+            {!trimmed
+              ? 'Enter a recipient'
+              : !amount
+                ? 'Enter an amount'
+                : chain
+                  ? `Send ${symbol} to ${chain.name}`
+                  : `Send ${symbol}`}
           </Button>
         </>
       )}
@@ -373,12 +439,16 @@ export default function SendPanel({
   )
 }
 
-function Receipt({ hash, onAgain }: { hash: string; onAgain: () => void }) {
+function Receipt({ hash, chainName, onAgain }: { hash: string; chainName?: string; onAgain: () => void }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-start gap-3">
         <CheckCircle2 size={18} aria-hidden className="mt-0.5 shrink-0 text-positive" />
-        <p className="text-base">Sent.</p>
+        <p className="text-base">
+          {chainName
+            ? `Sent. It reaches ${chainName} once a relayer carries it, usually within a minute.`
+            : 'Sent.'}
+        </p>
       </div>
       <a
         className="inline-flex items-center gap-1.5 text-base text-accent underline underline-offset-4"

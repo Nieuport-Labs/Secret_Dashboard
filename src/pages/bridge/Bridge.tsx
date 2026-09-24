@@ -15,15 +15,16 @@ import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
 import AmountField from '@/components/ui/AmountField'
 import Picker from '@/components/ui/Picker'
-import { DECIMALS, DISPLAY_DENOM, GAS, explorerTxUrl, withGasBuffer } from '@/chains/secret4'
-import { SOURCE_CHAINS, chainImageUrl, type SourceChain } from '@/chains/sources'
-import { depositGasLimit, sendDeposit, sendWithdraw, type Leg } from '@/lib/bridge'
+import { DECIMALS, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
+import { SOURCE_CHAINS, chainImageUrl, sourceChain, type SourceChain } from '@/chains/sources'
+import { depositGasLimit, sendDeposit, sendWithdraw, withdrawGasLimit, type Leg } from '@/lib/bridge'
 import { queryAllBalances } from '@/lib/bank'
 import { codeHashFor } from '@/lib/codeHash'
 import { errorMessage } from '@/lib/errors'
 import { fittingGasSliceUsd, quoteGasSlice, shouldOfferGas } from '@/lib/getGas'
-import { formatAmount, fromBaseUnits, toBaseUnits } from '@/lib/format'
-import { plainTransfer, wrapDepositMemo } from '@/lib/ibcMemo'
+import { formatAmount, fromBaseUnits, shortenAddress, toBaseUnits } from '@/lib/format'
+import { forwardedTransfer, plainTransfer, wrapDepositMemo } from '@/lib/ibcMemo'
+import { decodeBech32, encodeBech32 } from '@/lib/bech32'
 import { MSG_EXECUTE_CONTRACT, MSG_TRANSFER } from '@/lib/msgTypes'
 import { fetchPrices } from '@/lib/prices'
 import { fetchSkipGasLeg, fetchSkipGasRoute, planSkipAddresses, type SkipGasRoute } from '@/lib/skipGo'
@@ -324,17 +325,40 @@ export default function Bridge() {
           : amountBaseUnits
 
         const legs: Leg[] = []
+        const calls: Array<{
+          contract: string
+          msg: Record<string, unknown>
+          funds: Array<{ denom: string; amount: string }>
+        }> = []
+        let callGas = 0
 
         // The main transfer, wrapped on arrival when asked. The code hash is
         // read from the chain: a stale one makes the hook fail and the tokens
         // land public instead, the opposite of what was asked for.
+        const direct = wrap
+          ? wrapDepositMemo(token.address, await codeHashFor(queryClient, token.address), secretAddress)
+          : plainTransfer(secretAddress)
+
+        // Through the token's home chain, when that is the route: the same
+        // transfer, handed to the home chain to pass on — the wrap hook rides
+        // along to Secret untouched. The gas leg below is its own packet and
+        // is planned by Skip exactly as before.
+        const via = route.forward ? sourceChain(route.forward.via) : undefined
+        const hopKey = decodeBech32(source.address)
+        if (route.forward && (!via || !hopKey)) throw new Error('This route cannot be sent right now.')
+
         legs.push({
           denom: route.denom,
           amount: mainAmount,
           channel: route.channel,
-          transfer: wrap
-            ? wrapDepositMemo(token.address, await codeHashFor(queryClient, token.address), secretAddress)
-            : plainTransfer(secretAddress)
+          transfer:
+            route.forward && via && hopKey
+              ? forwardedTransfer(direct, encodeBech32(via.prefix, hopKey.bytes), route.forward.channel)
+              : direct,
+          forward:
+            route.forward && via
+              ? { via, channel: route.forward.channel, receiver: direct.receiver }
+              : undefined
         })
 
         if (useGas) {
@@ -343,25 +367,43 @@ export default function Bridge() {
           // a while before the user actually presses this button, and the
           // swap's minimum-output guard should reflect pool state now, not
           // whenever the checkbox first lit up.
-          const gasLeg = await fetchSkipGasLeg(skipRoute, skipAddresses)
+          const gasLeg = await fetchSkipGasLeg(skipRoute, skipAddresses, {
+            sender: source.address,
+            secret: secretAddress,
+            denom: route.denom,
+            amount: String(skipRoute.raw.amount_in)
+          })
           if (!gasLeg) {
             throw new Error(
               'Could not prepare the gas swap just now — try again, or turn off Get gas for this transfer.'
             )
           }
-          legs.push({
-            denom: gasLeg.denom,
-            amount: gasLeg.amount,
-            channel: gasLeg.channel,
-            transfer: { receiver: gasLeg.receiver, memo: gasLeg.memo }
-          })
+          // From another chain, a transfer to Osmosis that swaps on arrival;
+          // from Osmosis itself, a call to Skip's entry point that swaps there
+          // and sends the SCRT on.
+          if (gasLeg.kind === 'transfer') {
+            legs.push({
+              denom: gasLeg.denom,
+              amount: gasLeg.amount,
+              channel: gasLeg.channel,
+              transfer: { receiver: gasLeg.receiver, memo: gasLeg.memo }
+            })
+          } else {
+            calls.push(gasLeg)
+            callGas += gasLeg.gas
+          }
         }
 
         const result = await sendDeposit({
           chain,
           sender: source.address,
           legs,
-          gasLimit: depositGasLimit(chain, route, legs.length, wrap)
+          gasLimit: depositGasLimit(chain, route, legs.length, wrap || Boolean(route.forward)) + callGas,
+          calls,
+          summary: {
+            label: `Bridge ${amount} ${token.symbol} from ${chain.name}`,
+            detail: `to ${shortenAddress(secretAddress)}${wrap ? ', wrapped on arrival' : ''}`
+          }
         })
         setStatus({ kind: 'done', hash: result.hash })
         // The source side spends immediately; Secret's side only lands once the
@@ -380,7 +422,7 @@ export default function Bridge() {
         const unwrap = isScrtToken
           ? undefined
           : { contract: token.address, codeHash: await codeHashFor(queryClient, token.address) }
-        const gasLimit = withGasBuffer(chain.withdrawGas) + (unwrap ? GAS.unwrap : 0)
+        const gasLimit = withdrawGasLimit(chain, Boolean(unwrap))
         const msgTypes = unwrap ? [MSG_EXECUTE_CONTRACT, MSG_TRANSFER] : [MSG_TRANSFER]
 
         const result = await sendWithdraw({
@@ -392,7 +434,12 @@ export default function Bridge() {
           amount: amountBaseUnits,
           channel: route.channel,
           feeGranter: granterFor(gasLimit, msgTypes),
-          unwrap
+          unwrap,
+          forward: route.forward,
+          summary: {
+            label: `Bridge ${amount} ${token.symbol} to ${chain.name}`,
+            detail: `to ${shortenAddress(source.address)}`
+          }
         })
         setStatus({ kind: 'done', hash: result.hash })
         // Unwrap-and-send changes both the private balance and the public one,
@@ -606,7 +653,7 @@ export default function Bridge() {
                       >
                         Take less
                       </button>
-                      {gasUnavailableReason ? (
+                      {!canGetGas && gasUnavailableReason ? (
                         <span className="mt-1 block text-text-faint">{gasUnavailableReason}</span>
                       ) : null}
                     </>
@@ -740,6 +787,27 @@ export default function Bridge() {
         {!depositing && !isScrtToken && token ? (
           <p className="text-label text-text-faint">
             Unwraps your private {token.symbol} and sends it out in one transaction.
+            {route?.forward && chain ? (
+              <>
+                {' '}
+                It goes through {sourceChain(route.forward.via)?.name ?? 'its home chain'}, which passes it
+                on, so it arrives as the {token.symbol} {chain.name} already knows. Allow a few minutes for
+                the two hops.
+              </>
+            ) : null}
+          </p>
+        ) : null}
+
+        {/*
+          The same trip the other way: the Osmosis-native token goes home
+          first, and its home chain sends it on to Secret. Worth saying,
+          since it is slower than a direct transfer and passes through a
+          chain nobody picked.
+        */}
+        {depositing && route?.forward && token ? (
+          <p className="text-label text-text-faint">
+            Goes through {sourceChain(route.forward.via)?.name ?? 'its home chain'}, which passes it on to
+            Secret{wrap ? ' — still wrapped on arrival' : ''}. Allow a few minutes for the two hops.
           </p>
         ) : null}
       </div>

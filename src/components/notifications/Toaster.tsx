@@ -1,8 +1,10 @@
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock, ExternalLink, Loader2, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
+import { cn } from '@/lib/cn'
 import { useNotifications, type Toast } from '@/store/notifications'
+import { useTransactions, type TrackedTx } from '@/store/transactions'
 
 /**
  * The toast stack (Figma 34:688, 36:79, 36:88, 36:3).
@@ -10,19 +12,27 @@ import { useNotifications, type Toast } from '@/store/notifications'
  * Bottom-right on desktop, full width above the nav bar on a phone. Announced
  * politely: an arriving token is worth telling a screen reader about, but not
  * worth interrupting whatever it was reading.
+ *
+ * Transactions in flight share the stack, above the toasts — see
+ * `lib/txProgress.ts`.
  */
 export default function Toaster() {
   const toasts = useNotifications((state) => state.toasts)
   const dismiss = useNotifications((state) => state.dismiss)
+  const transactions = useTransactions((state) => state.transactions)
+  const dismissTx = useTransactions((state) => state.dismiss)
 
-  if (toasts.length === 0) return null
+  if (toasts.length === 0 && transactions.length === 0) return null
 
   return (
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed inset-x-4 bottom-24 z-40 flex flex-col items-end gap-2.5 lg:inset-x-auto lg:bottom-6 lg:right-6"
+      className="pointer-events-none fixed inset-x-4 bottom-24 z-40 flex flex-col items-end gap-2.5 lg:inset-x-auto lg:bottom-6 lg:right-6 lg:w-[360px]"
     >
+      {transactions.map((tx) => (
+        <TxCard key={tx.id} tx={tx} onDismiss={() => dismissTx(tx.id)} />
+      ))}
       {toasts.map((toast) => (
         <ToastCard key={toast.id} toast={toast} onDismiss={() => dismiss(toast.id)} />
       ))}
@@ -34,7 +44,7 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
   const navigate = useNavigate()
 
   return (
-    <div className="glass-panel pointer-events-auto w-full max-w-[340px] rounded-card p-4 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
+    <div className="glass-panel pointer-events-auto w-full rounded-card p-4 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
       {toast.kind === 'error' ? (
         <div className="flex items-start gap-2.5">
           <AlertCircle size={16} aria-hidden className="mt-px shrink-0 text-negative" />
@@ -88,6 +98,103 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
           )}
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * One transaction, updated in place as it moves along.
+ *
+ * The steps are the real ones — the wallet prompt, then each chain it lands
+ * on — not a timer dressed up as progress, so a step that takes a while simply
+ * stays lit. An IBC transfer is followed to the far chain, and the card ends
+ * on a link to where it arrived rather than to where it left.
+ */
+function TxCard({ tx, onDismiss }: { tx: TrackedTx; onDismiss: () => void }) {
+  const failed = tx.status === 'failed'
+  const settled = tx.status === 'done'
+
+  return (
+    <div className="glass-panel pointer-events-auto w-full rounded-card p-4 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
+      <div className="flex items-start gap-2.5">
+        {failed ? (
+          <AlertCircle size={16} aria-hidden className="mt-0.5 shrink-0 text-negative" />
+        ) : settled ? (
+          <CheckCircle2 size={16} aria-hidden className="mt-0.5 shrink-0 text-positive" />
+        ) : tx.status === 'stalled' ? (
+          <Clock size={16} aria-hidden className="mt-0.5 shrink-0 text-text-muted" />
+        ) : (
+          <Loader2 size={16} aria-hidden className="mt-0.5 shrink-0 animate-spin text-accent" />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-base font-medium">{tx.label}</p>
+          {tx.detail ? <p className="truncate text-sm text-text-faint">{tx.detail}</p> : null}
+          <p className={cn('mt-1 text-sm', failed ? 'break-address text-negative' : 'text-text-muted')}>
+            {tx.text}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          className="state-layer -mr-1 -mt-1 shrink-0 rounded-control p-1 text-text-muted"
+        >
+          <X size={14} aria-hidden />
+        </button>
+      </div>
+
+      <ol
+        className="mt-3 grid gap-1.5"
+        style={{ gridTemplateColumns: `repeat(${tx.steps.length}, minmax(0, 1fr))` }}
+        aria-label="Progress"
+      >
+        {tx.steps.map((step, index) => {
+          const behind = index < tx.step
+          const current = index === tx.step && !settled
+          return (
+            <li key={`${step}-${index}`} className="flex min-w-0 flex-col gap-1">
+              <span
+                className={cn(
+                  'h-1 rounded-pill transition-colors duration-[var(--duration-medium)]',
+                  behind
+                    ? 'bg-accent'
+                    : current && failed
+                      ? 'bg-negative'
+                      : current && tx.status === 'running'
+                        ? 'bg-accent motion-safe:animate-pulse'
+                        : 'bg-surface-3'
+                )}
+              />
+              <span
+                className={cn(
+                  'truncate text-label',
+                  behind || current ? 'text-text-muted' : 'text-text-faint'
+                )}
+                aria-current={current ? 'step' : undefined}
+              >
+                {step}
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+
+      {tx.links.length > 0 ? (
+        <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+          {tx.links.map((link) => (
+            <a
+              key={link.url}
+              href={link.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex items-center gap-1 text-sm text-accent underline underline-offset-4"
+            >
+              {link.label}
+              <ExternalLink size={12} aria-hidden />
+            </a>
+          ))}
+        </p>
+      ) : null}
     </div>
   )
 }

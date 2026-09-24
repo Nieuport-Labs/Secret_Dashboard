@@ -155,7 +155,7 @@ export default function UnstakePanel({ open, onClose, balances, derivative, onDo
             size="lg"
             loading={actions.state.kind === 'sending'}
             disabled={!ready}
-            onClick={() => void actions.unbondDerivative(base)}
+            onClick={() => void actions.unbondDerivative(base, { label: `Unstake ${amount} stkd-SCRT` })}
           >
             Unstake stkd-SCRT
           </Button>
