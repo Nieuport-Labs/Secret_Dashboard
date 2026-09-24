@@ -1,23 +1,21 @@
 import type { Msg } from 'secretjs'
 
-import { DENOM, GAS, GAS_VAULT_ADDRESS } from '@/chains/secret4'
-import { codeHashFor } from '@/lib/codeHash'
-import { covers, loadPermit, type Permit } from '@/lib/permit'
 import {
-  findRoutes,
-  listPairs,
-  quoteExactIn,
-  quoteExactOut,
-  swapGas,
-  swapMessage,
-  type Quote
-} from '@/lib/shadeSwap'
-import { permitAuth, queryBalance, queryBalances, redeemMsg } from '@/lib/snip20'
+  MAX_IMPACT_BPS,
+  PURCHASE_GAS,
+  purchaseMessages,
+  quoteForSscrt,
+  SLIPPAGE_BPS,
+  swappableTokens
+} from '@/lib/gasPurchase'
+import { loadPermit, type Permit } from '@/lib/permit'
+import { findRoutes, listPairs, quoteExactIn, swapGas, swapMessage, type Quote } from '@/lib/shadeSwap'
+import { permitAuth, queryBalance, queryBalances } from '@/lib/snip20'
 import { useFeePayer, vaultCredit } from '@/store/feePayer'
 import { useNotifications } from '@/store/notifications'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
-import { allTokenAddresses, SSCRT_ADDRESS, STKD_SCRT_ADDRESS } from '@/tokens/registry'
+import { SSCRT_ADDRESS } from '@/tokens/registry'
 
 /**
  * Auto-refill of gas credits: the `autorefill` answer to the first-run
@@ -43,7 +41,7 @@ import { allTokenAddresses, SSCRT_ADDRESS, STKD_SCRT_ADDRESS } from '@/tokens/re
 /** Refill below this, and by this much. 5 SCRT, in base units. */
 export const CREDIT_FLOOR = 5_000_000n
 
-export const REFILL_GAS = GAS.unwrap + GAS.buyGasCredit
+export const REFILL_GAS = PURCHASE_GAS
 
 export const SHADE_SWAP_URL = 'https://app.shadeprotocol.io/swap'
 
@@ -56,10 +54,6 @@ const COOLDOWN_MS = 2 * 60_000
 /** How often the "no sSCRT to refill with" notice may come back. */
 const NOTICE_EVERY_MS = 30 * 60_000
 
-/** The swap's minimum return sits this far under its quote. */
-const SLIPPAGE_BPS = 100n
-/** A trade that moves the pools' price by more than this is not made. */
-const MAX_IMPACT_BPS = 300
 /** Less SCRT than this out of a swap is not worth its gas. */
 const MIN_SWAP_OUT = 50_000n
 
@@ -119,10 +113,10 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
   if (!queryClient || need <= 0n) return undefined
 
   const pairs = await listPairs(queryClient)
-  const routable = allTokenAddresses()
-    .filter((token) => token !== SSCRT_ADDRESS && token !== STKD_SCRT_ADDRESS && covers(permit, token))
-    .map((token) => ({ token, routes: findRoutes(pairs, token, SSCRT_ADDRESS).slice(0, 4) }))
-    .filter((candidate) => candidate.routes.length > 0)
+  const routable = (await swappableTokens(queryClient, permit)).map((token) => ({
+    token,
+    routes: findRoutes(pairs, token, SSCRT_ADDRESS).slice(0, 4)
+  }))
   if (routable.length === 0) return undefined
 
   const balances = await queryBalances(
@@ -132,7 +126,7 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
   )
 
   // What each whole holding would fetch, by its best route.
-  const valued: Array<{ balance: bigint; best: Quote; routes: (typeof routable)[number]['routes'] }> = []
+  const valued: Array<{ token: string; balance: bigint; best: Quote }> = []
   for (const candidate of routable) {
     const outcome = balances.get(candidate.token)
     const balance = outcome?.status === 'ok' ? BigInt(outcome.amount) : 0n
@@ -143,24 +137,17 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
     const best = quotes
       .filter((quote): quote is Quote => quote !== undefined)
       .sort((a, b) => (a.amountOut === b.amountOut ? 0 : a.amountOut > b.amountOut ? -1 : 1))[0]
-    if (best && best.amountOut > 0n) valued.push({ balance, best, routes: candidate.routes })
+    if (best && best.amountOut > 0n) valued.push({ token: candidate.token, balance, best })
   }
   valued.sort((a, b) =>
     a.best.amountOut === b.best.amountOut ? 0 : a.best.amountOut > b.best.amountOut ? -1 : 1
   )
 
-  const target = (need * 10_000n) / (10_000n - SLIPPAGE_BPS)
-  for (const { balance, best, routes } of valued) {
+  for (const { token, balance, best } of valued) {
     // Enough to cover `need` with room for slippage: pay only for that.
-    const exact = (
-      await Promise.all(
-        routes.map((route) => quoteExactOut(queryClient, route, target).catch(() => undefined))
-      )
-    )
-      .filter((quote): quote is Quote => quote !== undefined && quote.amountIn <= balance)
-      .sort((a, b) => (a.amountIn === b.amountIn ? 0 : a.amountIn < b.amountIn ? -1 : 1))[0]
+    const exact = await quoteForSscrt(queryClient, token, need)
 
-    if (exact && exact.impactBps <= MAX_IMPACT_BPS) {
+    if (exact && exact.amountIn <= balance && exact.impactBps <= MAX_IMPACT_BPS) {
       return {
         message: await swapMessage(address, exact.route, exact.amountIn, need),
         gas: swapGas(exact.route),
@@ -225,34 +212,9 @@ export async function refillFor(address: string): Promise<Refill | undefined> {
     return undefined
   }
 
-  const { MsgExecuteContract } = await import('secretjs')
-  const [sscrtHash, vaultHash] = await Promise.all([
-    codeHashFor(queryClient, SSCRT_ADDRESS),
-    codeHashFor(queryClient, GAS_VAULT_ADDRESS)
-  ])
-
   return {
     amount,
     gas: REFILL_GAS + (swap?.gas ?? 0),
-    messages: [
-      // First, when there is one: the swap puts its sSCRT in the balance the
-      // unwrap then draws on.
-      ...(swap ? [swap.message] : []),
-      new MsgExecuteContract({
-        sender: address,
-        contract_address: SSCRT_ADDRESS,
-        code_hash: sscrtHash,
-        msg: redeemMsg(amount.toString()),
-        sent_funds: []
-      }),
-      // Runs after the unwrap above has put the SCRT in the bank balance.
-      new MsgExecuteContract({
-        sender: address,
-        contract_address: GAS_VAULT_ADDRESS,
-        code_hash: vaultHash,
-        msg: { grant: { grantee: address } },
-        sent_funds: [{ denom: DENOM, amount: amount.toString() }]
-      })
-    ]
+    messages: await purchaseMessages(queryClient, address, amount, swap?.message)
   }
 }
