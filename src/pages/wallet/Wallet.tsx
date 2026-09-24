@@ -7,7 +7,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import ActivityList from '@/components/wallet/ActivityList'
 import BalanceList from '@/components/wallet/BalanceList'
 import ProfileHeader from '@/components/wallet/ProfileHeader'
-import ReceiveDrawer from '@/components/wallet/ReceiveDrawer'
+import ReceiveModal from '@/components/wallet/ReceiveModal'
 import SendPanel from '@/components/wallet/SendPanel'
 import UnstakePanel from '@/components/wallet/UnstakePanel'
 import WrapPanel from '@/components/wallet/WrapPanel'
@@ -199,7 +199,7 @@ export default function Wallet() {
         />
       </div>
 
-      <ReceiveDrawer open={panel === 'receive'} onClose={() => setPanel(null)} address={address} />
+      <ReceiveModal open={panel === 'receive'} onClose={() => setPanel(null)} address={address} />
 
       {/* Send and Wrap share Receive's panel rather than being pages of their own. */}
       <SendPanel

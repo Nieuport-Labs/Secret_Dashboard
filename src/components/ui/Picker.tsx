@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Search } from 'lucide-react'
+import { Check, ChevronDown, Loader2, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import Modal from '@/components/ui/Modal'
@@ -21,6 +21,12 @@ interface DialogProps {
   options: PickerOption[]
   value?: string
   onChange: (id: string) => void
+  /**
+   * The list is still being filled — balances being read. Shown as a row at
+   * the foot of the list, so what has arrived can already be chosen and the
+   * missing part is not mistaken for "you hold nothing else".
+   */
+  loading?: string
 }
 
 /**
@@ -31,7 +37,7 @@ interface DialogProps {
  * where a second full-width field would only repeat what the amount already
  * shows.
  */
-export function PickerDialog({ open, onClose, label, options, value, onChange }: DialogProps) {
+export function PickerDialog({ open, onClose, label, options, value, onChange, loading }: DialogProps) {
   const [query, setQuery] = useState('')
 
   const visible = useMemo(() => {
@@ -92,7 +98,15 @@ export function PickerDialog({ open, onClose, label, options, value, onChange }:
             </button>
           </li>
         ))}
-        {visible.length === 0 ? (
+        {loading ? (
+          <li
+            className="flex items-center justify-center gap-2 px-2 py-6 text-base text-text-muted"
+            role="status"
+          >
+            <Loader2 size={16} aria-hidden className="animate-spin" />
+            {loading}
+          </li>
+        ) : visible.length === 0 ? (
           <li className="px-2 py-6 text-center text-base text-text-muted">Nothing matches.</li>
         ) : null}
       </ul>

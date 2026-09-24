@@ -2,8 +2,9 @@ import { ChevronDown } from 'lucide-react'
 import { useState } from 'react'
 
 import { PickerDialog, type PickerOption } from '@/components/ui/Picker'
+import ShareSlider from '@/components/ui/ShareSlider'
 import { cn } from '@/lib/cn'
-import { formatAmount, fromBaseUnits, toBaseUnits } from '@/lib/format'
+import { formatAmount } from '@/lib/format'
 
 interface Props {
   amount: string
@@ -26,11 +27,9 @@ interface Props {
   onSelect?: (id: string) => void
 }
 
-const PERCENTS = [25, 50, 100] as const
-
 /**
  * An amount, the balance behind it, and the two ways of spending a fraction of
- * that balance.
+ * that balance (`ShareSlider`).
  *
  * The asset is chosen by clicking the asset, in the slot where the ticker has
  * to be printed anyway — so choosing costs no extra row, and every form using
@@ -51,23 +50,6 @@ export default function AmountField({
   onSelect
 }: Props) {
   const [picking, setPicking] = useState(false)
-
-  const has = available !== undefined && BigInt(available) > 0n
-  const base = (() => {
-    try {
-      return amount ? BigInt(toBaseUnits(amount, decimals)) : 0n
-    } catch {
-      return 0n
-    }
-  })()
-
-  const percent = has && !error ? Number((base * 100n) / BigInt(available)) : 0
-
-  const setPercent = (share: number) => {
-    if (available === undefined) return
-    const next = (BigInt(available) * BigInt(share)) / 100n
-    onAmount(fromBaseUnits(next.toString(), decimals))
-  }
 
   return (
     <section className="flex flex-col gap-3">
@@ -124,41 +106,13 @@ export default function AmountField({
         />
       ) : null}
 
-      {/*
-        The slider and the buttons drive the same number and both earn their
-        place: the buttons are exact and one tap, the slider is for the case
-        where the fraction is a judgement rather than a round figure.
-      */}
-      <div className="flex items-center gap-3">
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={Math.min(100, Math.max(0, percent))}
-          disabled={!has}
-          onChange={(event) => setPercent(Number(event.target.value))}
-          aria-label="Fraction of balance"
-          className="slider min-w-0 flex-1"
-        />
-        <div className="flex shrink-0 gap-1">
-          {PERCENTS.map((share) => (
-            <button
-              key={share}
-              type="button"
-              disabled={!has}
-              onClick={() => setPercent(share)}
-              className={cn(
-                'state-layer rounded-pill border border-border px-2.5 py-1 text-label font-medium',
-                'disabled:cursor-not-allowed disabled:opacity-40',
-                percent === share ? 'bg-accent-container text-accent' : 'text-text-muted'
-              )}
-            >
-              {share === 100 ? 'Max' : `${share}%`}
-            </button>
-          ))}
-        </div>
-      </div>
+      <ShareSlider
+        amount={amount}
+        onAmount={onAmount}
+        available={available}
+        decimals={decimals}
+        invalid={Boolean(error)}
+      />
 
       {error ? (
         <span className="text-base text-negative" role="alert">

@@ -1,12 +1,13 @@
-import { ArrowDown, CheckCircle2, ExternalLink } from 'lucide-react'
+import { ArrowDown, CheckCircle2, ChevronDown, ExternalLink } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
-import AmountField from '@/components/ui/AmountField'
 import Button from '@/components/ui/Button'
-import Drawer from '@/components/ui/Drawer'
+import Modal from '@/components/ui/Modal'
+import { PickerDialog } from '@/components/ui/Picker'
+import ShareSlider from '@/components/ui/ShareSlider'
 import { DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import { cn } from '@/lib/cn'
-import { toBaseUnits } from '@/lib/format'
+import { formatAmount, toBaseUnits } from '@/lib/format'
 import type { Balances } from '@/hooks/useBalances'
 import { useWalletActions } from '@/hooks/useWalletActions'
 import { bankDenomFor } from '@/tokens/routes'
@@ -48,6 +49,7 @@ export default function WrapPanel({
   const [direction, setDirection] = useState<Direction>('wrap')
   const [contract, setContract] = useState(SSCRT_ADDRESS)
   const [amount, setAmount] = useState('')
+  const [picking, setPicking] = useState(false)
 
   /** Tokens whose bank denomination is unambiguous, so a wrap knows what to spend. */
   const wrappable = useMemo(
@@ -112,9 +114,22 @@ export default function WrapPanel({
 
   const publicLabel = denom === DENOM ? DISPLAY_DENOM : (token?.symbol ?? 'token')
   const privateLabel = token ? privateSymbol(token) : 'wrapped'
+  const image = token ? tokenImageUrl(token) : undefined
+  const flip = () => {
+    setDirection(wrapping ? 'unwrap' : 'wrap')
+    setAmount('')
+    actions.reset()
+  }
+
+  const options = wrappable.map(({ token: option }) => ({
+    id: option.address,
+    label: option.symbol,
+    detail: option.description,
+    image: tokenImageUrl(option)
+  }))
 
   return (
-    <Drawer open={open} onClose={onClose} title="Wrap">
+    <Modal open={open} onClose={onClose} title={wrapping ? 'Wrap' : 'Unwrap'}>
       {actions.state.kind === 'done' ? (
         <Receipt
           hash={actions.state.hash}
@@ -125,63 +140,104 @@ export default function WrapPanel({
         />
       ) : (
         <>
-          <div role="tablist" className="flex gap-1 rounded-pill border border-border p-1">
-            {(['wrap', 'unwrap'] as Direction[]).map((option) => (
-              <button
-                key={option}
-                role="tab"
-                type="button"
-                aria-selected={direction === option}
-                onClick={() => {
-                  setDirection(option)
-                  setAmount('')
-                  actions.reset()
-                }}
-                className={cn(
-                  'state-layer flex-1 rounded-pill px-4 py-1.5 text-base font-medium capitalize',
-                  'transition-colors duration-[var(--duration-short)] ease-[var(--ease-standard)]',
-                  direction === option ? 'bg-accent-container text-accent' : 'text-text-muted'
-                )}
-              >
-                {option}
-              </button>
-            ))}
+          {/*
+            Laid out as a swap, the way Uniswap does it: what goes in on top,
+            what comes out underneath, and the arrow between them is the
+            control that turns a wrap into an unwrap. Both sides of this pair
+            are usually called the same thing — the public ATOM voucher and the
+            SNIP-20 that holds it are both "ATOM" — so each card says in words
+            whether it is the public or the private side.
+          */}
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3 rounded-card border border-border bg-surface p-4">
+              <span className="text-label text-text-muted">From · {wrapping ? 'Public' : 'Private'}</span>
+              <div className="flex items-center gap-3">
+                <input
+                  data-autofocus
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(event) => setAmount(event.target.value)}
+                  placeholder="0"
+                  aria-label={`Amount to ${direction}`}
+                  className="min-w-0 flex-1 bg-transparent text-[2rem] font-medium leading-tight tabular-nums outline-none placeholder:text-text-faint"
+                />
+                <button
+                  type="button"
+                  onClick={() => setPicking(true)}
+                  aria-haspopup="dialog"
+                  className="state-layer flex shrink-0 items-center gap-2 rounded-pill border border-border py-1.5 pl-1.5 pr-2.5"
+                >
+                  {image ? <img src={image} alt="" className="size-6 shrink-0 rounded-pill" /> : null}
+                  <span className="text-base font-medium">{wrapping ? publicLabel : privateLabel}</span>
+                  <ChevronDown size={14} aria-hidden className="text-text-muted" />
+                </button>
+              </div>
+              {available !== undefined ? (
+                <span className="text-right text-label tabular-nums text-text-faint">
+                  Balance {formatAmount(available, { decimals })}
+                </span>
+              ) : null}
+              <ShareSlider
+                amount={amount}
+                onAmount={setAmount}
+                available={available}
+                decimals={decimals}
+                invalid={Boolean(amountError)}
+              />
+            </div>
+
+            {/*
+              In a row of its own between the cards rather than overlapping
+              their edges: the dialog is frosted glass, so there is no solid
+              background colour to cut the notch out of, and a ring in the
+              page colour read as a dark box stamped over both cards.
+            */}
+            <button
+              type="button"
+              onClick={flip}
+              aria-label={wrapping ? 'Switch to unwrap' : 'Switch to wrap'}
+              className="state-layer mx-auto flex size-8 items-center justify-center rounded-pill border border-border bg-surface text-text-muted"
+            >
+              <ArrowDown size={16} aria-hidden />
+            </button>
+
+            <div className="flex flex-col gap-2 rounded-card border border-border bg-surface p-4">
+              <span className="text-label text-text-muted">To · {wrapping ? 'Private' : 'Public'}</span>
+              <div className="flex items-center gap-3">
+                {/* One for one: a wrap is a deposit, not a trade. */}
+                <span
+                  className={cn(
+                    'min-w-0 flex-1 truncate text-[2rem] font-medium leading-tight tabular-nums',
+                    !amount && 'text-text-faint'
+                  )}
+                >
+                  {amount || '0'}
+                </span>
+                <span className="flex shrink-0 items-center gap-2 py-1.5 pr-2.5">
+                  {image ? <img src={image} alt="" className="size-6 shrink-0 rounded-pill" /> : null}
+                  <span className="text-base font-medium">{wrapping ? privateLabel : publicLabel}</span>
+                </span>
+              </div>
+            </div>
           </div>
 
-          <AmountField
-            amount={amount}
-            onAmount={setAmount}
-            symbol={wrapping ? publicLabel : privateLabel}
-            image={token ? tokenImageUrl(token) : undefined}
-            available={available}
-            decimals={decimals}
-            error={amountError}
-            options={wrappable.map(({ token: option }) => ({
-              id: option.address,
-              label: option.symbol,
-              detail: option.description,
-              image: tokenImageUrl(option)
-            }))}
-            optionsLabel="Token"
+          <PickerDialog
+            open={picking}
+            onClose={() => setPicking(false)}
+            label="Token"
+            options={options}
             value={contract}
-            onSelect={(id) => {
+            onChange={(id) => {
               setContract(id)
               setAmount('')
             }}
           />
 
-          {/*
-            Both sides of this pair are usually called the same thing — the
-            public ATOM voucher and the SNIP-20 that holds it are both "ATOM",
-            and only sSCRT has a ticker of its own. So the words carry the
-            distinction rather than the tickers, which would otherwise render
-            as "ATOM → ATOM".
-          */}
-          <p className="flex items-center justify-center gap-2 text-label text-text-faint">
-            {wrapping ? `Public ${publicLabel}` : `Private ${privateLabel}`}
-            <ArrowDown size={13} aria-hidden className="-rotate-90" />
-            {wrapping ? `Private ${privateLabel}` : `Public ${publicLabel}`}
-          </p>
+          {amountError ? (
+            <span className="text-base text-negative" role="alert">
+              {amountError}
+            </span>
+          ) : null}
 
           <p className="text-label text-text-muted">
             {wrapping
@@ -210,11 +266,11 @@ export default function WrapPanel({
             disabled={!ready}
             onClick={submit}
           >
-            {wrapping ? `Wrap ${publicLabel}` : `Unwrap ${privateLabel}`}
+            {!amount ? 'Enter an amount' : wrapping ? `Wrap ${publicLabel}` : `Unwrap ${privateLabel}`}
           </Button>
         </>
       )}
-    </Drawer>
+    </Modal>
   )
 }
 

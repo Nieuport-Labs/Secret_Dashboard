@@ -6,7 +6,7 @@ import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
 import Avatar from '@/components/wallet/Avatar'
 import BalanceList from '@/components/wallet/BalanceList'
-import ReceiveDrawer from '@/components/wallet/ReceiveDrawer'
+import ReceiveModal from '@/components/wallet/ReceiveModal'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { useBalances } from '@/hooks/useBalances'
 import { errorMessage } from '@/lib/errors'
@@ -195,7 +195,7 @@ export default function Multisig() {
         }}
       />
 
-      <ReceiveDrawer open={receiving} onClose={() => setReceiving(false)} address={config.address} />
+      <ReceiveModal open={receiving} onClose={() => setReceiving(false)} address={config.address} />
     </div>
   )
 }

@@ -156,6 +156,10 @@
    * `appearance: none` drops the whole native widget, so the track and the
    * thumb both have to be drawn — and per vendor, since the two pseudo-elements
    * cannot be selected together.
+   *
+   * The track is drawn in the strong border colour, not the surface colour:
+   * Send and Wrap put the slider inside a surface-coloured card, where a
+   * surface-coloured track vanished.
    */
   .slider {
     appearance: none;
@@ -173,13 +177,13 @@
   .slider::-webkit-slider-runnable-track {
     height: 4px;
     border-radius: var(--radius-pill);
-    background: var(--color-surface);
+    background: var(--color-border-strong);
   }
 
   .slider::-moz-range-track {
     height: 4px;
     border-radius: var(--radius-pill);
-    background: var(--color-surface);
+    background: var(--color-border-strong);
   }
 
   .slider::-webkit-slider-thumb {

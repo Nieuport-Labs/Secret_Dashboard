@@ -2,7 +2,8 @@ import { CheckCircle2, ChevronDown, Trash2, XCircle } from 'lucide-react'
 import { useState } from 'react'
 
 import Button from '@/components/ui/Button'
-import Drawer from '@/components/ui/Drawer'
+import Picker from '@/components/ui/Picker'
+import Modal from '@/components/ui/Modal'
 import { DEFAULT_LCD_URLS, DEFAULT_RPC_URLS, DISPLAY_DENOM } from '@/chains/secret4'
 import {
   forgetResolvedEndpoints,
@@ -54,100 +55,112 @@ const FEE_MODES: Array<{ value: FeeMode; label: string; detail: string }> = [
   }
 ]
 
-export default function SettingsDrawer({ open, onClose }: Props) {
+export default function SettingsModal({ open, onClose }: Props) {
   const settings = useSettings()
   const grants = useFeePayer((state) => state.grants)
   const activeFeeMode = FEE_MODES.find((mode) => mode.value === settings.feeMode) ?? FEE_MODES[0]
 
   return (
-    <Drawer open={open} onClose={onClose} title="Settings">
-      <section className="flex flex-col gap-3">
-        <h3 className="text-base font-semibold">Transaction fees</h3>
+    <Modal open={open} onClose={onClose} title="Settings" size="xl">
+      {/*
+        Two columns once there is room. Nothing here depends on anything else,
+        so there is no reason to read it as one long column: how the app looks
+        and pays on the left, what it connects to and what it holds on the
+        right.
+      */}
+      <div className="grid gap-x-10 gap-y-6 md:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-6">
+          <section className="flex flex-col gap-3">
+            <h3 className="text-base font-semibold">Transaction fees</h3>
 
-        <div className="flex items-center gap-1 rounded-pill border border-border p-1">
-          {FEE_MODES.map((mode) => (
-            <button
-              key={mode.value}
-              type="button"
-              onClick={() => settings.set('feeMode', mode.value)}
-              aria-pressed={settings.feeMode === mode.value}
-              className={cn(
-                'state-layer flex-1 rounded-pill px-3 py-2 text-sm font-medium transition-colors duration-[var(--duration-short)] ease-[var(--ease-standard)]',
-                settings.feeMode === mode.value
-                  ? 'bg-accent-strong text-[var(--color-accent-text)]'
-                  : 'text-text-muted'
-              )}
-            >
-              {mode.label}
-            </button>
-          ))}
+            <div className="flex items-center gap-1 rounded-pill border border-border p-1">
+              {FEE_MODES.map((mode) => (
+                <button
+                  key={mode.value}
+                  type="button"
+                  onClick={() => settings.set('feeMode', mode.value)}
+                  aria-pressed={settings.feeMode === mode.value}
+                  className={cn(
+                    'state-layer flex-1 rounded-pill px-3 py-2 text-sm font-medium transition-colors duration-[var(--duration-short)] ease-[var(--ease-standard)]',
+                    settings.feeMode === mode.value
+                      ? 'bg-accent-strong text-[var(--color-accent-text)]'
+                      : 'text-text-muted'
+                  )}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+
+            <p className="text-sm text-text-faint">{activeFeeMode.detail}</p>
+
+            {settings.feeMode === 'select' ? <GranterPicker grants={grants} /> : null}
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <h3 className="text-base font-semibold">Appearance</h3>
+            <div className="flex gap-2">
+              {(['dark', 'light'] as Theme[]).map((theme) => (
+                <button
+                  key={theme}
+                  type="button"
+                  onClick={() => settings.set('theme', theme)}
+                  className={cn(
+                    'state-layer flex-1 rounded-control px-4 py-2.5 text-base font-medium capitalize',
+                    settings.theme === theme ? 'bg-accent-container text-accent' : 'bg-surface'
+                  )}
+                >
+                  {theme}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <h3 className="text-base font-semibold">Currency</h3>
+            {/*
+              The app's own chooser rather than a native <select>: the native
+              list is drawn by the platform, outside the theme, and inside a
+              frosted dialog it came out unreadable.
+            */}
+            <Picker
+              label="Currency"
+              options={CURRENCIES.map(({ code, name }) => ({ id: code, label: code, detail: name }))}
+              value={settings.currency}
+              onChange={(code) => settings.set('currency', code)}
+            />
+            <p className="text-sm text-text-faint">
+              Prices only. Balances are always the real token amounts.
+            </p>
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <h3 className="text-base font-semibold">Notifications</h3>
+            <label className="state-layer flex cursor-pointer items-start gap-3 rounded-control bg-surface p-3">
+              <input
+                type="checkbox"
+                checked={settings.notificationsEnabled}
+                onChange={(event) => settings.set('notificationsEnabled', event.target.checked)}
+                className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
+              />
+              <span>
+                <span className="block text-base font-medium">Private push notifications</span>
+                <span className="block text-sm text-text-muted">
+                  Tells you when a private token arrives, without polling. Turning this off falls back to
+                  checking periodically, which still works.
+                </span>
+              </span>
+            </label>
+          </section>
         </div>
 
-        <p className="text-sm text-text-faint">{activeFeeMode.detail}</p>
-
-        {settings.feeMode === 'select' ? <GranterPicker grants={grants} /> : null}
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h3 className="text-base font-semibold">Appearance</h3>
-        <div className="flex gap-2">
-          {(['dark', 'light'] as Theme[]).map((theme) => (
-            <button
-              key={theme}
-              type="button"
-              onClick={() => settings.set('theme', theme)}
-              className={cn(
-                'state-layer flex-1 rounded-control px-4 py-2.5 text-base font-medium capitalize',
-                settings.theme === theme ? 'bg-accent-container text-accent' : 'bg-surface'
-              )}
-            >
-              {theme}
-            </button>
-          ))}
+        <div className="flex min-w-0 flex-col gap-6">
+          <EndpointSection />
+          <PermitSection />
+          <CustomTokensSection />
         </div>
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h3 className="text-base font-semibold">Currency</h3>
-        <select
-          value={settings.currency}
-          onChange={(event) => settings.set('currency', event.target.value)}
-          className="rounded-control border border-border bg-surface px-3 py-2 text-base outline-none"
-        >
-          {CURRENCIES.map((code) => (
-            <option key={code} value={code}>
-              {code}
-            </option>
-          ))}
-        </select>
-        <p className="text-sm text-text-faint">Prices only. Balances are always the real token amounts.</p>
-      </section>
-
-      <EndpointSection />
-
-      <PermitSection />
-
-      <section className="flex flex-col gap-3">
-        <h3 className="text-base font-semibold">Notifications</h3>
-        <label className="state-layer flex cursor-pointer items-start gap-3 rounded-control bg-surface p-3">
-          <input
-            type="checkbox"
-            checked={settings.notificationsEnabled}
-            onChange={(event) => settings.set('notificationsEnabled', event.target.checked)}
-            className="mt-1 size-4 shrink-0 accent-[var(--color-accent)]"
-          />
-          <span>
-            <span className="block text-base font-medium">Private push notifications</span>
-            <span className="block text-sm text-text-muted">
-              Tells you when a private token arrives, without polling. Turning this off falls back to checking
-              periodically, which still works.
-            </span>
-          </span>
-        </label>
-      </section>
-
-      <CustomTokensSection />
-    </Drawer>
+      </div>
+    </Modal>
   )
 }
 
@@ -199,7 +212,16 @@ function GranterPicker({ grants }: { grants: FeeGrant[] }) {
   )
 }
 
-const CURRENCIES = ['USD', 'EUR', 'GBP', 'CHF', 'CZK', 'JPY', 'AUD', 'CAD']
+const CURRENCIES = [
+  { code: 'USD', name: 'US dollar' },
+  { code: 'EUR', name: 'Euro' },
+  { code: 'GBP', name: 'British pound' },
+  { code: 'CHF', name: 'Swiss franc' },
+  { code: 'CZK', name: 'Czech koruna' },
+  { code: 'JPY', name: 'Japanese yen' },
+  { code: 'AUD', name: 'Australian dollar' },
+  { code: 'CAD', name: 'Canadian dollar' }
+]
 
 /**
  * Endpoint overrides.
@@ -450,29 +472,22 @@ function PermitSection() {
             <Button variant="soft" shape="control" size="sm" loading={signing} onClick={() => void sign()}>
               Re-sign
             </Button>
-            <Button variant="ghost" size="sm" onClick={forget}>
+            {/*
+              Forgets the stkd-SCRT unbonding permit along with the main one.
+              It is a separate signature, but not a separate thing anyone
+              means to keep once they have asked this device to forget.
+            */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                forget()
+                if (staking.permit) staking.forget()
+              }}
+            >
               Forget on this device
             </Button>
           </div>
-          <p className="text-sm text-text-faint">
-            Forgetting removes the local copy only. It stays valid on chain until revoked, which is a
-            transaction and cannot be undone under the same permit name.
-          </p>
-
-          {staking.permit ? (
-            <p className="text-sm text-text-faint">
-              A second permit covers stkd-SCRT&rsquo;s unbonding queue, which asks for a permission no other
-              token understands.{' '}
-              <button
-                type="button"
-                onClick={staking.forget}
-                className="text-accent underline underline-offset-4"
-              >
-                Forget that one too
-              </button>
-              .
-            </p>
-          ) : null}
         </>
       ) : (
         <>
