@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronDown, ExternalLink, Fuel } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ExternalLink, Fuel, Loader2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import AmountHero from '@/components/ui/AmountHero'
@@ -85,17 +85,23 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
   const [picking, setPicking] = useState(false)
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
   const [swappable, setSwappable] = useState<string[]>([])
+  /** Still finding which tokens could pay — the pool list and the permit's tokens. */
+  const [listing, setListing] = useState(false)
   const [quote, setQuote] = useState<QuoteState>({ kind: 'none' })
 
   // Which private tokens could pay, which needs the permit to read them at all.
   useEffect(() => {
     if (!queryClient || !permit) return
     let cancelled = false
+    setListing(true)
     void swappableTokens(queryClient, permit)
       .then((tokens) => {
         if (!cancelled) setSwappable(tokens)
       })
       .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setListing(false)
+      })
     return () => {
       cancelled = true
     }
@@ -103,6 +109,10 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
 
   const contracts = useMemo(() => [SSCRT_ADDRESS, ...swappable], [swappable])
   const balances = useBalances(permit ? permitAuth(permit) : undefined, undefined, contracts)
+  // Until both the candidates and their balances are in, the picker is not
+  // the whole list — say so rather than show a short one as if it were.
+  const loadingTokens =
+    Boolean(permit) && (listing || balances.loading || (contracts.length > 0 && balances.tokens.length === 0))
 
   const held = useMemo(() => {
     const map = new Map<string, bigint>()
@@ -353,7 +363,15 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
           <span className="text-base font-medium">Pay with {selected.label}</span>
           <span className="truncate text-label text-text-faint">{payDetail}</span>
         </span>
-        <ChevronDown size={16} aria-hidden className="shrink-0 text-text-muted" />
+        {loadingTokens ? (
+          <Loader2
+            size={16}
+            aria-label="Loading your tokens"
+            className="shrink-0 animate-spin text-text-muted"
+          />
+        ) : (
+          <ChevronDown size={16} aria-hidden className="shrink-0 text-text-muted" />
+        )}
       </button>
 
       <PickerDialog
@@ -361,6 +379,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
         onClose={() => setPicking(false)}
         label="Pay with"
         options={options}
+        loading={loadingTokens ? 'Loading your tokens…' : undefined}
         value={payWith}
         onChange={(id) => setPayWith(id)}
       />

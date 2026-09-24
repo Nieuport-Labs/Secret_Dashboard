@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronDown, ExternalLink, Eye, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ExternalLink, Eye, Loader2, ShieldCheck } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import Button from '@/components/ui/Button'
@@ -90,6 +90,8 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
   const [picking, setPicking] = useState(false)
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
   const [swappable, setSwappable] = useState<string[]>([])
+  /** Still finding which tokens could pay — the pool list and the permit's tokens. */
+  const [listing, setListing] = useState(false)
   const [quote, setQuote] = useState<QuoteState>({ kind: 'none' })
 
   /*
@@ -102,11 +104,15 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
   useEffect(() => {
     if (!queryClient || !permit || !token || !otherWays) return
     let cancelled = false
+    setListing(true)
     void swappableTokens(queryClient, permit, token)
       .then((tokens) => {
         if (!cancelled) setSwappable(tokens)
       })
       .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setListing(false)
+      })
     return () => {
       cancelled = true
     }
@@ -121,6 +127,12 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
     undefined,
     contracts
   )
+  // Until both the candidates and their balances are in, the picker is not
+  // the whole list — say so rather than show a short one as if it were.
+  const loadingTokens =
+    Boolean(permit) &&
+    otherWays &&
+    (listing || balances.loading || (contracts.length > 0 && balances.tokens.length === 0))
 
   const held = useMemo(() => {
     const map = new Map<string, bigint>()
@@ -332,7 +344,15 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
           <span className="text-base font-medium">Pay with {selected.label}</span>
           <span className="truncate text-label text-text-faint">{selected.detail}</span>
         </span>
-        <ChevronDown size={16} aria-hidden className="shrink-0 text-text-muted" />
+        {loadingTokens ? (
+          <Loader2
+            size={16}
+            aria-label="Loading your tokens"
+            className="shrink-0 animate-spin text-text-muted"
+          />
+        ) : (
+          <ChevronDown size={16} aria-hidden className="shrink-0 text-text-muted" />
+        )}
       </button>
 
       {/* One signature, no transaction: it reads private balances, which is
@@ -354,6 +374,7 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
         onClose={() => setPicking(false)}
         label="Pay with"
         options={options}
+        loading={loadingTokens ? 'Loading your tokens…' : undefined}
         value={payWith}
         onChange={(id) => setPayWith(id)}
       />
