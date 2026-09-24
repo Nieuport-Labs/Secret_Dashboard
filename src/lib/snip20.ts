@@ -1,8 +1,7 @@
 import type { SecretNetworkClient } from 'secretjs'
 
 import { batchQuery } from '@/lib/batchQuery'
-import { codeHashFor } from '@/lib/codeHash'
-import { mapWithLimit } from '@/lib/concurrency'
+import { codeHashFor, codeHashesFor } from '@/lib/codeHash'
 import { errorMessage } from '@/lib/errors'
 import { covers, withPermit, type Permit } from '@/lib/permit'
 
@@ -176,11 +175,7 @@ export async function queryBalancesBatched(
     return true
   })
 
-  const hashes = new Map<string, string>()
-  await mapWithLimit(asked, 12, async (address) => {
-    const hash = await codeHashFor(client, address).catch(() => undefined)
-    if (hash) hashes.set(address, hash)
-  })
+  const hashes = await codeHashesFor(client, asked)
 
   const query = balanceQuery(auth)
   const answers = await batchQuery(

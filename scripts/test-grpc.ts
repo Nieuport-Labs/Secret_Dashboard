@@ -26,6 +26,7 @@ function check(name: string, condition: boolean, detail?: unknown): void {
 const CONTRACT = 'secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek'
 let seen: { path?: string; contentType?: string; contract?: string; query?: Buffer } = {}
 let answerWith: 'ok' | 'contract-error' = 'ok'
+let hashCalls = 0
 
 /** Just enough protobuf to read the request back. */
 function readFields(message: Buffer): Map<number, Buffer> {
@@ -60,6 +61,18 @@ const server = createServer((request, response) => {
       query: fields.get(2)
     }
     response.writeHead(200, { 'content-type': 'application/grpc' })
+    if (seen.path?.endsWith('/CodeHashByContractAddress')) {
+      hashCalls += 1
+      // QueryCodeHashResponse { code_hash = 1 }: the address's last character, 64 times.
+      const hash = Buffer.from(seen.contract!.slice(-1).repeat(64))
+      const message = Buffer.concat([Buffer.from([0x0a, hash.length]), hash])
+      const frame = Buffer.alloc(5 + message.length)
+      frame.writeUInt32BE(message.length, 1)
+      message.copy(frame, 5)
+      response.addTrailers({ 'grpc-status': '0' })
+      response.end(frame)
+      return
+    }
     if (answerWith === 'contract-error') {
       response.addTrailers({
         'grpc-status': '2',
@@ -136,6 +149,26 @@ check(
   (await call({ contract: 'cosmos1abc', query: 'AQID' })).status === 400
 )
 check('an empty query is refused', (await call({ contract: CONTRACT, query: '' })).status === 400)
+
+{
+  const other = 'secret1s09x2xvfd2lp2skgzm29w2xtena7s8fq98v852'
+  const response = await call({ codeHashes: [CONTRACT, other] })
+  const reply = (await response.json()) as { codeHashes?: Record<string, string> }
+  check(
+    'every code hash asked for comes back in one call',
+    response.status === 200 &&
+      reply.codeHashes?.[CONTRACT] === 'k'.repeat(64) &&
+      reply.codeHashes?.[other] === '2'.repeat(64),
+    reply
+  )
+  const before = hashCalls
+  await call({ codeHashes: [CONTRACT, other] })
+  check('and is remembered by a warm function', hashCalls === before, hashCalls)
+  check(
+    'a bad address among them is refused',
+    (await call({ codeHashes: [CONTRACT, 'cosmos1abc'] })).status === 400
+  )
+}
 
 // The proxy keeps its connection open between calls; cut it from this side.
 await new Promise<void>((resolve) => {

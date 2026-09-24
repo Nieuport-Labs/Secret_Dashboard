@@ -19,18 +19,22 @@ import { connect, type ClientHttp2Session } from 'node:http2'
  * ciphertext — the contract address is the one thing in the clear, as it is
  * to any LCD.
  *
- * It forwards `QuerySecretContract` and nothing else, so it is not a general
- * gRPC proxy.
+ * It forwards `QuerySecretContract` and `CodeHashByContractAddress` — the
+ * second so a balance sweep can learn every token's code hash in one round
+ * trip instead of one LCD request each — and nothing else, so it is not a
+ * general gRPC proxy.
  */
 
 const ENDPOINT = process.env.SECRET_GRPC_URL ?? 'https://grpc.secretnetwork.pathrocknetwork.org:443'
-const METHOD = '/secret.compute.v1beta1.Query/QuerySecretContract'
+const QUERY_METHOD = '/secret.compute.v1beta1.Query/QuerySecretContract'
+const CODE_HASH_METHOD = '/secret.compute.v1beta1.Query/CodeHashByContractAddress'
 
 const ADDRESS = /^secret1[02-9ac-hj-np-z]{38,58}$/
 /** Encrypted queries base64'd. A batch of permit queries is tens of kB; this is generous. */
 const MAX_QUERY_CHARS = 400_000
+/** Code hashes asked for in one call: a whole token registry, with room. */
+const MAX_CODE_HASHES = 300
 const TIMEOUT_MS = 15_000
-
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -63,7 +67,17 @@ function encodeRequest(contract: string, query: Uint8Array): Buffer {
   ])
 }
 
-/** `QuerySecretContractResponse { bytes data = 1; }` */
+/** `QueryByContractAddressRequest { string contract_address = 1; }` */
+function encodeAddress(contract: string): Buffer {
+  const address = Buffer.from(contract, 'utf8')
+  return Buffer.concat([Buffer.from([0x0a, ...varint(address.length)]), address])
+}
+
+/**
+ * Field 1 of a response, the only one either answer has:
+ * `QuerySecretContractResponse { bytes data = 1; }`,
+ * `QueryCodeHashResponse { string code_hash = 1; }`.
+ */
 function decodeResponse(message: Buffer): Buffer {
   let offset = 0
   while (offset < message.length) {
@@ -89,7 +103,13 @@ function decodeResponse(message: Buffer): Buffer {
 /** The chain answered, with a gRPC error status — a contract error, not a broken connection. */
 class GrpcStatusError extends Error {}
 
-/** Kept between calls on a warm function, so a sweep pays for one TLS handshake. */
+/**
+ * Kept between calls on a warm function, so a sweep pays for one TLS
+ * handshake. A warm function also serves several requests at once, all on
+ * this one connection — so a connection is never destroyed while it may be
+ * carrying someone else's request; one that failed is only let go of, and
+ * closes once what it carries is done.
+ */
 let session: ClientHttp2Session | undefined
 
 function sessionFor(): ClientHttp2Session {
@@ -98,9 +118,11 @@ function sessionFor(): ClientHttp2Session {
   const forget = () => {
     if (session === fresh) session = undefined
   }
-  // A node closes idle connections (GOAWAY); a warm function must not keep
-  // handing out one that is going away.
-  fresh.on('error', forget)
+  fresh.on('error', (error: Error & { code?: string }) => {
+    console.error('secret-query connection error:', error.code ?? '', error.message)
+    forget()
+  })
+  // A node closes idle connections (GOAWAY); a new request must not go to one that is going away.
   fresh.on('goaway', forget)
   fresh.on('close', forget)
   fresh.unref()
@@ -108,28 +130,23 @@ function sessionFor(): ClientHttp2Session {
   return fresh
 }
 
-/** A connection that failed under a request is dropped, and the request tried once more on a new one. */
-async function unaryWithRetry(message: Buffer): Promise<Buffer> {
-  try {
-    return await unary(message)
-  } catch (error) {
-    if (error instanceof GrpcStatusError) throw error
-    session?.destroy()
-    session = undefined
-    return unary(message)
-  }
+/** Stop handing out `failed` to new requests, without cutting the ones it carries. */
+function letGo(failed: ClientHttp2Session): void {
+  if (session === failed) session = undefined
+  if (!failed.closed && !failed.destroyed) failed.close()
 }
 
-function unary(message: Buffer): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
+function unary(method: string, message: Buffer): Promise<Buffer> {
+  const connection = sessionFor()
+  return new Promise<Buffer>((resolve, reject) => {
     const frame = Buffer.alloc(5 + message.length)
     frame[0] = 0
     frame.writeUInt32BE(message.length, 1)
     message.copy(frame, 5)
 
-    const request = sessionFor().request({
+    const request = connection.request({
       ':method': 'POST',
-      ':path': METHOD,
+      ':path': method,
       'content-type': 'application/grpc',
       te: 'trailers'
     })
@@ -166,31 +183,102 @@ function unary(message: Buffer): Promise<Buffer> {
       resolve(decodeResponse(body.subarray(5, 5 + body.readUInt32BE(1))))
     })
     request.end(frame)
+  }).catch((error: unknown) => {
+    if (!(error instanceof GrpcStatusError)) letGo(connection)
+    throw error
   })
 }
 
+/** A request whose connection failed under it is tried once more, on a new one. */
+async function unaryWithRetry(method: string, message: Buffer): Promise<Buffer> {
+  try {
+    return await unary(method, message)
+  } catch (error) {
+    if (error instanceof GrpcStatusError) throw error
+    return unary(method, message)
+  }
+}
+
+/**
+ * Code hashes are public and change only with a migration, so a warm function
+ * keeps what it has read. An hour bounds how long a migrated contract is
+ * answered with its old hash — and a query sent with it fails loudly, it does
+ * not read the wrong contract.
+ */
+const HASH_TTL_MS = 60 * 60_000
+const hashes = new Map<string, { hash: string; at: number }>()
+
+async function codeHash(contract: string): Promise<string> {
+  const cached = hashes.get(contract)
+  if (cached && Date.now() - cached.at < HASH_TTL_MS) return cached.hash
+  const hash = (await unaryWithRetry(CODE_HASH_METHOD, encodeAddress(contract))).toString('utf8')
+  if (hash) hashes.set(contract, { hash, at: Date.now() })
+  return hash
+}
+
+/**
+ *   POST { codeHashes: ["secret1…", …] } → { codeHashes: { "secret1…": "<hash>" | null } }
+ *
+ * Every hash in one browser round trip; the calls behind it run side by side
+ * on one connection. A contract whose hash could not be read maps to null.
+ */
+async function codeHashes(addresses: unknown): Promise<Response> {
+  if (
+    !Array.isArray(addresses) ||
+    addresses.length === 0 ||
+    addresses.length > MAX_CODE_HASHES ||
+    !addresses.every((address) => typeof address === 'string' && ADDRESS.test(address))
+  ) {
+    return json({ error: 'bad codeHashes' }, 400)
+  }
+  const started = Date.now()
+  const answers = await Promise.allSettled((addresses as string[]).map(codeHash))
+  const result: Record<string, string | null> = {}
+  let missing = 0
+  answers.forEach((answer, index) => {
+    const ok = answer.status === 'fulfilled' && answer.value !== ''
+    if (!ok) missing += 1
+    result[(addresses as string[])[index]] = ok ? answer.value : null
+  })
+  console.log(`secret-query codeHashes n=${addresses.length} missing=${missing} ms=${Date.now() - started}`)
+  // Every one failing is the path being down, not a list of odd contracts.
+  if (missing === addresses.length) return json({ error: 'no code hash could be read' }, 503)
+  return json({ codeHashes: result })
+}
+
 export async function POST(request: Request): Promise<Response> {
-  let body: { contract?: unknown; query?: unknown }
+  let body: { contract?: unknown; query?: unknown; codeHashes?: unknown }
   try {
     body = (await request.json()) as typeof body
   } catch {
     return json({ error: 'not JSON' }, 400)
   }
+  if (body.codeHashes !== undefined) return codeHashes(body.codeHashes)
   if (typeof body.contract !== 'string' || !ADDRESS.test(body.contract))
     return json({ error: 'bad contract' }, 400)
   if (typeof body.query !== 'string' || body.query.length === 0 || body.query.length > MAX_QUERY_CHARS) {
     return json({ error: 'bad query' }, 400)
   }
 
+  const started = Date.now()
   try {
-    const data = await unaryWithRetry(encodeRequest(body.contract, Buffer.from(body.query, 'base64')))
+    const data = await unaryWithRetry(
+      QUERY_METHOD,
+      encodeRequest(body.contract, Buffer.from(body.query, 'base64'))
+    )
+    // How long the node took, for finding where a slow sweep spends its time.
+    console.log(`secret-query query bytes=${body.query.length} ms=${Date.now() - started}`)
     return json({ data: data.toString('base64') })
   } catch (error) {
     // A contract error comes back as a gRPC status carrying the (encrypted)
     // reason; the browser decrypts it. 502 says the chain answered; 503 says
     // the node could not be reached at all, so the browser stops using this.
     const message = error instanceof Error ? error.message : 'gRPC call failed'
-    if (!(error instanceof GrpcStatusError)) console.error('secret-query transport failure:', message)
+    if (!(error instanceof GrpcStatusError)) {
+      // "The pending stream has been canceled" says nothing on its own; the connection's error does.
+      const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : ''
+      console.error('secret-query transport failure:', message, cause && `(caused by: ${cause})`)
+    }
     return json({ error: message }, error instanceof GrpcStatusError ? 502 : 503)
   }
 }

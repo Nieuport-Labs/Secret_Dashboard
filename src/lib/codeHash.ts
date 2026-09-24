@@ -1,5 +1,10 @@
 import type { SecretNetworkClient } from 'secretjs'
 
+import { mapWithLimit } from '@/lib/concurrency'
+import { grpcCodeHashes } from '@/lib/grpcQuery'
+
+const LCD_CONCURRENCY = 12
+
 /**
  * Code hashes, read from the chain rather than hardcoded.
  *
@@ -44,19 +49,28 @@ export function codeHashFor(client: SecretNetworkClient, contractAddress: string
  * of one per token in series. Failures are kept out of the cache by
  * `codeHashFor`, and reported per address rather than failing the batch — one
  * unreachable contract must not empty the whole screen.
+ *
+ * What is not cached yet is asked of the gRPC proxy first, all in one request
+ * (`grpcCodeHashes`); only what that could not answer goes to the LCD, one
+ * request each.
  */
 export async function codeHashesFor(
   client: SecretNetworkClient,
   addresses: string[]
 ): Promise<Map<string, string>> {
-  const results = await Promise.allSettled(
-    addresses.map(async (address) => [address, await codeHashFor(client, address)] as const)
-  )
+  const unknown = addresses.filter((address) => !cache.has(address))
+  const viaProxy = unknown.length > 1 ? await grpcCodeHashes(unknown) : undefined
+  for (const [address, hash] of viaProxy ?? []) {
+    if (!cache.has(address)) cache.set(address, Promise.resolve(hash))
+  }
 
   const hashes = new Map<string, string>()
-  for (const result of results) {
-    if (result.status === 'fulfilled') hashes.set(result.value[0], result.value[1])
-  }
+  // A dozen at a time: a registry's worth fired at once is what gets a
+  // browser rate-limited by a public LCD.
+  await mapWithLimit(addresses, LCD_CONCURRENCY, async (address) => {
+    const hash = await codeHashFor(client, address).catch(() => undefined)
+    if (hash) hashes.set(address, hash)
+  })
   return hashes
 }
 

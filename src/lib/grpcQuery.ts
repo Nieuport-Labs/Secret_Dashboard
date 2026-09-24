@@ -110,3 +110,33 @@ export async function grpcQueryContract(
   }
   throw new Error(reply.error ?? `secret-query answered ${response.status}`)
 }
+
+/**
+ * Code hashes for many contracts in one request (the proxy asks the node for
+ * them side by side). Only the ones it could read; `undefined` when the path
+ * itself failed, so the caller asks the LCD as before.
+ */
+export async function grpcCodeHashes(addresses: string[]): Promise<Map<string, string> | undefined> {
+  if (addresses.length === 0 || !grpcAvailable()) return undefined
+  try {
+    const response = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ codeHashes: addresses })
+    })
+    const reply = (await response.json().catch(() => ({}))) as {
+      codeHashes?: Record<string, string | null>
+    }
+    if (!response.ok || !reply.codeHashes) throw new Error(`secret-query answered ${response.status}`)
+    grpcAnswered()
+    const hashes = new Map<string, string>()
+    for (const address of addresses) {
+      const hash = reply.codeHashes[address]
+      if (typeof hash === 'string' && /^[0-9a-f]{64}$/i.test(hash)) hashes.set(address, hash)
+    }
+    return hashes
+  } catch {
+    grpcFailed()
+    return undefined
+  }
+}
