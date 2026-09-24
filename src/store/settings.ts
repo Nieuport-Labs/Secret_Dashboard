@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 
 import { GAS_SLICE_USD } from '@/chains/osmosis'
 import type { AssetMode, FeeMode, GasMode, Theme } from '@/lib/settingsRecord'
+import { SSCRT_ADDRESS } from '@/tokens/registry'
 
 export type { AssetMode, FeeMode, GasMode, Theme }
 
@@ -77,4 +78,14 @@ export const useSettings = create<SettingsState>()(
 /** Keeps the document class in step with the theme setting. */
 export function applyTheme(theme: Theme): void {
   document.documentElement.classList.toggle('light', theme === 'light')
+}
+
+/**
+ * Whether a private token may be unwrapped. In easy mode only sSCRT can be —
+ * SCRT is what pays for gas, so taking it back out has to stay possible.
+ * Everything else takes expert mode, which is also the answer until the
+ * first-run question has been answered: easy is the default.
+ */
+export function canUnwrap(assetMode: AssetMode | undefined, contract: string): boolean {
+  return assetMode === 'expert' || contract === SSCRT_ADDRESS
 }

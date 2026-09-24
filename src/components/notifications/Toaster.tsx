@@ -1,7 +1,8 @@
-import { AlertCircle, CheckCircle2, Clock, ExternalLink, Loader2, X } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock, ExternalLink, Fuel, Loader2, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
+import { SHADE_SWAP_URL } from '@/lib/autoRefill'
 import { cn } from '@/lib/cn'
 import { useNotifications, type Toast } from '@/store/notifications'
 import { useTransactions, type TrackedTx } from '@/store/transactions'
@@ -50,6 +51,28 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
           <AlertCircle size={16} aria-hidden className="mt-px shrink-0 text-negative" />
           <p className="text-base">{toast.message}</p>
         </div>
+      ) : toast.kind === 'gas-empty' ? (
+        <>
+          <div className="flex items-start gap-2.5">
+            <Fuel size={16} aria-hidden className="mt-0.5 shrink-0 text-accent" />
+            <p className="text-base">{toast.message}</p>
+          </div>
+          <div className="mt-3 flex gap-2.5">
+            <a
+              href={SHADE_SWAP_URL}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={onDismiss}
+              className="state-layer inline-flex flex-1 items-center justify-center gap-1.5 rounded-control bg-accent-strong px-4 py-2 text-base font-medium text-[var(--color-accent-text)]"
+            >
+              Get SCRT/sSCRT
+              <ExternalLink size={14} aria-hidden />
+            </a>
+            <Button variant="secondary" shape="control" onClick={onDismiss}>
+              Dismiss
+            </Button>
+          </div>
+        </>
       ) : (
         <>
           <div className="flex items-center justify-between gap-3">

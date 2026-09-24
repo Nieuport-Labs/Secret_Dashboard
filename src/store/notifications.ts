@@ -17,6 +17,8 @@ export type ToastKind =
   | 'wrapped'
   | 'bridged'
   | 'error'
+  /** Auto-refill found gas credits low and no sSCRT to top them up with. */
+  | 'gas-empty'
 
 export interface Toast {
   id: string

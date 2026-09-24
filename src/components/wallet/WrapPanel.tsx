@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn'
 import { formatAmount, toBaseUnits } from '@/lib/format'
 import type { Balances } from '@/hooks/useBalances'
 import { useWalletActions } from '@/hooks/useWalletActions'
+import { canUnwrap, useSettings } from '@/store/settings'
 import { bankDenomFor } from '@/tokens/routes'
 import { privateSymbol, SSCRT_ADDRESS, TOKENS, tokenByAddress, tokenImageUrl } from '@/tokens/registry'
 
@@ -45,6 +46,7 @@ export default function WrapPanel({
   onDone
 }: Props) {
   const actions = useWalletActions(onDone)
+  const assetMode = useSettings((state) => state.assetMode)
 
   const [direction, setDirection] = useState<Direction>('wrap')
   const [contract, setContract] = useState(SSCRT_ADDRESS)
@@ -76,7 +78,10 @@ export default function WrapPanel({
   const token = tokenByAddress(contract)
   const denom = bankDenomFor(contract)
   const decimals = token?.decimals ?? 6
-  const wrapping = direction === 'wrap'
+  // Easy mode unwraps nothing but sSCRT; picking another token turns the
+  // panel back into a wrap rather than offering what cannot be done.
+  const unwrapAllowed = canUnwrap(assetMode, contract)
+  const wrapping = direction === 'wrap' || !unwrapAllowed
 
   const wrapped = balances.tokens.find((row) => row.token.address === contract)
   const wrappedAmount = wrapped?.outcome.status === 'ok' ? wrapped.outcome.amount : undefined
@@ -200,14 +205,20 @@ export default function WrapPanel({
               background colour to cut the notch out of, and a ring in the
               page colour read as a dark box stamped over both cards.
             */}
-            <button
-              type="button"
-              onClick={flip}
-              aria-label={wrapping ? 'Switch to unwrap' : 'Switch to wrap'}
-              className="state-layer mx-auto flex size-8 items-center justify-center rounded-pill border border-border bg-surface text-text-muted"
-            >
-              <ArrowDown size={16} aria-hidden />
-            </button>
+            {unwrapAllowed ? (
+              <button
+                type="button"
+                onClick={flip}
+                aria-label={wrapping ? 'Switch to unwrap' : 'Switch to wrap'}
+                className="state-layer mx-auto flex size-8 items-center justify-center rounded-pill border border-border bg-surface text-text-muted"
+              >
+                <ArrowDown size={16} aria-hidden />
+              </button>
+            ) : (
+              <span className="mx-auto flex size-8 items-center justify-center text-text-faint">
+                <ArrowDown size={16} aria-hidden />
+              </span>
+            )}
 
             <div className="flex flex-col gap-2 rounded-card border border-border bg-surface p-4">
               <span className="text-label text-text-muted">To · {wrapping ? 'Private' : 'Public'}</span>

@@ -138,6 +138,15 @@ export default function Bridge() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- resets on token identity, not on every settings change
   }, [tokenAddress, isScrtToken])
 
+  /*
+   * Easy mode has no choice to offer: everything arrives wrapped. The one
+   * exception is SCRT for someone paying fees in SCRT themselves — wrapping it
+   * would leave them holding sSCRT and unable to pay for the next transaction.
+   * With auto-refill on, sSCRT is exactly what the refill spends, so it wraps.
+   */
+  const easyMode = settings.assetMode !== 'expert'
+  const wrapOnArrival = easyMode ? !isScrtToken || settings.gasMode === 'autorefill' : wrap
+
   useEffect(() => {
     const ids = ['secret', token?.coingeckoId].filter((id): id is string => !!id)
     void fetchPrices(ids)
@@ -335,7 +344,7 @@ export default function Bridge() {
         // The main transfer, wrapped on arrival when asked. The code hash is
         // read from the chain: a stale one makes the hook fail and the tokens
         // land public instead, the opposite of what was asked for.
-        const direct = wrap
+        const direct = wrapOnArrival
           ? wrapDepositMemo(token.address, await codeHashFor(queryClient, token.address), secretAddress)
           : plainTransfer(secretAddress)
 
@@ -398,11 +407,12 @@ export default function Bridge() {
           chain,
           sender: source.address,
           legs,
-          gasLimit: depositGasLimit(chain, route, legs.length, wrap || Boolean(route.forward)) + callGas,
+          gasLimit:
+            depositGasLimit(chain, route, legs.length, wrapOnArrival || Boolean(route.forward)) + callGas,
           calls,
           summary: {
             label: `Bridge ${amount} ${token.symbol} from ${chain.name}`,
-            detail: `to ${shortenAddress(secretAddress)}${wrap ? ', wrapped on arrival' : ''}`
+            detail: `to ${shortenAddress(secretAddress)}${wrapOnArrival ? ', wrapped on arrival' : ''}`
           }
         })
         setStatus({ kind: 'done', hash: result.hash })
@@ -598,7 +608,7 @@ export default function Bridge() {
                 )}
               />
               <span className="ml-auto text-label font-normal text-text-faint">
-                {[wrap ? 'wrap on arrival' : undefined, getGas && canGetGas ? 'get gas' : undefined]
+                {[wrapOnArrival ? 'wrap on arrival' : undefined, getGas && canGetGas ? 'get gas' : undefined]
                   .filter(Boolean)
                   .join(' · ') || 'none'}
               </span>
@@ -606,15 +616,18 @@ export default function Bridge() {
 
             {optionsOpen ? (
               <div className="-mx-2 flex flex-col gap-0.5">
-                <Option
-                  checked={wrap}
-                  onChange={setWrap}
-                  icon={<ShieldCheck size={16} aria-hidden className="text-accent" />}
-                  title={isScrtToken ? 'Wrap on arrival' : 'Wrap on arrival (recommended)'}
-                >
-                  Arrives as a private SNIP-20 instead of sitting on Secret in public. Costs a little more gas
-                  on the source chain.
-                </Option>
+                {/* Not a choice in easy mode — see `wrapOnArrival`. */}
+                {easyMode ? null : (
+                  <Option
+                    checked={wrap}
+                    onChange={setWrap}
+                    icon={<ShieldCheck size={16} aria-hidden className="text-accent" />}
+                    title={isScrtToken ? 'Wrap on arrival' : 'Wrap on arrival (recommended)'}
+                  >
+                    Arrives as a private SNIP-20 instead of sitting on Secret in public. Costs a little more
+                    gas on the source chain.
+                  </Option>
+                )}
 
                 <Option
                   checked={getGas && canGetGas}
@@ -807,7 +820,7 @@ export default function Bridge() {
         {depositing && route?.forward && token ? (
           <p className="text-label text-text-faint">
             Goes through {sourceChain(route.forward.via)?.name ?? 'its home chain'}, which passes it on to
-            Secret{wrap ? ' — still wrapped on arrival' : ''}. Allow a few minutes for the two hops.
+            Secret{wrapOnArrival ? ' — still wrapped on arrival' : ''}. Allow a few minutes for the two hops.
           </p>
         ) : null}
       </div>
