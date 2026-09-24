@@ -4,11 +4,15 @@
  * Adapted from dash.scrt.network's chain table (MIT). Axelar's own routes are
  * absent on purpose: they have been disabled since the 2026-06-10 drain of the
  * CW20-ICS20 fork, and the reference still ships them. See docs/chain-facts.md.
+ * Twenty smaller chains the reference lists are left out too, to keep the
+ * picker short. Their token routes stay in `tokens/routes.ts`: that table also
+ * says which bank denomination each token wraps, and someone already holding
+ * one of those tokens on Secret still needs to wrap and unwrap it.
  *
  * Channel ids are the part that rots. `withdrawChannel` is Secret's own side and
  * is checked by `npm run verify:chain`; `depositChannel` belongs to the source
  * chain and is verified against that chain when a route is selected, because
- * checking thirty-seven chains on every page load would be absurd.
+ * checking seventeen chains on every page load would be absurd.
  */
 
 export interface SourceChain {
@@ -58,32 +62,6 @@ export const SOURCE_CHAINS: SourceChain[] = [
     lcd: 'https://rest.lavenderfive.com/akash'
   },
   {
-    name: 'Andromeda',
-    chainId: 'andromeda-1',
-    prefix: 'andr',
-    depositChannel: 'channel-2',
-    withdrawChannel: 'channel-97',
-    depositGas: 200000,
-    withdrawGas: 150000,
-    feeDenom: 'uandr',
-    image: 'andr.png',
-    rpc: 'https://andro.rpc.m.stavr.tech',
-    lcd: 'https://andro.api.m.stavr.tech'
-  },
-  {
-    name: 'Archway',
-    chainId: 'archway-1',
-    prefix: 'archway',
-    depositChannel: 'channel-21',
-    withdrawChannel: 'channel-84',
-    depositGas: 200000,
-    withdrawGas: 150000,
-    feeDenom: 'aarch',
-    image: 'archway.svg',
-    rpc: 'https://rpc.lavenderfive.com/archway',
-    lcd: 'https://rest.lavenderfive.com/archway'
-  },
-  {
     name: 'Axelar',
     chainId: 'axelar-dojo-1',
     prefix: 'axelar',
@@ -97,19 +75,6 @@ export const SOURCE_CHAINS: SourceChain[] = [
     lcd: 'https://lcd-axelar.imperator.co:443'
   },
   {
-    name: 'Carbon',
-    chainId: 'carbon-1',
-    prefix: 'swth',
-    depositChannel: 'channel-45',
-    withdrawChannel: 'channel-160',
-    depositGas: 200000,
-    withdrawGas: 150000,
-    feeDenom: 'swth',
-    image: 'swth.svg',
-    rpc: 'https://rpc.lavenderfive.com/carbon',
-    lcd: 'https://rest.lavenderfive.com/carbon'
-  },
-  {
     name: 'Celestia',
     chainId: 'celestia',
     prefix: 'celestia',
@@ -121,45 +86,6 @@ export const SOURCE_CHAINS: SourceChain[] = [
     image: 'celestia.svg',
     rpc: 'https://rpc.lavenderfive.com/celestia',
     lcd: 'https://rest.lavenderfive.com/celestia'
-  },
-  {
-    name: 'Comdex',
-    chainId: 'comdex-1',
-    prefix: 'comdex',
-    depositChannel: 'channel-65',
-    withdrawChannel: 'channel-63',
-    depositGas: 200000,
-    withdrawGas: 150000,
-    feeDenom: 'ucmdx',
-    image: 'cmdx.svg',
-    rpc: 'https://rpc.lavenderfive.com/comdex',
-    lcd: 'https://rest.lavenderfive.com/comdex'
-  },
-  {
-    name: 'Composable',
-    chainId: 'centauri-1',
-    prefix: 'pica',
-    depositChannel: 'channel-14',
-    withdrawChannel: 'channel-80',
-    depositGas: 200000,
-    withdrawGas: 150000,
-    feeDenom: 'ppica',
-    image: 'composable.svg',
-    rpc: 'https://rpc.lavenderfive.com/composable',
-    lcd: 'https://rest.lavenderfive.com/composable'
-  },
-  {
-    name: 'Coreum',
-    chainId: 'coreum-mainnet-1',
-    prefix: 'core',
-    depositChannel: 'channel-25',
-    withdrawChannel: 'channel-101',
-    depositGas: 300000,
-    withdrawGas: 150000,
-    feeDenom: 'ucore',
-    image: 'coreum.svg',
-    rpc: 'https://rpc-coreum.ecostake.com',
-    lcd: 'https://rest-coreum.ecostake.com'
   },
   {
     name: 'Cosmos Hub',
@@ -186,45 +112,6 @@ export const SOURCE_CHAINS: SourceChain[] = [
     image: 'dydx.svg',
     rpc: 'https://rpc.lavenderfive.com/dydx',
     lcd: 'https://rest.lavenderfive.com/dydx'
-  },
-  {
-    name: 'Dymension',
-    chainId: 'dymension_1100-1',
-    prefix: 'dym',
-    depositChannel: 'channel-35',
-    withdrawChannel: 'channel-130',
-    depositGas: 250000,
-    withdrawGas: 150000,
-    feeDenom: 'adym',
-    image: 'dymension.svg',
-    rpc: 'https://rpc.lavenderfive.com/dymension',
-    lcd: 'https://rest.lavenderfive.com/dymension'
-  },
-  {
-    name: 'Gravity Bridge',
-    chainId: 'gravity-bridge-3',
-    prefix: 'gravity',
-    depositChannel: 'channel-79',
-    withdrawChannel: 'channel-17',
-    depositGas: 200000,
-    withdrawGas: 150000,
-    feeDenom: 'ugraviton',
-    image: 'grav.svg',
-    rpc: 'https://gravity-rpc.polkachu.com',
-    lcd: 'https://gravity-api.polkachu.com'
-  },
-  {
-    name: 'Cheqd',
-    chainId: 'cheqd-mainnet-1',
-    prefix: 'cheqd',
-    depositChannel: 'channel-36',
-    withdrawChannel: 'channel-141',
-    depositGas: 200000,
-    withdrawGas: 150000,
-    feeDenom: 'ncheq',
-    image: 'cheq.svg',
-    rpc: 'https://rpc.lavenderfive.com/cheqd',
-    lcd: 'https://rest.lavenderfive.com/cheqd'
   },
   {
     name: 'Chihuahua',
@@ -292,45 +179,6 @@ export const SOURCE_CHAINS: SourceChain[] = [
     lcd: 'https://kava-rest.publicnode.com'
   },
   {
-    name: 'Kujira',
-    chainId: 'kaiyo-1',
-    prefix: 'kujira',
-    depositChannel: 'channel-10',
-    withdrawChannel: 'channel-22',
-    depositGas: 200000,
-    withdrawGas: 150000,
-    feeDenom: 'ukuji',
-    image: 'kuji.svg',
-    rpc: 'https://kujira-rpc.polkachu.com',
-    lcd: 'https://kujira-api.polkachu.com'
-  },
-  {
-    name: 'Migaloo',
-    chainId: 'migaloo-1',
-    prefix: 'migaloo',
-    depositChannel: 'channel-4',
-    withdrawChannel: 'channel-57',
-    depositGas: 200000,
-    withdrawGas: 150000,
-    feeDenom: 'uwhale',
-    image: 'migaloo.svg',
-    rpc: 'https://migaloo-rpc.polkachu.com:443',
-    lcd: 'https://migaloo-api.polkachu.com:443'
-  },
-  {
-    name: 'Neutron',
-    chainId: 'neutron-1',
-    prefix: 'neutron',
-    depositChannel: 'channel-1551',
-    withdrawChannel: 'channel-144',
-    depositGas: 200000,
-    withdrawGas: 150000,
-    feeDenom: 'untrn',
-    image: 'ntrn.svg',
-    rpc: 'https://rpc-kralum.neutron-1.neutron.org',
-    lcd: 'https://rest-kralum.neutron-1.neutron.org'
-  },
-  {
     name: 'Noble',
     chainId: 'noble-1',
     prefix: 'noble',
@@ -342,19 +190,6 @@ export const SOURCE_CHAINS: SourceChain[] = [
     image: 'noble.svg',
     rpc: 'https://noble-rpc.polkachu.com',
     lcd: 'https://noble-api.polkachu.com'
-  },
-  {
-    name: 'Nolus',
-    chainId: 'pirin-1',
-    prefix: 'nolus',
-    depositChannel: 'channel-13995',
-    withdrawChannel: 'channel-146',
-    depositGas: 200000,
-    withdrawGas: 150000,
-    feeDenom: 'unls',
-    image: 'nolus.svg',
-    rpc: 'https://rpc.lavenderfive.com/nolus',
-    lcd: 'https://rest.lavenderfive.com/nolus'
   },
   {
     name: 'Nym',
@@ -370,32 +205,6 @@ export const SOURCE_CHAINS: SourceChain[] = [
     lcd: 'https://api.nymtech.net'
   },
   {
-    name: 'Omniflix',
-    chainId: 'omniflixhub-1',
-    prefix: 'omniflix',
-    depositChannel: 'channel-46',
-    withdrawChannel: 'channel-162',
-    depositGas: 500000,
-    withdrawGas: 150000,
-    feeDenom: 'uflix',
-    image: 'flix.svg',
-    rpc: 'https://rpc.omniflix.bronbro.io:443',
-    lcd: 'https://lcd.omniflix.bronbro.io'
-  },
-  {
-    name: 'Oraichain',
-    chainId: 'Oraichain',
-    prefix: 'orai',
-    depositChannel: 'channel-217',
-    withdrawChannel: 'channel-135',
-    depositGas: 700000,
-    withdrawGas: 150000,
-    feeDenom: 'orai',
-    image: 'orai.svg',
-    rpc: 'https://rpc.orai.io',
-    lcd: 'https://lcd.orai.io'
-  },
-  {
     name: 'Osmosis',
     chainId: 'osmosis-1',
     prefix: 'osmo',
@@ -407,32 +216,6 @@ export const SOURCE_CHAINS: SourceChain[] = [
     image: 'osmo.svg',
     rpc: 'https://osmosis-rpc.publicnode.com',
     lcd: 'https://osmosis-rest.publicnode.com'
-  },
-  {
-    name: 'Persistence',
-    chainId: 'core-1',
-    prefix: 'persistence',
-    depositChannel: 'channel-82',
-    withdrawChannel: 'channel-64',
-    depositGas: 300000,
-    withdrawGas: 150000,
-    feeDenom: 'uxprt',
-    image: 'xprt.svg',
-    rpc: 'https://persistence-rpc.publicnode.com',
-    lcd: 'https://persistence-rest.publicnode.com'
-  },
-  {
-    name: 'Quicksilver',
-    chainId: 'quicksilver-2',
-    prefix: 'quick',
-    depositChannel: 'channel-52',
-    withdrawChannel: 'channel-65',
-    depositGas: 300000,
-    withdrawGas: 150000,
-    feeDenom: 'uqck',
-    image: 'qck.svg',
-    rpc: 'https://rpc.lavenderfive.com/quicksilver',
-    lcd: 'https://rest.lavenderfive.com/quicksilver'
   },
   {
     name: 'Saga',
@@ -461,19 +244,6 @@ export const SOURCE_CHAINS: SourceChain[] = [
     lcd: 'https://lcd-sentinel.whispernode.com:443'
   },
   {
-    name: 'Stargaze',
-    chainId: 'stargaze-1',
-    prefix: 'stars',
-    depositChannel: 'channel-48',
-    withdrawChannel: 'channel-19',
-    depositGas: 200000,
-    withdrawGas: 150000,
-    feeDenom: 'ustars',
-    image: 'stars.svg',
-    rpc: 'https://rpc.stargaze-apis.com',
-    lcd: 'https://rest.stargaze-apis.com'
-  },
-  {
     name: 'Stride',
     chainId: 'stride-1',
     prefix: 'stride',
@@ -485,32 +255,6 @@ export const SOURCE_CHAINS: SourceChain[] = [
     image: 'stride.svg',
     rpc: 'https://rpc.lavenderfive.com/stride',
     lcd: 'https://rest.lavenderfive.com/stride'
-  },
-  {
-    name: 'Terra',
-    chainId: 'phoenix-1',
-    prefix: 'terra',
-    depositChannel: 'channel-3',
-    withdrawChannel: 'channel-16',
-    depositGas: 300000,
-    withdrawGas: 150000,
-    feeDenom: 'uluna',
-    image: 'luna2.svg',
-    rpc: 'https://terra-rpc.publicnode.com',
-    lcd: 'https://terra-rest.publicnode.com'
-  },
-  {
-    name: 'UX Chain',
-    chainId: 'umee-1',
-    prefix: 'umee',
-    depositChannel: 'channel-123',
-    withdrawChannel: 'channel-126',
-    depositGas: 200000,
-    withdrawGas: 150000,
-    feeDenom: 'uumee',
-    image: 'umee.svg',
-    rpc: 'https://umee-rpc.w3coins.io',
-    lcd: 'https://umee-api.w3coins.io'
   }
 ]
 
