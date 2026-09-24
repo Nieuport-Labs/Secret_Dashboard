@@ -155,6 +155,8 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
   const swapping = payWith !== NATIVE && payWith !== SSCRT_ADDRESS
   const payToken = payWith === NATIVE ? undefined : tokenByAddress(payWith)
   const paySymbol = payToken ? privateSymbol(payToken) : DISPLAY_DENOM
+  /** What is bought is credit, not SCRT — one credit pays one SCRT of fees. */
+  const creditsUnit = amount === '1' ? 'gas credit' : 'gas credits'
 
   // The price moves, so the quote follows the amount, a moment after typing stops.
   useEffect(() => {
@@ -236,7 +238,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
         )
         const gasLimit = PURCHASE_GAS + (route ? swapGas(route.route) : 0)
         tx = await broadcastTracked(
-          { label: `Buy ${amount} ${DISPLAY_DENOM} of gas credit`, detail: `with ${paySymbol}` },
+          { label: `Buy ${amount} ${creditsUnit}`, detail: `with ${paySymbol}` },
           client,
           messages,
           {
@@ -304,8 +306,8 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
         <div className="flex items-start gap-3">
           <CheckCircle2 size={18} aria-hidden className="mt-0.5 shrink-0 text-positive" />
           <p className="text-base">
-            Bought {amount} {DISPLAY_DENOM} of credit. It pays for your next transactions automatically while
-            your fee setting is Auto.
+            Bought {amount} {creditsUnit}. {amount === '1' ? 'It pays' : 'They pay'} for your next
+            transactions automatically while your fee setting is Auto.
           </p>
         </div>
         <a
@@ -332,7 +334,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
         <AmountHero
           amount={amount}
           onAmount={setAmount}
-          symbol={DISPLAY_DENOM}
+          symbol="gas credits"
           decimals={DECIMALS}
           unitPrice={scrtPrice}
           currency={currency}
@@ -438,11 +440,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
         disabled={!ready}
         onClick={() => void buy()}
       >
-        {!client
-          ? 'Connect a wallet first'
-          : !amount
-            ? 'Enter an amount'
-            : `Buy ${amount} ${DISPLAY_DENOM} of credit`}
+        {!client ? 'Connect a wallet first' : !amount ? 'Enter an amount' : `Buy ${amount} ${creditsUnit}`}
       </Button>
     </>
   )
