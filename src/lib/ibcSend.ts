@@ -1,7 +1,7 @@
 import { DENOM } from '@/chains/secret4'
-import { SOURCE_CHAINS, type SourceChain } from '@/chains/sources'
+import { SOURCE_CHAINS, sourceChain, type SourceChain } from '@/chains/sources'
 import { decodeBech32 } from '@/lib/bech32'
-import { bankDenomFor, withdrawRoute } from '@/tokens/routes'
+import { bankDenomFor, withdrawRoute, type Route } from '@/tokens/routes'
 
 /**
  * Sending to an address on another chain, straight from Send.
@@ -49,6 +49,10 @@ export type IbcPlan =
       channel?: string
       /** SNIP-20 to unwrap in the same transaction, for a private balance. */
       unwrap?: string
+      /** Goes through the token's home chain first — see `FORWARDS` in routes.ts. */
+      forward?: Route['forward']
+      /** That home chain, for saying so. */
+      via?: SourceChain
     }
   | { ok: false }
 
@@ -70,5 +74,15 @@ export function planIbcSend(asset: IbcAsset, chain: SourceChain): IbcPlan {
   if (!spent || route.denom !== spent) return { ok: false }
   if (spent !== DENOM && !spent.startsWith('ibc/')) return { ok: false }
 
-  return { ok: true, denom: spent, channel: route.channel, unwrap: asset.private ? asset.token : undefined }
+  const via = route.forward ? sourceChain(route.forward.via) : undefined
+  if (route.forward && !via) return { ok: false }
+
+  return {
+    ok: true,
+    denom: spent,
+    channel: route.channel,
+    unwrap: asset.private ? asset.token : undefined,
+    forward: route.forward,
+    via
+  }
 }

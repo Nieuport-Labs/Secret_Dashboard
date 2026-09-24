@@ -1,7 +1,8 @@
 import type { Msg, SecretNetworkClient } from 'secretjs'
 
 import { DENOM, GAS, GAS_PRICE_USCRT, withGasBuffer } from '@/chains/secret4'
-import type { SourceChain } from '@/chains/sources'
+import { sourceChain, type SourceChain } from '@/chains/sources'
+import { decodeBech32, encodeBech32 } from '@/lib/bech32'
 import type { Route } from '@/tokens/routes'
 import { MSG_TRANSFER } from '@/lib/msgTypes'
 import type { HookedTransfer } from '@/lib/ibcMemo'
@@ -138,6 +139,11 @@ export interface WithdrawMessageOptions {
    * and there is nothing upstream of it to unwrap.
    */
   unwrap?: { contract: string; codeHash: string }
+  /**
+   * Send it to this chain first and have it forwarded from there to
+   * `receiver` — the route's `forward`. `chain` stays the final destination.
+   */
+  forward?: Route['forward']
 }
 
 export interface WithdrawOptions extends WithdrawMessageOptions {
@@ -172,9 +178,12 @@ export async function withdrawMessages({
   denom,
   amount,
   channel,
-  unwrap
+  unwrap,
+  forward
 }: WithdrawMessageOptions): Promise<Msg[]> {
   const { MsgExecuteContract, MsgTransfer } = await import('secretjs')
+
+  const hop = forward ? forwardHop(forward, receiver) : undefined
 
   return [
     ...(unwrap
@@ -190,16 +199,42 @@ export async function withdrawMessages({
       : []),
     new MsgTransfer({
       sender,
-      receiver,
+      receiver: hop?.receiver ?? receiver,
       source_port: 'transfer',
-      source_channel: channel ?? chain.withdrawChannel,
+      source_channel: channel ?? (hop ? hop.chain.withdrawChannel : chain.withdrawChannel),
       token: { denom, amount },
       // Seconds here, unlike the source-chain path above: secretjs takes
       // seconds and converts, cosmjs takes nanoseconds raw.
       timeout_timestamp: String(Math.floor(Date.now() / 1000) + TIMEOUT_SECONDS),
-      memo: ''
+      memo: hop?.memo ?? ''
     })
   ]
+}
+
+/**
+ * The first leg of a forwarded withdrawal: who receives it on the chain in the
+ * middle, and the memo that tells that chain where to send it next.
+ *
+ * The middle receiver is the final recipient's own key under the middle
+ * chain's prefix. Packet-forward ignores it on recent versions, but where it
+ * does not, or if the forward is ever stranded there, it lands on an account
+ * the recipient holds — the same 20 bytes, and every chain `FORWARDS` lists
+ * derives its accounts the standard Cosmos way.
+ */
+function forwardHop(
+  forward: NonNullable<Route['forward']>,
+  receiver: string
+): { chain: SourceChain; receiver: string; memo: string } {
+  const chain = sourceChain(forward.via)
+  const decoded = decodeBech32(receiver)
+  if (!chain || !decoded) throw new Error('This route cannot be sent right now.')
+  return {
+    chain,
+    receiver: encodeBech32(chain.prefix, decoded.bytes),
+    memo: JSON.stringify({
+      forward: { receiver, port: 'transfer', channel: forward.channel, timeout: '10m', retries: 2 }
+    })
+  }
 }
 
 /**

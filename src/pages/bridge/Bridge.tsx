@@ -16,7 +16,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import AmountField from '@/components/ui/AmountField'
 import Picker from '@/components/ui/Picker'
 import { DECIMALS, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
-import { SOURCE_CHAINS, chainImageUrl, type SourceChain } from '@/chains/sources'
+import { SOURCE_CHAINS, chainImageUrl, sourceChain, type SourceChain } from '@/chains/sources'
 import { depositGasLimit, sendDeposit, sendWithdraw, withdrawGasLimit, type Leg } from '@/lib/bridge'
 import { queryAllBalances } from '@/lib/bank'
 import { codeHashFor } from '@/lib/codeHash'
@@ -392,7 +392,8 @@ export default function Bridge() {
           amount: amountBaseUnits,
           channel: route.channel,
           feeGranter: granterFor(gasLimit, msgTypes),
-          unwrap
+          unwrap,
+          forward: route.forward
         })
         setStatus({ kind: 'done', hash: result.hash })
         // Unwrap-and-send changes both the private balance and the public one,
@@ -740,6 +741,14 @@ export default function Bridge() {
         {!depositing && !isScrtToken && token ? (
           <p className="text-label text-text-faint">
             Unwraps your private {token.symbol} and sends it out in one transaction.
+            {route?.forward && chain ? (
+              <>
+                {' '}
+                It goes through {sourceChain(route.forward.via)?.name ?? 'its home chain'}, which passes it
+                on, so it arrives as the {token.symbol} {chain.name} already knows. Allow a few minutes for
+                the two hops.
+              </>
+            ) : null}
           </p>
         ) : null}
       </div>

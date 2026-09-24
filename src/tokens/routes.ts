@@ -30,6 +30,11 @@ export interface Route {
    * until route planning lands; see docs/chain-facts.md.
    */
   needsSkip?: boolean
+  /**
+   * Not the far end's own channel: the packet goes to the token's home chain
+   * first, which passes it on over `channel` — see `FORWARDS` below.
+   */
+  forward?: { via: string; channel: string }
 }
 
 /** Source chain → Secret. `denom` is what the token is called on the source chain. */
@@ -2290,8 +2295,91 @@ function index(routes: Route[]): Map<string, Route[]> {
   return byToken
 }
 
+/**
+ * Out of Secret to Osmosis by way of the token's home chain.
+ *
+ * Sending ATOM from Secret straight to Osmosis would deliver a voucher of a
+ * voucher — ATOM as Secret's channel knows it, wrapped again by Osmosis — which
+ * no pool there trades. Sent to Cosmos Hub instead, with a memo asking the Hub
+ * to pass it on, it arrives as the ATOM Osmosis already lists. One signature on
+ * Secret; the home chain's packet-forward middleware does the second hop, and
+ * if that hop fails it refunds the whole way back to the sender on Secret.
+ *
+ * Deliberately short. Each entry is a chain that runs packet-forward (per
+ * Skip's chain registry, which is what routes real traffic through them) and
+ * a channel to Osmosis that was checked open on that chain and pointed at
+ * `osmosis-1` on 2026-09-24. A chain whose accounts are not the standard
+ * Cosmos kind (Injective, Evmos) is left out: the hop address below is derived
+ * from the recipient's, and there it would not be theirs.
+ */
+const FORWARDS: Array<{ token: string; via: string; channel: string; to: string }> = [
+  // ATOM, over Cosmos Hub.
+  {
+    token: 'secret19e75l25r6sa6nhdf4lggjmgpw0vmpfvsw5cnpe',
+    via: 'cosmoshub-4',
+    channel: 'channel-141',
+    to: 'osmosis-1'
+  },
+  // USDC, over Noble.
+  {
+    token: 'secret1chsejpk9kfj4vt9ec6xvyguw539gsdtr775us2',
+    via: 'noble-1',
+    channel: 'channel-1',
+    to: 'osmosis-1'
+  },
+  // TIA, over Celestia.
+  {
+    token: 'secret1s9h6mrp4k9gll4zfv5h78ll68hdq8ml7jrnn20',
+    via: 'celestia',
+    channel: 'channel-2',
+    to: 'osmosis-1'
+  },
+  // stATOM and stTIA, over Stride.
+  {
+    token: 'secret155w9uxruypsltvqfygh5urghd5v0zc6f9g69sq',
+    via: 'stride-1',
+    channel: 'channel-5',
+    to: 'osmosis-1'
+  },
+  {
+    token: 'secret1l5d0vncwnlln0tz0m4tp9rgm740xl7th6es0q0',
+    via: 'stride-1',
+    channel: 'channel-5',
+    to: 'osmosis-1'
+  }
+]
+
+/**
+ * The forwards as withdraw routes to their final chain. The denomination and
+ * channel are the first hop's, since that is the packet Secret actually sends.
+ * A forward whose first hop is missing, or which would shadow a direct route,
+ * is dropped rather than guessed at.
+ */
+const FORWARDED_WITHDRAW_ROUTES: Route[] = FORWARDS.flatMap(({ token, via, channel, to }) => {
+  const first = WITHDRAW_ROUTES.find(
+    (route) => route.token === token && route.chainId === via && !route.needsSkip
+  )
+  // A needsSkip entry for the same pair is the multi-hop placeholder this replaces, not a direct route.
+  const direct = WITHDRAW_ROUTES.some(
+    (route) => route.token === token && route.chainId === to && !route.needsSkip
+  )
+  if (!first || direct) return []
+  return [
+    {
+      token,
+      chainId: to,
+      denom: first.denom,
+      channel: first.channel,
+      gas: first.gas,
+      forward: { via, channel }
+    }
+  ]
+})
+
+const OUTBOUND_ROUTES = [...WITHDRAW_ROUTES, ...FORWARDED_WITHDRAW_ROUTES]
+
 const DEPOSITS_BY_TOKEN = index(DEPOSIT_ROUTES)
-const WITHDRAWALS_BY_TOKEN = index(WITHDRAW_ROUTES)
+const WITHDRAWALS_BY_TOKEN = index(OUTBOUND_ROUTES)
 
 /** Chains this token can be bridged in from. Single-hop routes only. */
 export function depositRoutes(token: string): Route[] {
@@ -2323,13 +2411,13 @@ export function withdrawRoute(token: string, chainId: string): Route | undefined
 /** Every token that can be bridged out to this chain. */
 export function tokensToChain(chainId: string): string[] {
   return [
-    ...new Set(WITHDRAW_ROUTES.filter((r) => r.chainId === chainId && !r.needsSkip).map((r) => r.token))
+    ...new Set(OUTBOUND_ROUTES.filter((r) => r.chainId === chainId && !r.needsSkip).map((r) => r.token))
   ]
 }
 
 /** Every chain any token can be bridged out to. */
 export function chainsWithWithdrawals(): string[] {
-  return [...new Set(WITHDRAW_ROUTES.filter((r) => !r.needsSkip).map((r) => r.chainId))]
+  return [...new Set(OUTBOUND_ROUTES.filter((r) => !r.needsSkip).map((r) => r.chainId))]
 }
 
 /**

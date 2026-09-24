@@ -11,6 +11,7 @@ import { sendTx } from '@/lib/sendTx'
 import { MSG_EXECUTE_CONTRACT, MSG_SEND, MSG_TRANSFER } from '@/lib/msgTypes'
 import { depositMsg, redeemMsg, transferMsg } from '@/lib/snip20'
 import { STKD_SCRT_ADDRESS } from '@/tokens/registry'
+import type { Route } from '@/tokens/routes'
 import { useWallet } from '@/store/wallet'
 
 export type ActionState =
@@ -111,6 +112,7 @@ export function useWalletActions(onSuccess?: () => void) {
       amount: string
       channel?: string
       unwrap?: string
+      forward?: Route['forward']
     }) => {
       if (!address || !queryClient) return
       const unwrap = params.unwrap
@@ -124,7 +126,8 @@ export function useWalletActions(onSuccess?: () => void) {
           denom: params.denom,
           amount: params.amount,
           channel: params.channel,
-          unwrap
+          unwrap,
+          forward: params.forward
         }),
         withdrawGasLimit(params.chain, Boolean(unwrap)),
         unwrap ? [MSG_EXECUTE_CONTRACT, MSG_TRANSFER] : [MSG_TRANSFER]

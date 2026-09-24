@@ -230,7 +230,8 @@ export default function SendPanel({
         denom: plan.denom,
         amount: base,
         channel: plan.channel,
-        unwrap: plan.unwrap
+        unwrap: plan.unwrap,
+        forward: plan.forward
       })
     } else if (selected.private) void actions.sendToken(selected.id, trimmed, base)
     else void actions.sendNative(trimmed, base, selected.denom ?? DENOM)
@@ -385,6 +386,9 @@ export default function SendPanel({
                 {isPrivate
                   ? `Unwrapped and sent to ${chain.name} over IBC in one transaction.`
                   : `Sent to ${chain.name} over IBC.`}{' '}
+                {plan?.ok && plan.via
+                  ? `It goes through ${plan.via.name}, which passes it on, so it arrives as the ${symbol} ${chain.name} already knows.`
+                  : null}{' '}
                 The amount and both addresses are public on both chains. It lands once a relayer carries it,
                 usually within a minute, and comes back if nobody has in 15 minutes.
               </>
