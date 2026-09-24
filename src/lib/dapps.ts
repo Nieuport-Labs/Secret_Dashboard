@@ -1,74 +1,111 @@
 /**
- * The Secret dApp registry.
+ * The Secret ecosystem, as this dashboard lists it.
  *
- * Fetched from SecretFoundation/DappRegistry rather than bundled, so the list
- * stays current without a redeploy. Icons are kept locally: they were copied
- * from the registry at build time, so the page works offline and does not
- * announce which dApps someone is browsing to a third party.
+ * Kept here rather than fetched from SecretFoundation/DappRegistry: the list
+ * is short and hand-picked, so a change to it is a reviewed commit, and the
+ * page no longer depends on a third-party file being reachable. Icons are
+ * local copies for the same reason, and so browsing the page does not announce
+ * which apps someone looked at.
  */
-
-const REGISTRY_URL = 'https://raw.githubusercontent.com/SecretFoundation/DappRegistry/main/dAppRegistry.json'
 
 export interface Dapp {
   name: string
   link: string
   description: string
-  /** Path under /img/dapps/, or absent. */
+  /** Path under /img/, or absent. */
   icon?: string
   tags: string[]
 }
 
-interface RawDapp {
-  name?: string
-  link?: string
-  description?: string
-  icon?: string
-  tags?: string[]
-}
-
-export async function fetchDapps(): Promise<Dapp[]> {
-  const response = await fetch(REGISTRY_URL, {
-    headers: { Accept: 'application/json' },
-    signal: AbortSignal.timeout(12_000)
-  })
-  if (!response.ok) throw new Error(`The dApp registry could not be read: HTTP ${response.status}`)
-
-  const body = (await response.json()) as RawDapp[]
-  if (!Array.isArray(body)) throw new Error('The dApp registry returned something unexpected.')
-
-  return body
-    .filter((entry): entry is RawDapp & { name: string; link: string } => Boolean(entry?.name && entry?.link))
-    .map((entry) => ({
-      name: entry.name,
-      link: entry.link,
-      description: entry.description ?? '',
-      icon: entry.icon,
-      tags: entry.tags ?? []
-    }))
-}
+export const DAPPS: Dapp[] = [
+  {
+    name: 'Secret Bridges',
+    link: 'https://dash.scrt.network/bridge',
+    description: 'Bridge assets from IBC, EVM, and other ecosystems to Secret.',
+    icon: '/img/dapps/Bridges_Logo_2_32f36a3c58_NP9oBOxR9.webp',
+    tags: ['Tool']
+  },
+  {
+    name: 'AmberDAO',
+    link: 'https://amberdao.io/',
+    description: 'A community-driven, privacy-preserving store of value token built on Secret Network.',
+    icon: '/img/dapps/Amber_Dao_Logo_fd192c1e11_NaDWj0aOA.webp',
+    tags: ['dApp', 'DeFi']
+  },
+  {
+    name: 'Secret Tokens',
+    link: 'https://dash.scrt.network/wrap',
+    description:
+      'Wrapping coins as Secret Tokens immediately supercharges them with private balances and private transfers.',
+    icon: '/img/dapps/stoken_2f0fb694df_bMVioaSGb.webp',
+    tags: ['dApp', 'Data']
+  },
+  {
+    name: 'Secret Dashboard (original)',
+    link: 'https://dash.scrt.network/',
+    description: 'An interface providing access to essential Secret Network functions and data.',
+    icon: '/img/dapps/small_dashb_e1299d7523_QwkrgHrFr.webp',
+    tags: ['Data']
+  },
+  {
+    name: 'Secret Dashboard (1.9)',
+    link: 'https://dashboard.nieuportlabs.cz/',
+    description:
+      'Send, receive, stake and wrap in one place — with private balances, invoices and tips by QR code.',
+    icon: '/img/logo-mark.svg',
+    tags: ['Data', 'Wallet']
+  },
+  {
+    name: 'Keplr Wallet',
+    link: 'https://wallet.keplr.app/',
+    description: 'The interchain wallet for the Cosmos ecosystem.',
+    icon: '/img/dapps/keplr.webp',
+    tags: ['Wallet']
+  },
+  {
+    name: 'Starshell Wallet',
+    link: 'https://starshell.net/',
+    description:
+      'A privacy-preserving, free, and open-source Web3 wallet built for Secret Network and the Cosmos ecosystem.',
+    icon: '/img/dapps/starshell.webp',
+    tags: ['Wallet']
+  },
+  {
+    name: 'Mintscan',
+    link: 'https://www.mintscan.io/secret',
+    description: 'A block explorer for the Cosmos ecosystem, developed by Cosmostation.',
+    icon: '/img/dapps/mintscan.webp',
+    tags: ['Tool']
+  },
+  {
+    name: 'Secret Nodes',
+    link: 'https://secretnodes.com/secret-4',
+    description: 'A block explorer for Secret Network: blocks, transactions, validators and governance.',
+    tags: ['Tool']
+  },
+  {
+    name: 'SNIP-20 Transfer History',
+    link: 'https://trivium.network/tools',
+    description: 'View the transfer history of secret tokens in your wallet.',
+    icon: '/img/dapps/trivium.webp',
+    tags: ['Tool']
+  },
+  {
+    name: 'Silent Swap',
+    link: 'https://www.silentswap.com/',
+    description: 'Private cross-chain swaps.',
+    icon: '/img/dapps/silentswap.jpg',
+    tags: ['Tool']
+  }
+]
 
 /**
- * The app given the top of the ecosystem page.
- *
- * A name, matched against the registry, rather than a copy of an entry: the
- * registry owns the description, the icon and the link, and a featured slot
- * that goes stale the moment one of them changes is worse than no slot. The
- * entry below is only the fallback for a registry that cannot be reached, so
- * the card is still a real, working link to a real app.
+ * The app given the top of the ecosystem page. A name that must match an
+ * entry above, so the card and the grid can never disagree about it.
  */
-export const FEATURED_NAME = 'Shade Protocol'
+export const FEATURED_NAME = 'Secret Dashboard (1.9)'
 
-const FEATURED_FALLBACK: Dapp = {
-  name: FEATURED_NAME,
-  link: 'https://shadeprotocol.io/',
-  description: 'An array of connected privacy-preserving DeFi applications built on Secret Network.',
-  icon: '/img/dapps/dapp_shade_206fbe8b01_U9LBd0ib1-.webp',
-  tags: ['dApp', 'DeFi']
-}
-
-export function featuredDapp(dapps: Dapp[]): Dapp {
-  return dapps.find((dapp) => dapp.name === FEATURED_NAME) ?? FEATURED_FALLBACK
-}
+export const FEATURED: Dapp = DAPPS.find((dapp) => dapp.name === FEATURED_NAME) ?? DAPPS[0]
 
 /** Every tag present, in the order they first appear. */
 export function collectTags(dapps: Dapp[]): string[] {

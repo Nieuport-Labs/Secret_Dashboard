@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import { DISPLAY_DENOM } from '@/chains/secret4'
-import { fetchDapps, WHERE_TO_BUY, type Dapp } from '@/lib/dapps'
+import { DAPPS, WHERE_TO_BUY } from '@/lib/dapps'
 import { isInstalled, WALLETS, type WalletId } from '@/lib/wallet'
 import { cn } from '@/lib/cn'
 import { useWallet } from '@/store/wallet'
@@ -248,23 +248,9 @@ function WalletStep({
   )
 }
 
-/** Real apps from the registry, not a description of the idea of apps. */
+/** Real apps from the ecosystem list, not a description of the idea of apps. */
 function DappsStep() {
-  const [dapps, setDapps] = useState<Dapp[]>([])
-
-  useEffect(() => {
-    let cancelled = false
-    fetchDapps()
-      .then((list) => {
-        if (!cancelled) setDapps(list.slice(0, 6))
-      })
-      .catch(() => {
-        /* the prose below still stands on its own */
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const dapps = DAPPS.slice(0, 6)
 
   return (
     <div className="flex flex-col gap-4">
