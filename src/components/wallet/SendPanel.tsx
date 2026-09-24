@@ -17,7 +17,7 @@ import ShareSlider from '@/components/ui/ShareSlider'
 import { DECIMALS, DENOM, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import { chainImageUrl } from '@/chains/sources'
 import { cn } from '@/lib/cn'
-import { formatAmount, fromBaseUnits, toBaseUnits } from '@/lib/format'
+import { formatAmount, fromBaseUnits, shortenAddress, toBaseUnits } from '@/lib/format'
 import { destinationOf, planIbcSend, type IbcPlan } from '@/lib/ibcSend'
 import type { Balances } from '@/hooks/useBalances'
 import { useWalletActions } from '@/hooks/useWalletActions'
@@ -222,6 +222,10 @@ export default function SendPanel({
 
   const submit = () => {
     if (!ready || !selected) return
+    const summary = {
+      label: `Send ${amount} ${symbol}${chain ? ` to ${chain.name}` : ''}`,
+      detail: `to ${shortenAddress(trimmed)}`
+    }
     if (chain) {
       if (!plan?.ok) return
       void actions.sendIbc({
@@ -231,10 +235,11 @@ export default function SendPanel({
         amount: base,
         channel: plan.channel,
         unwrap: plan.unwrap,
-        forward: plan.forward
+        forward: plan.forward,
+        summary
       })
-    } else if (selected.private) void actions.sendToken(selected.id, trimmed, base)
-    else void actions.sendNative(trimmed, base, selected.denom ?? DENOM)
+    } else if (selected.private) void actions.sendToken(selected.id, trimmed, base, summary)
+    else void actions.sendNative(trimmed, base, selected.denom ?? DENOM, summary)
   }
 
   return (

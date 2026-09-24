@@ -1,10 +1,10 @@
-import { AlertCircle, CheckCircle2, ExternalLink, Loader2, X } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock, ExternalLink, Loader2, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
 import { useNotifications, type Toast } from '@/store/notifications'
-import { useTransactions, type TrackedTx, type TxStage } from '@/store/transactions'
+import { useTransactions, type TrackedTx } from '@/store/transactions'
 
 /**
  * The toast stack (Figma 34:688, 36:79, 36:88, 36:3).
@@ -102,44 +102,36 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
   )
 }
 
-const STEPS: Array<{ stage: TxStage; label: string }> = [
-  { stage: 'signing', label: 'Sign' },
-  { stage: 'confirming', label: 'Confirm' },
-  { stage: 'done', label: 'Done' }
-]
-
-const STAGE_TEXT: Record<TxStage, string> = {
-  signing: 'Approve it in your wallet.',
-  confirming: 'Sent. Waiting for a block to include it…',
-  done: 'Confirmed.',
-  failed: 'Failed.'
-}
-
 /**
- * One transaction, updated in place as it moves along. The three steps are
- * the real ones — the wallet prompt, the block, the result — not a timer
- * dressed up as progress, so a step that takes a while simply stays lit.
+ * One transaction, updated in place as it moves along.
+ *
+ * The steps are the real ones — the wallet prompt, then each chain it lands
+ * on — not a timer dressed up as progress, so a step that takes a while simply
+ * stays lit. An IBC transfer is followed to the far chain, and the card ends
+ * on a link to where it arrived rather than to where it left.
  */
 function TxCard({ tx, onDismiss }: { tx: TrackedTx; onDismiss: () => void }) {
-  const failed = tx.stage === 'failed'
-  const reached = failed ? -1 : STEPS.findIndex((step) => step.stage === tx.stage)
+  const failed = tx.status === 'failed'
+  const settled = tx.status === 'done'
 
   return (
-    <div className="glass-panel pointer-events-auto w-full max-w-[340px] rounded-card p-4 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
+    <div className="glass-panel pointer-events-auto w-full max-w-[360px] rounded-card p-4 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
       <div className="flex items-start gap-2.5">
         {failed ? (
           <AlertCircle size={16} aria-hidden className="mt-0.5 shrink-0 text-negative" />
-        ) : tx.stage === 'done' ? (
+        ) : settled ? (
           <CheckCircle2 size={16} aria-hidden className="mt-0.5 shrink-0 text-positive" />
+        ) : tx.status === 'stalled' ? (
+          <Clock size={16} aria-hidden className="mt-0.5 shrink-0 text-text-muted" />
         ) : (
           <Loader2 size={16} aria-hidden className="mt-0.5 shrink-0 animate-spin text-accent" />
         )}
         <div className="min-w-0 flex-1">
           <p className="text-base font-medium">{tx.label}</p>
-          <p className={cn('mt-0.5 text-sm', failed ? 'break-address text-negative' : 'text-text-muted')}>
-            {failed && tx.message ? tx.message : STAGE_TEXT[tx.stage]}
+          {tx.detail ? <p className="truncate text-sm text-text-faint">{tx.detail}</p> : null}
+          <p className={cn('mt-1 text-sm', failed ? 'break-address text-negative' : 'text-text-muted')}>
+            {tx.text}
           </p>
-          {tx.stage === 'done' && tx.note ? <p className="mt-1 text-sm text-text-muted">{tx.note}</p> : null}
         </div>
         <button
           type="button"
@@ -151,41 +143,57 @@ function TxCard({ tx, onDismiss }: { tx: TrackedTx; onDismiss: () => void }) {
         </button>
       </div>
 
-      {failed ? null : (
-        <ol className="mt-3 grid grid-cols-3 gap-1.5" aria-label="Progress">
-          {STEPS.map((step, index) => (
-            <li key={step.stage} className="flex flex-col gap-1">
+      <ol
+        className="mt-3 grid gap-1.5"
+        style={{ gridTemplateColumns: `repeat(${tx.steps.length}, minmax(0, 1fr))` }}
+        aria-label="Progress"
+      >
+        {tx.steps.map((step, index) => {
+          const behind = index < tx.step
+          const current = index === tx.step && !settled
+          return (
+            <li key={`${step}-${index}`} className="flex min-w-0 flex-col gap-1">
               <span
                 className={cn(
                   'h-1 rounded-pill transition-colors duration-[var(--duration-medium)]',
-                  index < reached || tx.stage === 'done'
+                  behind
                     ? 'bg-accent'
-                    : index === reached
-                      ? 'bg-accent motion-safe:animate-pulse'
-                      : 'bg-surface-3'
+                    : current && failed
+                      ? 'bg-negative'
+                      : current && tx.status === 'running'
+                        ? 'bg-accent motion-safe:animate-pulse'
+                        : 'bg-surface-3'
                 )}
               />
               <span
-                className={cn('text-label', index <= reached ? 'text-text-muted' : 'text-text-faint')}
-                aria-current={index === reached ? 'step' : undefined}
+                className={cn(
+                  'truncate text-label',
+                  behind || current ? 'text-text-muted' : 'text-text-faint'
+                )}
+                aria-current={current ? 'step' : undefined}
               >
-                {step.label}
+                {step}
               </span>
             </li>
-          ))}
-        </ol>
-      )}
+          )
+        })}
+      </ol>
 
-      {tx.url ? (
-        <a
-          href={tx.url}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="mt-3 inline-flex items-center gap-1.5 text-sm text-accent underline underline-offset-4"
-        >
-          View transaction
-          <ExternalLink size={12} aria-hidden />
-        </a>
+      {tx.links.length > 0 ? (
+        <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+          {tx.links.map((link) => (
+            <a
+              key={link.url}
+              href={link.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex items-center gap-1 text-sm text-accent underline underline-offset-4"
+            >
+              {link.label}
+              <ExternalLink size={12} aria-hidden />
+            </a>
+          ))}
+        </p>
       ) : null}
     </div>
   )

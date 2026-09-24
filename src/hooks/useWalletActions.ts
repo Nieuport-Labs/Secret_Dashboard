@@ -1,13 +1,14 @@
 import { useCallback, useState } from 'react'
-import type { Msg } from 'secretjs'
+import type { Msg, TxResponse } from 'secretjs'
 
 import { DENOM, GAS } from '@/chains/secret4'
 import type { SourceChain } from '@/chains/sources'
-import { withdrawGasLimit, withdrawMessages } from '@/lib/bridge'
+import { followWithdraw, withdrawGasLimit, withdrawMessages, withdrawTrack } from '@/lib/bridge'
 import { codeHashFor } from '@/lib/codeHash'
 import { claimMsg, unbondMsg } from '@/lib/derivative'
 import { errorMessage } from '@/lib/errors'
 import { sendTx } from '@/lib/sendTx'
+import type { TrackOptions, TxSummary, TxTracker } from '@/lib/txProgress'
 import { MSG_EXECUTE_CONTRACT, MSG_SEND, MSG_TRANSFER } from '@/lib/msgTypes'
 import { depositMsg, redeemMsg, transferMsg } from '@/lib/snip20'
 import { STKD_SCRT_ADDRESS } from '@/tokens/registry'
@@ -40,11 +41,17 @@ export function useWalletActions(onSuccess?: () => void) {
   const [state, setState] = useState<ActionState>({ kind: 'idle' })
 
   const broadcast = useCallback(
-    async (messages: Msg[], gasLimit: number, msgTypes: string[], label: string) => {
+    async (
+      messages: Msg[],
+      gasLimit: number,
+      msgTypes: string[],
+      track: TrackOptions,
+      follow?: (tx: TxResponse, tracker: TxTracker) => void
+    ) => {
       if (!client || !address) return
       setState({ kind: 'sending' })
       try {
-        const tx = await sendTx(client, messages, gasLimit, msgTypes, label)
+        const tx = await sendTx(client, messages, gasLimit, msgTypes, track, follow)
 
         if (tx.code !== 0) {
           setState({ kind: 'failed', message: tx.rawLog || `The chain rejected it (code ${tx.code}).` })
@@ -62,14 +69,14 @@ export function useWalletActions(onSuccess?: () => void) {
 
   /** Native SCRT, or any other bank denomination the account holds. */
   const sendNative = useCallback(
-    async (recipient: string, amount: string, denom: string = DENOM) => {
+    async (recipient: string, amount: string, denom: string = DENOM, summary?: TxSummary) => {
       if (!address) return
       const { MsgSend } = await import('secretjs')
       await broadcast(
         [new MsgSend({ from_address: address, to_address: recipient, amount: [{ denom, amount }] })],
         GAS.send,
         [MSG_SEND],
-        'Send'
+        summary ?? { label: 'Send' }
       )
     },
     [address, broadcast]
@@ -80,7 +87,7 @@ export function useWalletActions(onSuccess?: () => void) {
    * was paid or how much.
    */
   const sendToken = useCallback(
-    async (contract: string, recipient: string, amount: string) => {
+    async (contract: string, recipient: string, amount: string, summary?: TxSummary) => {
       if (!address || !queryClient) return
       const { MsgExecuteContract } = await import('secretjs')
       await broadcast(
@@ -95,7 +102,7 @@ export function useWalletActions(onSuccess?: () => void) {
         ],
         GAS.snip20Transfer,
         [MSG_EXECUTE_CONTRACT],
-        'Private send'
+        summary ?? { label: 'Private send' }
       )
     },
     [address, queryClient, broadcast]
@@ -115,6 +122,7 @@ export function useWalletActions(onSuccess?: () => void) {
       channel?: string
       unwrap?: string
       forward?: Route['forward']
+      summary: TxSummary
     }) => {
       if (!address || !queryClient) return
       const unwrap = params.unwrap
@@ -133,7 +141,14 @@ export function useWalletActions(onSuccess?: () => void) {
         }),
         withdrawGasLimit(params.chain, Boolean(unwrap)),
         unwrap ? [MSG_EXECUTE_CONTRACT, MSG_TRANSFER] : [MSG_TRANSFER],
-        `Send to ${params.chain.name}`
+        withdrawTrack(params.summary, params.chain, params.forward),
+        (tx, tracker) =>
+          followWithdraw(tx, tracker, {
+            chain: params.chain,
+            receiver: params.recipient,
+            channel: params.channel,
+            forward: params.forward
+          })
       )
     },
     [address, queryClient, broadcast]
@@ -147,7 +162,7 @@ export function useWalletActions(onSuccess?: () => void) {
    * arguments.
    */
   const wrap = useCallback(
-    async (contract: string, denom: string, amount: string) => {
+    async (contract: string, denom: string, amount: string, summary?: TxSummary) => {
       if (!address || !queryClient) return
       const { MsgExecuteContract } = await import('secretjs')
       await broadcast(
@@ -162,7 +177,7 @@ export function useWalletActions(onSuccess?: () => void) {
         ],
         GAS.wrap,
         [MSG_EXECUTE_CONTRACT],
-        'Wrap'
+        summary ?? { label: 'Wrap' }
       )
     },
     [address, queryClient, broadcast]
@@ -170,7 +185,7 @@ export function useWalletActions(onSuccess?: () => void) {
 
   /** Unwrap back to the bank denomination. Here the amount is in the message. */
   const unwrap = useCallback(
-    async (contract: string, amount: string) => {
+    async (contract: string, amount: string, summary?: TxSummary) => {
       if (!address || !queryClient) return
       const { MsgExecuteContract } = await import('secretjs')
       await broadcast(
@@ -185,7 +200,7 @@ export function useWalletActions(onSuccess?: () => void) {
         ],
         GAS.unwrap,
         [MSG_EXECUTE_CONTRACT],
-        'Unwrap'
+        summary ?? { label: 'Unwrap' }
       )
     },
     [address, queryClient, broadcast]
@@ -197,7 +212,7 @@ export function useWalletActions(onSuccess?: () => void) {
    * once the batch has left and the chain's 21 days are up.
    */
   const unbondDerivative = useCallback(
-    async (amount: string) => {
+    async (amount: string, summary?: TxSummary) => {
       if (!address || !queryClient) return
       const { MsgExecuteContract } = await import('secretjs')
       await broadcast(
@@ -212,7 +227,7 @@ export function useWalletActions(onSuccess?: () => void) {
         ],
         GAS.derivativeUnbond,
         [MSG_EXECUTE_CONTRACT],
-        'Unstake stkd-SCRT'
+        summary ?? { label: 'Unstake stkd-SCRT' }
       )
     },
     [address, queryClient, broadcast]
@@ -234,7 +249,7 @@ export function useWalletActions(onSuccess?: () => void) {
       ],
       GAS.derivativeClaim,
       [MSG_EXECUTE_CONTRACT],
-      'Claim unstaked SCRT'
+      { label: 'Claim unstaked SCRT' }
     )
   }, [address, queryClient, broadcast])
 

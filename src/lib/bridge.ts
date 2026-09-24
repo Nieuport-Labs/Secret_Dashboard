@@ -1,13 +1,20 @@
 import type { Msg, SecretNetworkClient } from 'secretjs'
 
-import { DENOM, GAS, GAS_PRICE_USCRT, withGasBuffer } from '@/chains/secret4'
-import { sourceChain, type SourceChain } from '@/chains/sources'
+import { CHAIN_ID, DEFAULT_LCD_URLS, DENOM, GAS, GAS_PRICE_USCRT, withGasBuffer } from '@/chains/secret4'
+import { mintscanTxUrl, sourceChain, type SourceChain } from '@/chains/sources'
 import { decodeBech32, encodeBech32 } from '@/lib/bech32'
 import type { Route } from '@/tokens/routes'
 import { MSG_TRANSFER } from '@/lib/msgTypes'
 import type { HookedTransfer } from '@/lib/ibcMemo'
 import { redeemMsg } from '@/lib/snip20'
-import { signAndBroadcast, trackTx } from '@/lib/txProgress'
+import { followPacket, sentPackets, type Hop, type TxEvent } from '@/lib/ibcTrack'
+import {
+  signAndBroadcast,
+  trackTx,
+  type TrackOptions,
+  type TxSummary,
+  type TxTracker
+} from '@/lib/txProgress'
 
 /**
  * Sending an IBC transfer from a source chain into Secret.
@@ -44,6 +51,8 @@ export interface SendOptions {
   legs: Leg[]
   /** Gas limit for the whole transaction. */
   gasLimit: number
+  /** What the progress card says is being bridged. */
+  summary?: TxSummary
 }
 
 export interface SendResult {
@@ -63,7 +72,13 @@ function timeoutNanos(): string {
  * they are signed together, so the user approves once and cannot end up having
  * paid for gas without having bridged anything.
  */
-export async function sendDeposit({ chain, sender, legs, gasLimit }: SendOptions): Promise<SendResult> {
+export async function sendDeposit({
+  chain,
+  sender,
+  legs,
+  gasLimit,
+  summary
+}: SendOptions): Promise<SendResult> {
   const { SigningStargateClient, GasPrice } = await loadStargate()
 
   const provider = window.keplr
@@ -75,7 +90,11 @@ export async function sendDeposit({ chain, sender, legs, gasLimit }: SendOptions
     gasPrice: GasPrice.fromString(`0.025${chain.feeDenom}`)
   })
 
-  const tracker = trackTx(`Bridge from ${chain.name}`)
+  const tracker = trackTx({
+    label: summary?.label ?? `Bridge from ${chain.name}`,
+    detail: summary?.detail,
+    chains: [chain.name, 'Secret']
+  })
   try {
     const messages = legs.map((leg) => ({
       typeUrl: MSG_TRANSFER,
@@ -113,10 +132,26 @@ export async function sendDeposit({ chain, sender, legs, gasLimit }: SendOptions
       throw new Error(result.rawLog || `The source chain rejected it (code ${result.code}).`)
     }
 
-    tracker.done(
-      result.transactionHash,
-      'It reaches Secret once a relayer carries it, usually within a minute.'
+    tracker.confirmed(
+      (() => {
+        const url = mintscanTxUrl(chain.chainId, result.transactionHash)
+        return url ? { label: chain.name, url } : undefined
+      })()
     )
+    // The main transfer, which is the first leg; the gas leg, when there is
+    // one, travels on its own and is not what the card is about.
+    const [packet] = sentPackets(result.events as readonly TxEvent[], legs[0].channel ?? chain.depositChannel)
+    if (packet) {
+      void followPacket(
+        tracker,
+        packet,
+        [{ chainId: CHAIN_ID, name: 'Secret', lcds: DEFAULT_LCD_URLS }],
+        2,
+        legs[0].transfer.receiver
+      )
+    } else {
+      tracker.stall('Sent, but the transfer could not be found in the transaction to follow it.')
+    }
     return { hash: result.transactionHash, height: result.height }
   } catch (error) {
     tracker.fail(error)
@@ -170,6 +205,49 @@ export interface WithdrawOptions extends WithdrawMessageOptions {
   client: SecretNetworkClient
   /** Fee grant to spend, if one covers this. */
   feeGranter?: string
+  /** What the progress card says is being sent. */
+  summary?: TxSummary
+}
+
+/** The card for a withdrawal: Secret, the chain in the middle if forwarded, then the destination. */
+export function withdrawTrack(
+  summary: TxSummary,
+  chain: SourceChain,
+  forward: Route['forward'] | undefined
+): TrackOptions {
+  const via = forward ? sourceChain(forward.via) : undefined
+  return { ...summary, chains: ['Secret', ...(via ? [via.name] : []), chain.name] }
+}
+
+/**
+ * Once the withdrawal is confirmed on Secret, follow its packet to the far
+ * side — through the chain in the middle, when it is forwarded — so the card
+ * ends on proof it arrived rather than on proof it left.
+ */
+export function followWithdraw(
+  tx: { events?: unknown },
+  tracker: TxTracker,
+  {
+    chain,
+    receiver,
+    channel,
+    forward
+  }: Pick<WithdrawMessageOptions, 'chain' | 'receiver' | 'channel' | 'forward'>
+): void {
+  const via = forward ? sourceChain(forward.via) : undefined
+  const first = via ?? chain
+  const [packet] = sentPackets((tx.events ?? []) as readonly TxEvent[], channel ?? first.withdrawChannel)
+  if (!packet) {
+    tracker.stall('Sent, but the transfer could not be found in the transaction to follow it.')
+    return
+  }
+  const hops: Hop[] = [
+    ...(via && forward
+      ? [{ chainId: via.chainId, name: via.name, lcds: [via.lcd], forwardChannel: forward.channel }]
+      : []),
+    { chainId: chain.chainId, name: chain.name, lcds: [chain.lcd] }
+  ]
+  void followPacket(tracker, packet, hops, 2, receiver)
 }
 
 /** Gas for a withdrawal, plus the unwrap when one rides along. */
@@ -263,8 +341,15 @@ function forwardHop(
  * The mirror of a deposit, and signed on Secret rather than on the far side —
  * which means it costs SCRT for gas, and can therefore use the app's fee payer.
  */
-export async function sendWithdraw({ client, feeGranter, ...options }: WithdrawOptions): Promise<SendResult> {
-  const tracker = trackTx(`Bridge to ${options.chain.name}`)
+export async function sendWithdraw({
+  client,
+  feeGranter,
+  summary,
+  ...options
+}: WithdrawOptions): Promise<SendResult> {
+  const tracker = trackTx(
+    withdrawTrack(summary ?? { label: `Bridge to ${options.chain.name}` }, options.chain, options.forward)
+  )
   let messages: Msg[]
   try {
     messages = await withdrawMessages(options)
@@ -283,7 +368,8 @@ export async function sendWithdraw({ client, feeGranter, ...options }: WithdrawO
     },
     tracker
   )
-  tracker.settle(tx, `It reaches ${options.chain.name} once a relayer carries it, usually within a minute.`)
+  tracker.settle(tx, { continues: true })
+  if (tx.code === 0) followWithdraw(tx, tracker, options)
 
   if (tx.code !== 0) {
     throw new Error(tx.rawLog || `Secret rejected it (code ${tx.code}).`)

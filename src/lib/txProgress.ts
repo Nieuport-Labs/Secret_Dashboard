@@ -19,7 +19,7 @@ import {
   MSG_WITHDRAW_COMMISSION,
   MSG_WITHDRAW_REWARD
 } from '@/lib/msgTypes'
-import { useTransactions } from '@/store/transactions'
+import { useTransactions, type TxLink } from '@/store/transactions'
 
 /**
  * Progress for every transaction the app sends, shown in the corner by
@@ -33,38 +33,80 @@ import { useTransactions } from '@/store/transactions'
  * browser.
  */
 
+/** What the card calls a transaction, and to whom or where it goes. */
+export interface TxSummary {
+  label: string
+  detail?: string
+}
+
+export interface TrackOptions extends TxSummary {
+  /**
+   * The chains it passes through after being signed, in order. The first is
+   * where it is broadcast. Just Secret, unless it is an IBC transfer that the
+   * card should follow to the far side.
+   */
+  chains?: string[]
+}
+
 export interface TxTracker {
   signing(): void
   confirming(): void
-  /** Settle on the chain's answer: code 0 is done, anything else failed. */
-  settle(tx: Pick<TxResponse, 'code' | 'rawLog' | 'transactionHash'>, note?: string): void
-  /** Settle on a hash from a chain with no explorer link to give. */
-  done(hash: string, note?: string): void
+  /**
+   * Settle on the chain's answer: code 0 is confirmed, anything else failed.
+   * With `continues`, confirmed is not the end — a packet is still to be
+   * followed, and the card stays open for it.
+   */
+  settle(tx: Pick<TxResponse, 'code' | 'rawLog' | 'transactionHash'>, options?: { continues?: boolean }): void
+  /** Confirmed on a chain other than Secret, with its own link. */
+  confirmed(link?: TxLink): void
+  reached(step: number, text: string): void
+  link(link: TxLink): void
+  finish(text: string): void
+  stall(text: string): void
   fail(error: unknown): void
 }
 
-export function trackTx(label: string): TxTracker {
-  const { start, update } = useTransactions.getState()
-  const id = start(label)
+export function trackTx(options: TrackOptions | string): TxTracker {
+  const { label, detail, chains = ['Secret'] } = typeof options === 'string' ? { label: options } : options
+  const steps = ['Sign', ...chains]
+  const { start, update, addLink } = useTransactions.getState()
+  const id = start({
+    label,
+    detail,
+    steps,
+    step: 0,
+    status: 'running',
+    text: 'Approve it in your wallet.',
+    links: []
+  })
+
+  const reached = (step: number, text: string) => update(id, { step, text, status: 'running' })
+  const finish = (text: string) => update(id, { step: steps.length, text, status: 'done' })
+  const afterConfirm = () =>
+    steps.length > 2 ? reached(2, `On its way to ${steps[2]}…`) : finish('Confirmed.')
 
   return {
-    signing: () => update(id, { stage: 'signing' }),
-    confirming: () => update(id, { stage: 'confirming' }),
-    settle: (tx, note) =>
-      tx.code === 0
-        ? update(id, {
-            stage: 'done',
-            hash: tx.transactionHash,
-            url: explorerTxUrl(tx.transactionHash),
-            note
-          })
-        : update(id, {
-            stage: 'failed',
-            hash: tx.transactionHash || undefined,
-            message: tx.rawLog || `The chain rejected it (code ${tx.code}).`
-          }),
-    done: (hash, note) => update(id, { stage: 'done', hash, note }),
-    fail: (error) => update(id, { stage: 'failed', message: errorMessage(error) })
+    signing: () => reached(0, 'Approve it in your wallet.'),
+    confirming: () => reached(1, `Signed. Waiting for a block on ${steps[1]}…`),
+    settle: (tx, settleOptions) => {
+      if (tx.code !== 0) {
+        update(id, { status: 'failed', text: tx.rawLog || `The chain rejected it (code ${tx.code}).` })
+        return
+      }
+      addLink(id, { label: steps[1], url: explorerTxUrl(tx.transactionHash) })
+      if (settleOptions?.continues) afterConfirm()
+      else finish('Confirmed.')
+    },
+    confirmed: (link) => {
+      if (link) addLink(id, link)
+      afterConfirm()
+    },
+    reached,
+    link: (link) => addLink(id, link),
+    finish,
+    stall: (text) => update(id, { status: 'stalled', text }),
+    fail: (error) =>
+      update(id, { status: 'failed', text: typeof error === 'string' ? error : errorMessage(error) })
   }
 }
 
@@ -96,7 +138,7 @@ export async function signAndBroadcast(
 
 /** Track, broadcast and settle, for the call sites with nothing else to do in between. */
 export async function broadcastTracked(
-  label: string,
+  label: TrackOptions | string,
   client: SecretNetworkClient,
   messages: Msg[],
   options: TxOptions

@@ -8,7 +8,7 @@ import { MSG_EXECUTE_CONTRACT } from '@/lib/msgTypes'
 import { clearProfileMsg, registryConfigured } from '@/lib/profile'
 import type { RecordProfile } from '@/lib/profileRecord'
 import { profileState, rememberWritten } from '@/lib/profileSync'
-import { labelFor, signAndBroadcast, trackTx, type TxTracker } from '@/lib/txProgress'
+import { labelFor, signAndBroadcast, trackTx, type TrackOptions, type TxTracker } from '@/lib/txProgress'
 import { useFeePayer } from '@/store/feePayer'
 import { useWallet } from '@/store/wallet'
 
@@ -157,19 +157,23 @@ function broadcast(
 }
 
 /**
- * @param label what the progress card calls it; named from `msgTypes` when
+ * @param track what the progress card calls it; named from `msgTypes` when
  *   omitted. One card covers the whole call, the retry below included.
+ * @param follow for a transfer the card should see arrive: called once the
+ *   transaction is confirmed, and left to finish the card itself.
  */
 export async function sendTx(
   client: SecretNetworkClient,
   messages: Msg[],
   gasLimit: number,
   msgTypes: string[],
-  label: string = labelFor(msgTypes)
+  track: TrackOptions | string = labelFor(msgTypes),
+  follow?: (tx: TxResponse, tracker: TxTracker) => void
 ): Promise<TxResponse> {
-  const tracker = trackTx(label)
+  const tracker = trackTx(track)
   const tx = await sendTxWith(client, messages, gasLimit, msgTypes, tracker)
-  tracker.settle(tx)
+  tracker.settle(tx, { continues: Boolean(follow) })
+  if (follow && tx.code === 0) follow(tx, tracker)
   return tx
 }
 

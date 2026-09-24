@@ -106,14 +106,22 @@ export default function WrapPanel({
 
   const ready = Boolean(amount) && !amountError && BigInt(base) > 0n && Boolean(denom)
 
-  const submit = () => {
-    if (!ready || !denom) return
-    if (wrapping) void actions.wrap(contract, denom, base)
-    else void actions.unwrap(contract, base)
-  }
-
   const publicLabel = denom === DENOM ? DISPLAY_DENOM : (token?.symbol ?? 'token')
   const privateLabel = token ? privateSymbol(token) : 'wrapped'
+
+  const submit = () => {
+    if (!ready || !denom) return
+    if (wrapping)
+      void actions.wrap(contract, denom, base, {
+        label: `Wrap ${amount} ${publicLabel}`,
+        detail: `into ${privateLabel}`
+      })
+    else
+      void actions.unwrap(contract, base, {
+        label: `Unwrap ${amount} ${privateLabel}`,
+        detail: `into ${publicLabel}`
+      })
+  }
   const image = token ? tokenImageUrl(token) : undefined
   const flip = () => {
     setDirection(wrapping ? 'unwrap' : 'wrap')

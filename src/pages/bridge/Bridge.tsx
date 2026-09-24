@@ -22,7 +22,7 @@ import { queryAllBalances } from '@/lib/bank'
 import { codeHashFor } from '@/lib/codeHash'
 import { errorMessage } from '@/lib/errors'
 import { fittingGasSliceUsd, quoteGasSlice, shouldOfferGas } from '@/lib/getGas'
-import { formatAmount, fromBaseUnits, toBaseUnits } from '@/lib/format'
+import { formatAmount, fromBaseUnits, shortenAddress, toBaseUnits } from '@/lib/format'
 import { plainTransfer, wrapDepositMemo } from '@/lib/ibcMemo'
 import { MSG_EXECUTE_CONTRACT, MSG_TRANSFER } from '@/lib/msgTypes'
 import { fetchPrices } from '@/lib/prices'
@@ -361,7 +361,11 @@ export default function Bridge() {
           chain,
           sender: source.address,
           legs,
-          gasLimit: depositGasLimit(chain, route, legs.length, wrap)
+          gasLimit: depositGasLimit(chain, route, legs.length, wrap),
+          summary: {
+            label: `Bridge ${amount} ${token.symbol} from ${chain.name}`,
+            detail: `to ${shortenAddress(secretAddress)}${wrap ? ', wrapped on arrival' : ''}`
+          }
         })
         setStatus({ kind: 'done', hash: result.hash })
         // The source side spends immediately; Secret's side only lands once the
@@ -393,7 +397,11 @@ export default function Bridge() {
           channel: route.channel,
           feeGranter: granterFor(gasLimit, msgTypes),
           unwrap,
-          forward: route.forward
+          forward: route.forward,
+          summary: {
+            label: `Bridge ${amount} ${token.symbol} to ${chain.name}`,
+            detail: `to ${shortenAddress(source.address)}`
+          }
         })
         setStatus({ kind: 'done', hash: result.hash })
         // Unwrap-and-send changes both the private balance and the public one,

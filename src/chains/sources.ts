@@ -270,3 +270,33 @@ export function chainImageUrl(chain: SourceChain): string {
 
 /** Osmosis is the swap hop for "Get gas", so it is looked up by name elsewhere. */
 export const OSMOSIS_CHAIN_ID = 'osmosis-1'
+
+/**
+ * Mintscan's name for each chain, for linking a transaction on the far side
+ * of a bridge. Only chains Mintscan actually indexes; the rest get no link
+ * rather than one that 404s.
+ */
+const MINTSCAN: Record<string, string> = {
+  'agoric-3': 'agoric',
+  'akashnet-2': 'akash',
+  'axelar-dojo-1': 'axelar',
+  celestia: 'celestia',
+  'cosmoshub-4': 'cosmos',
+  'dydx-mainnet-1': 'dydx',
+  'chihuahua-1': 'chihuahua',
+  'injective-1': 'injective',
+  'jackal-1': 'jackal',
+  'juno-1': 'juno',
+  'kava_2222-10': 'kava',
+  'noble-1': 'noble',
+  'osmosis-1': 'osmosis',
+  'ssc-1': 'saga',
+  'sentinelhub-2': 'sentinel',
+  'stride-1': 'stride',
+  'secret-4': 'secret'
+}
+
+export function mintscanTxUrl(chainId: string, hash: string): string | undefined {
+  const slug = MINTSCAN[chainId]
+  return slug ? `https://www.mintscan.io/${slug}/tx/${hash}` : undefined
+}

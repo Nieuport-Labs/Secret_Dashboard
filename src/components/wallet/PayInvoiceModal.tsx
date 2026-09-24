@@ -6,7 +6,7 @@ import Modal from '@/components/ui/Modal'
 import AssetAmount from '@/components/wallet/AssetAmount'
 import { explorerTxUrl } from '@/chains/secret4'
 import { cn } from '@/lib/cn'
-import { formatAmount } from '@/lib/format'
+import { formatAmount, shortenAddress } from '@/lib/format'
 import { invoiceBaseUnits, type Invoice } from '@/lib/invoice'
 import { useAssetBalance } from '@/hooks/useAssetBalance'
 import { useWalletActions } from '@/hooks/useWalletActions'
@@ -53,8 +53,12 @@ export default function PayInvoiceModal({ open, onClose, invoice, onPaid }: Prop
   const short = held !== undefined && BigInt(held) < BigInt(base)
 
   const pay = () => {
-    if (asset.private) void actions.sendToken(asset.id, invoice.to, base)
-    else void actions.sendNative(invoice.to, base, asset.id)
+    const summary = {
+      label: `Pay ${invoice.amount} ${asset.symbol}`,
+      detail: `to ${shortenAddress(invoice.to)}`
+    }
+    if (asset.private) void actions.sendToken(asset.id, invoice.to, base, summary)
+    else void actions.sendNative(invoice.to, base, asset.id, summary)
   }
 
   return (
