@@ -11,7 +11,12 @@
 
 import { quoteGasSlice, shouldOfferGas, fittingGasSliceUsd } from '../src/lib/getGas.ts'
 import { wrapDepositMemo } from '../src/lib/ibcMemo.ts'
-import { parseSkipTransferMsg, planSkipAddresses } from '../src/lib/skipGo.ts'
+import {
+  parseSkipGasMsg,
+  parseSkipTransferMsg,
+  planSkipAddresses,
+  SKIP_OSMOSIS_ENTRY_POINT
+} from '../src/lib/skipGo.ts'
 import { IBC_HOOKS_WRAPPER } from '../src/chains/secret4.ts'
 
 let passed = 0

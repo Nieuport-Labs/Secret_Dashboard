@@ -325,6 +325,12 @@ export default function Bridge() {
           : amountBaseUnits
 
         const legs: Leg[] = []
+        const calls: Array<{
+          contract: string
+          msg: Record<string, unknown>
+          funds: Array<{ denom: string; amount: string }>
+        }> = []
+        let callGas = 0
 
         // The main transfer, wrapped on arrival when asked. The code hash is
         // read from the chain: a stale one makes the hook fail and the tokens
@@ -361,25 +367,39 @@ export default function Bridge() {
           // a while before the user actually presses this button, and the
           // swap's minimum-output guard should reflect pool state now, not
           // whenever the checkbox first lit up.
-          const gasLeg = await fetchSkipGasLeg(skipRoute, skipAddresses)
+          const gasLeg = await fetchSkipGasLeg(skipRoute, skipAddresses, {
+            sender: source.address,
+            secret: secretAddress,
+            denom: route.denom,
+            amount: String(skipRoute.raw.amount_in)
+          })
           if (!gasLeg) {
             throw new Error(
               'Could not prepare the gas swap just now — try again, or turn off Get gas for this transfer.'
             )
           }
-          legs.push({
-            denom: gasLeg.denom,
-            amount: gasLeg.amount,
-            channel: gasLeg.channel,
-            transfer: { receiver: gasLeg.receiver, memo: gasLeg.memo }
-          })
+          // From another chain, a transfer to Osmosis that swaps on arrival;
+          // from Osmosis itself, a call to Skip's entry point that swaps there
+          // and sends the SCRT on.
+          if (gasLeg.kind === 'transfer') {
+            legs.push({
+              denom: gasLeg.denom,
+              amount: gasLeg.amount,
+              channel: gasLeg.channel,
+              transfer: { receiver: gasLeg.receiver, memo: gasLeg.memo }
+            })
+          } else {
+            calls.push(gasLeg)
+            callGas += gasLeg.gas
+          }
         }
 
         const result = await sendDeposit({
           chain,
           sender: source.address,
           legs,
-          gasLimit: depositGasLimit(chain, route, legs.length, wrap || Boolean(route.forward)),
+          gasLimit: depositGasLimit(chain, route, legs.length, wrap || Boolean(route.forward)) + callGas,
+          calls,
           summary: {
             label: `Bridge ${amount} ${token.symbol} from ${chain.name}`,
             detail: `to ${shortenAddress(secretAddress)}${wrap ? ', wrapped on arrival' : ''}`
@@ -633,7 +653,7 @@ export default function Bridge() {
                       >
                         Take less
                       </button>
-                      {gasUnavailableReason ? (
+                      {!canGetGas && gasUnavailableReason ? (
                         <span className="mt-1 block text-text-faint">{gasUnavailableReason}</span>
                       ) : null}
                     </>

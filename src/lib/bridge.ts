@@ -30,6 +30,9 @@ function loadStargate() {
   return stargate
 }
 
+/** CosmWasm's execute on the source chain — not Secret's own `compute` one. */
+const MSG_WASM_EXECUTE = '/cosmwasm.wasm.v1.MsgExecuteContract'
+
 /** How long a packet may sit before it times out and the funds come back. */
 const TIMEOUT_SECONDS = 900
 
@@ -60,6 +63,15 @@ export interface SendOptions {
   gasLimit: number
   /** What the progress card says is being bridged. */
   summary?: TxSummary
+  /**
+   * Contract calls signed in the same transaction, after the transfers. Only
+   * the gas leg from Osmosis, which is a call to Skip's entry point there.
+   */
+  calls?: Array<{
+    contract: string
+    msg: Record<string, unknown>
+    funds: Array<{ denom: string; amount: string }>
+  }>
 }
 
 export interface SendResult {
@@ -84,7 +96,8 @@ export async function sendDeposit({
   sender,
   legs,
   gasLimit,
-  summary
+  summary,
+  calls = []
 }: SendOptions): Promise<SendResult> {
   const { SigningStargateClient, GasPrice } = await loadStargate()
 
@@ -117,7 +130,25 @@ export async function sendDeposit({
         // memo, which is a different field entirely and does nothing here.
         memo: leg.transfer.memo
       }
-    }))
+    })) as Array<{ typeUrl: string; value: unknown }>
+
+    if (calls.length > 0) {
+      // cosmjs's default registry knows transfers, not CosmWasm; the one type
+      // this needs is added to this client's own registry and nowhere else.
+      const { MsgExecuteContract } = await import('cosmjs-types/cosmwasm/wasm/v1/tx')
+      client.registry.register(MSG_WASM_EXECUTE, MsgExecuteContract)
+      for (const call of calls) {
+        messages.push({
+          typeUrl: MSG_WASM_EXECUTE,
+          value: MsgExecuteContract.fromPartial({
+            sender,
+            contract: call.contract,
+            msg: new TextEncoder().encode(JSON.stringify(call.msg)),
+            funds: call.funds
+          })
+        })
+      }
+    }
 
     // Signed and broadcast as two calls rather than one `signAndBroadcast`,
     // so the progress card can tell waiting on the wallet from waiting on

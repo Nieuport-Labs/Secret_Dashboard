@@ -140,6 +140,40 @@ export interface SkipTransferLeg {
 }
 
 /**
+ * Skip's swap entry point on Osmosis: label "Skip Swap Entry Point", no admin,
+ * so its code cannot change under this app. Read from the chain on 2026-09-24.
+ */
+export const SKIP_OSMOSIS_ENTRY_POINT = 'osmo10a3k4hvk37cc4hnxctw4p95fhscd2z6h2rmx0aukc6rm8u9qqx9smfsh7u'
+
+/**
+ * A deposit that starts on Osmosis swaps right there, so Skip's plan for it is
+ * a call to its entry point rather than a transfer: swap the slice, then send
+ * the SCRT on to Secret. Measured at 1.0–1.3M gas on chain.
+ */
+export interface SkipContractLeg {
+  contract: string
+  /** The contract message, as an object. */
+  msg: Record<string, unknown>
+  funds: Array<{ denom: string; amount: string }>
+  gas: number
+}
+
+export type SkipGasLeg = ({ kind: 'transfer' } & SkipTransferLeg) | ({ kind: 'contract' } & SkipContractLeg)
+
+/** What a plan must match before it is signed — see `parseSkipGasMsg`. */
+export interface SkipLegExpectations {
+  /** Who signs on the source chain. */
+  sender: string
+  /** Where the SCRT must end up. */
+  secret: string
+  /** What the slice is paid in, and how much of it. */
+  denom: string
+  amount: string
+}
+
+const CONTRACT_LEG_GAS = 1_600_000
+
+/**
  * The one message a gas-leg plan needs, from Skip's `/msgs` endpoint.
  *
  * Only ever asks for a single signature on the source chain — the same shape
@@ -151,8 +185,9 @@ export interface SkipTransferLeg {
 export async function fetchSkipGasLeg(
   route: SkipGasRoute,
   addressList: string[],
+  expect: SkipLegExpectations,
   slippagePercent = 5
-): Promise<SkipTransferLeg | undefined> {
+): Promise<SkipGasLeg | undefined> {
   try {
     const response = await fetch(`${SKIP_API}/v2/fungible/msgs`, {
       method: 'POST',
@@ -171,9 +206,73 @@ export async function fetchSkipGasLeg(
       signal: AbortSignal.timeout(TIMEOUT_MS)
     })
     if (!response.ok) return undefined
-    return parseSkipTransferMsg(await response.json())
+    return parseSkipGasMsg(await response.json(), expect)
   } catch {
     return undefined
+  }
+}
+
+/**
+ * Either shape of gas leg: the transfer Skip plans from any other chain, or
+ * the entry-point call it plans from Osmosis.
+ *
+ * The contract call is checked harder than the transfer, because it is not a
+ * transfer this app composed the shape of: the contract must be Skip's own
+ * entry point, the signer and the funds must be exactly the slice from this
+ * account, and what it does after the swap must be an IBC transfer to this
+ * account's Secret address. Anything else is refused — a plan that swapped
+ * the slice and sent it somewhere else would otherwise be signed unseen.
+ */
+export function parseSkipGasMsg(body: unknown, expect: SkipLegExpectations): SkipGasLeg | undefined {
+  const transfer = parseSkipTransferMsg(body)
+  if (transfer) return { kind: 'transfer', ...transfer }
+
+  const msgs = (body as { msgs?: unknown[] } | undefined)?.msgs
+  if (!Array.isArray(msgs) || msgs.length !== 1) return undefined
+  const wrapped = (
+    msgs[0] as { multi_chain_msg?: { msg?: unknown; msg_type_url?: unknown; chain_id?: unknown } }
+  ).multi_chain_msg
+  if (
+    !wrapped ||
+    wrapped.msg_type_url !== '/cosmwasm.wasm.v1.MsgExecuteContract' ||
+    wrapped.chain_id !== OSMOSIS_CHAIN_ID ||
+    typeof wrapped.msg !== 'string'
+  ) {
+    return undefined
+  }
+
+  let parsed: { sender?: unknown; contract?: unknown; msg?: unknown; funds?: unknown }
+  try {
+    parsed = JSON.parse(wrapped.msg) as typeof parsed
+  } catch {
+    return undefined
+  }
+
+  const funds = parsed.funds as Array<{ denom?: unknown; amount?: unknown }> | undefined
+  const action = (parsed.msg as { swap_and_action?: Record<string, unknown> } | undefined)?.swap_and_action
+  const info = (
+    action?.post_swap_action as { ibc_transfer?: { ibc_info?: Record<string, unknown> } } | undefined
+  )?.ibc_transfer?.ibc_info
+
+  if (
+    parsed.contract !== SKIP_OSMOSIS_ENTRY_POINT ||
+    parsed.sender !== expect.sender ||
+    !Array.isArray(funds) ||
+    funds.length !== 1 ||
+    funds[0].denom !== expect.denom ||
+    funds[0].amount !== expect.amount ||
+    !action?.min_asset ||
+    info?.receiver !== expect.secret
+  ) {
+    return undefined
+  }
+
+  return {
+    kind: 'contract',
+    contract: SKIP_OSMOSIS_ENTRY_POINT,
+    msg: parsed.msg as Record<string, unknown>,
+    funds: [{ denom: expect.denom, amount: expect.amount }],
+    gas: CONTRACT_LEG_GAS
   }
 }
 
