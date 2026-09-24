@@ -2,11 +2,13 @@ import { useCallback, useState } from 'react'
 import type { Msg } from 'secretjs'
 
 import { DENOM, GAS } from '@/chains/secret4'
+import type { SourceChain } from '@/chains/sources'
+import { withdrawGasLimit, withdrawMessages } from '@/lib/bridge'
 import { codeHashFor } from '@/lib/codeHash'
 import { claimMsg, unbondMsg } from '@/lib/derivative'
 import { errorMessage } from '@/lib/errors'
 import { sendTx } from '@/lib/sendTx'
-import { MSG_EXECUTE_CONTRACT, MSG_SEND } from '@/lib/msgTypes'
+import { MSG_EXECUTE_CONTRACT, MSG_SEND, MSG_TRANSFER } from '@/lib/msgTypes'
 import { depositMsg, redeemMsg, transferMsg } from '@/lib/snip20'
 import { STKD_SCRT_ADDRESS } from '@/tokens/registry'
 import { useWallet } from '@/store/wallet'
@@ -91,6 +93,41 @@ export function useWalletActions(onSuccess?: () => void) {
         ],
         GAS.snip20Transfer,
         [MSG_EXECUTE_CONTRACT]
+      )
+    },
+    [address, queryClient, broadcast]
+  )
+
+  /**
+   * To an address on another chain, over IBC — the bridge's withdrawal, sent
+   * from Send. A private balance is unwrapped in the same transaction, so
+   * nobody has to remember to do that first.
+   */
+  const sendIbc = useCallback(
+    async (params: {
+      chain: SourceChain
+      recipient: string
+      denom: string
+      amount: string
+      channel?: string
+      unwrap?: string
+    }) => {
+      if (!address || !queryClient) return
+      const unwrap = params.unwrap
+        ? { contract: params.unwrap, codeHash: await codeHashFor(queryClient, params.unwrap) }
+        : undefined
+      await broadcast(
+        await withdrawMessages({
+          chain: params.chain,
+          sender: address,
+          receiver: params.recipient,
+          denom: params.denom,
+          amount: params.amount,
+          channel: params.channel,
+          unwrap
+        }),
+        withdrawGasLimit(params.chain, Boolean(unwrap)),
+        unwrap ? [MSG_EXECUTE_CONTRACT, MSG_TRANSFER] : [MSG_TRANSFER]
       )
     },
     [address, queryClient, broadcast]
@@ -193,5 +230,5 @@ export function useWalletActions(onSuccess?: () => void) {
 
   const reset = useCallback(() => setState({ kind: 'idle' }), [])
 
-  return { state, reset, sendNative, sendToken, wrap, unwrap, unbondDerivative, claimDerivative }
+  return { state, reset, sendNative, sendToken, sendIbc, wrap, unwrap, unbondDerivative, claimDerivative }
 }

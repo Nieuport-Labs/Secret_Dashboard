@@ -1,4 +1,4 @@
-import type { SecretNetworkClient } from 'secretjs'
+import type { Msg, SecretNetworkClient } from 'secretjs'
 
 import { DENOM, GAS, GAS_PRICE_USCRT, withGasBuffer } from '@/chains/secret4'
 import type { SourceChain } from '@/chains/sources'
@@ -117,8 +117,7 @@ export function depositGasLimit(chain: SourceChain, route: Route, legs: number, 
   return withGasBuffer(Math.ceil(base * legs * (hooked ? 1.5 : 1)))
 }
 
-export interface WithdrawOptions {
-  client: SecretNetworkClient
+export interface WithdrawMessageOptions {
   chain: SourceChain
   /** The Secret account sending. */
   sender: string
@@ -130,8 +129,6 @@ export interface WithdrawOptions {
   amount: string
   /** Overrides the chain default when the route names its own channel. */
   channel?: string
-  /** Fee grant to spend, if one covers this. */
-  feeGranter?: string
   /**
    * Unwrap this SNIP-20 into `denom` in the same transaction, immediately
    * before sending it out. This is how a withdrawal draws on the private
@@ -143,11 +140,24 @@ export interface WithdrawOptions {
   unwrap?: { contract: string; codeHash: string }
 }
 
+export interface WithdrawOptions extends WithdrawMessageOptions {
+  client: SecretNetworkClient
+  /** Fee grant to spend, if one covers this. */
+  feeGranter?: string
+}
+
+/** Gas for a withdrawal, plus the unwrap when one rides along. */
+export function withdrawGasLimit(chain: SourceChain, unwrap: boolean): number {
+  return withGasBuffer(chain.withdrawGas) + (unwrap ? GAS.unwrap : 0)
+}
+
 /**
- * Sending an IBC transfer out of Secret.
+ * The messages that take a token out of Secret: the unwrap, when there is one,
+ * then the transfer.
  *
- * The mirror of a deposit, and signed on Secret rather than on the far side —
- * which means it costs SCRT for gas, and can therefore use the app's fee payer.
+ * Separate from `sendWithdraw` because Send builds the same pair when its
+ * recipient is on another chain, and signs it through the wallet's own
+ * transaction path rather than this one.
  *
  * The denomination is the one Secret knows: `uscrt` for SCRT itself, an `ibc/…`
  * voucher for anything that arrived over IBC. A SNIP-20 balance cannot be sent
@@ -155,21 +165,18 @@ export interface WithdrawOptions {
  * so when `unwrap` is given, that redeem rides in the same transaction as the
  * transfer, ahead of it, rather than as a separate signature.
  */
-export async function sendWithdraw({
-  client,
+export async function withdrawMessages({
   chain,
   sender,
   receiver,
   denom,
   amount,
   channel,
-  feeGranter,
   unwrap
-}: WithdrawOptions): Promise<SendResult> {
+}: WithdrawMessageOptions): Promise<Msg[]> {
   const { MsgExecuteContract, MsgTransfer } = await import('secretjs')
 
-  const gasLimit = withGasBuffer(chain.withdrawGas) + (unwrap ? GAS.unwrap : 0)
-  const messages = [
+  return [
     ...(unwrap
       ? [
           new MsgExecuteContract({
@@ -193,9 +200,17 @@ export async function sendWithdraw({
       memo: ''
     })
   ]
+}
 
-  const tx = await client.tx.broadcast(messages, {
-    gasLimit,
+/**
+ * Sending an IBC transfer out of Secret.
+ *
+ * The mirror of a deposit, and signed on Secret rather than on the far side —
+ * which means it costs SCRT for gas, and can therefore use the app's fee payer.
+ */
+export async function sendWithdraw({ client, feeGranter, ...options }: WithdrawOptions): Promise<SendResult> {
+  const tx = await client.tx.broadcast(await withdrawMessages(options), {
+    gasLimit: withdrawGasLimit(options.chain, Boolean(options.unwrap)),
     gasPriceInFeeDenom: GAS_PRICE_USCRT,
     feeDenom: DENOM,
     feeGranter
