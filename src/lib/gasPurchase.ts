@@ -66,39 +66,54 @@ export async function purchaseMessages(
 }
 
 /**
- * Tokens that can be swapped for sSCRT here: covered by the permit (so their
- * balance can be read), with a constant-product route, and not stkd-SCRT —
- * a staking position someone chose, not spare change.
+ * Tokens that can be swapped for `target` (sSCRT unless said otherwise):
+ * covered by the permit, so their balance can be read, with a constant-product
+ * route, and not stkd-SCRT — a staking position someone chose, not spare change.
  */
-export async function swappableTokens(client: SecretNetworkClient, permit: Permit): Promise<string[]> {
+export async function swappableTokens(
+  client: SecretNetworkClient,
+  permit: Permit,
+  target: string = SSCRT_ADDRESS
+): Promise<string[]> {
   const pairs = await listPairs(client)
   return allTokenAddresses().filter(
     (token) =>
-      token !== SSCRT_ADDRESS &&
+      token !== target &&
       token !== STKD_SCRT_ADDRESS &&
       covers(permit, token) &&
-      findRoutes(pairs, token, SSCRT_ADDRESS).length > 0
+      findRoutes(pairs, token, target).length > 0
   )
 }
 
 /**
- * What it costs in `token` to get `amount` of sSCRT out, slippage included:
- * the quote targets `amount` plus the slippage margin, so `amount` is what the
- * swap can promise as its minimum. The cheapest of up to four routes.
+ * What it costs in `token` to get `amount` of `target` out, slippage
+ * included: the quote targets `amount` plus the slippage margin, so `amount`
+ * is what the swap can promise as its minimum. The cheapest of up to four
+ * routes.
  */
-export async function quoteForSscrt(
+export async function quoteInto(
   client: SecretNetworkClient,
   token: string,
+  target: string,
   amount: bigint
 ): Promise<Quote | undefined> {
   const pairs = await listPairs(client)
-  const target = (amount * 10_000n) / (10_000n - SLIPPAGE_BPS)
+  const padded = (amount * 10_000n) / (10_000n - SLIPPAGE_BPS)
   const quotes = await Promise.all(
-    findRoutes(pairs, token, SSCRT_ADDRESS)
+    findRoutes(pairs, token, target)
       .slice(0, 4)
-      .map((route) => quoteExactOut(client, route, target).catch(() => undefined))
+      .map((route) => quoteExactOut(client, route, padded).catch(() => undefined))
   )
   return quotes
     .filter((quote): quote is Quote => quote !== undefined)
     .sort((a, b) => (a.amountIn === b.amountIn ? 0 : a.amountIn < b.amountIn ? -1 : 1))[0]
+}
+
+/** `quoteInto` for sSCRT, which is what gas credits are bought with. */
+export function quoteForSscrt(
+  client: SecretNetworkClient,
+  token: string,
+  amount: bigint
+): Promise<Quote | undefined> {
+  return quoteInto(client, token, SSCRT_ADDRESS, amount)
 }

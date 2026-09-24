@@ -11,7 +11,6 @@ import { DENOM } from '@/chains/secret4'
 import { cn } from '@/lib/cn'
 import { shortenAddress } from '@/lib/format'
 import {
-  invoiceAsset,
   invoiceAssets,
   invoiceBaseUnits,
   invoiceUri,
@@ -57,7 +56,13 @@ type Target = 'uri' | 'link'
  */
 export default function InvoiceModal({ open, onClose, onBack, address, purpose = 'invoice' }: Props) {
   const phone = purpose === 'phone'
-  const assets = useMemo(() => invoiceAssets(), [])
+  const expert = useSettings((state) => state.assetMode === 'expert')
+  // Easy mode asks for SCRT and private tokens only: the public vouchers are
+  // what expert mode's unwrapping is for.
+  const assets = useMemo(
+    () => invoiceAssets().filter((option) => expert || option.private || option.id === DENOM),
+    [expert]
+  )
 
   const [assetId, setAssetId] = useState(DENOM)
   const [amount, setAmount] = useState('')
@@ -72,7 +77,7 @@ export default function InvoiceModal({ open, onClose, onBack, address, purpose =
     setInvoice(undefined)
   }, [open])
 
-  const asset = invoiceAsset(assetId) ?? assets[0]
+  const asset = assets.find((option) => option.id === assetId) ?? assets[0]
 
   /*
    * The asset's price, for the fiat view. Asked for here rather than taken

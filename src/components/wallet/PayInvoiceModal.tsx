@@ -1,15 +1,25 @@
-import { CheckCircle2, ExternalLink, Eye, Loader2, ShieldCheck } from 'lucide-react'
-import { useEffect } from 'react'
+import { CheckCircle2, ChevronDown, ExternalLink, Eye, ShieldCheck } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
+import { PickerDialog } from '@/components/ui/Picker'
 import AssetAmount from '@/components/wallet/AssetAmount'
 import { explorerTxUrl } from '@/chains/secret4'
-import { cn } from '@/lib/cn'
-import { formatAmount, shortenAddress } from '@/lib/format'
-import { invoiceBaseUnits, type Invoice } from '@/lib/invoice'
 import { useAssetBalance } from '@/hooks/useAssetBalance'
-import { useWalletActions } from '@/hooks/useWalletActions'
+import { useBalances } from '@/hooks/useBalances'
+import { usePermit } from '@/hooks/usePermit'
+import { errorMessage } from '@/lib/errors'
+import { formatAmount, shortenAddress } from '@/lib/format'
+import { MAX_IMPACT_BPS, quoteInto, swappableTokens } from '@/lib/gasPurchase'
+import { invoiceBaseUnits, type Invoice } from '@/lib/invoice'
+import { paymentMessages, settlementToken, type PaySource } from '@/lib/invoicePayment'
+import type { Quote } from '@/lib/shadeSwap'
+import { permitAuth } from '@/lib/snip20'
+import { sendTx } from '@/lib/sendTx'
+import { canUnwrap, useSettings } from '@/store/settings'
+import { useWallet } from '@/store/wallet'
+import { privateSymbol, tokenByAddress, tokenImageUrl } from '@/tokens/registry'
 
 interface Props {
   open: boolean
@@ -19,138 +29,331 @@ interface Props {
   onPaid?: () => void
 }
 
+/** The invoice's own asset. Anything else is a token address. */
+const DIRECT = 'direct'
+/** A public invoice, paid from the private form of the same asset. */
+const UNWRAP = 'unwrap'
+
+type Status =
+  | { kind: 'idle' }
+  | { kind: 'sending' }
+  | { kind: 'done'; hash: string }
+  | { kind: 'failed'; message: string }
+
+type QuoteState =
+  { kind: 'none' } | { kind: 'loading' } | { kind: 'ready'; quote: Quote } | { kind: 'unavailable' }
+
 /**
  * Paying an invoice: a confirmation, not a form.
  *
- * Nothing here is editable. The link set the recipient, the asset and the
- * amount, and a form that let any of them be changed would turn "pay this
- * invoice" into "send something to someone" — the one mistake worth designing
- * out is paying a different amount than was asked for, or the wrong account.
+ * Nothing about what is paid is editable. The link set the recipient, the
+ * asset and the amount, and a form that let any of them be changed would turn
+ * "pay this invoice" into "send something to someone" — the one mistake worth
+ * designing out is paying a different amount than was asked for, or the wrong
+ * account.
+ *
+ * What the payer spends is theirs to choose, though: the asset itself, or any
+ * private token that can be swapped for it on ShadeSwap in the same
+ * transaction (`lib/invoicePayment.ts`). The recipient gets the invoice's
+ * amount of the invoice's asset either way.
  */
 export default function PayInvoiceModal({ open, onClose, invoice, onPaid }: Props) {
-  const actions = useWalletActions(() => {
-    refresh()
-    onPaid?.()
-  })
-  const { asset } = invoice
-  const base = invoiceBaseUnits(invoice.amount, asset.decimals) ?? '0'
+  return (
+    <Modal open={open} onClose={onClose} title="Pay invoice">
+      {/* Mounts with the dialog, so a reopened one starts fresh and nothing is
+          read while it is closed. */}
+      <PayInvoice invoice={invoice} onPaid={onPaid} />
+    </Modal>
+  )
+}
 
-  // Reopening after a payment must not show the receipt as if it were pending.
-  useEffect(() => {
-    if (open) actions.reset()
-    // Only when it opens; `actions` is rebuilt on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void }) {
+  const client = useWallet((state) => state.client)
+  const queryClient = useWallet((state) => state.queryClient)
+  const address = useWallet((state) => state.address)
+  const assetMode = useSettings((state) => state.assetMode)
+  const { permit } = usePermit()
+
+  const { asset } = invoice
+  const amount = BigInt(invoiceBaseUnits(invoice.amount, asset.decimals) ?? '0')
+  const token = settlementToken(asset)
+  // Paying a public invoice any other way ends in an unwrap of `token`, which
+  // easy mode allows for sSCRT only.
+  const otherWays = Boolean(token) && (asset.private || canUnwrap(assetMode, token!))
+
+  const [payWith, setPayWith] = useState<string>(DIRECT)
+  const [picking, setPicking] = useState(false)
+  const [status, setStatus] = useState<Status>({ kind: 'idle' })
+  const [swappable, setSwappable] = useState<string[]>([])
+  const [quote, setQuote] = useState<QuoteState>({ kind: 'none' })
 
   /*
-   * Only the one asset the invoice is in, read directly — see
-   * `useAssetBalance`. Until it answers, or when it cannot (a private token
-   * with no permit yet), the payment is still offered: the chain is the judge
-   * of whether it is covered.
+   * The invoice's own asset, read directly — see `useAssetBalance`. Until it
+   * answers, or when it cannot (a private token with no permit yet), paying
+   * with it is still offered: the chain is the judge of whether it is covered.
    */
-  const { balance, refresh, signPermit, signing } = useAssetBalance(open ? asset : undefined)
-  const held = balance.status === 'ok' ? balance.amount : undefined
-  const short = held !== undefined && BigInt(held) < BigInt(base)
+  const direct = useAssetBalance(asset)
 
-  const pay = () => {
-    const summary = {
-      label: `Pay ${invoice.amount} ${asset.symbol}`,
-      detail: `to ${shortenAddress(invoice.to)}`
+  useEffect(() => {
+    if (!queryClient || !permit || !token || !otherWays) return
+    let cancelled = false
+    void swappableTokens(queryClient, permit, token)
+      .then((tokens) => {
+        if (!cancelled) setSwappable(tokens)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
     }
-    if (asset.private) void actions.sendToken(asset.id, invoice.to, base, summary)
-    else void actions.sendNative(invoice.to, base, asset.id, summary)
+  }, [queryClient, permit, token, otherWays])
+
+  const contracts = useMemo(
+    () => (token && otherWays ? [token, ...swappable] : []),
+    [token, otherWays, swappable]
+  )
+  const balances = useBalances(
+    permit && contracts.length > 0 ? permitAuth(permit) : undefined,
+    undefined,
+    contracts
+  )
+
+  const held = useMemo(() => {
+    const map = new Map<string, bigint>()
+    for (const row of balances.tokens) {
+      if (row.outcome.status === 'ok' && BigInt(row.outcome.amount) > 0n) {
+        map.set(row.token.address, BigInt(row.outcome.amount))
+      }
+    }
+    return map
+  }, [balances.tokens])
+
+  const swapping = payWith !== DIRECT && payWith !== UNWRAP
+  const payToken = swapping ? tokenByAddress(payWith) : undefined
+
+  useEffect(() => {
+    if (!swapping || !queryClient || !token) {
+      setQuote({ kind: 'none' })
+      return
+    }
+    setQuote({ kind: 'loading' })
+    let cancelled = false
+    void quoteInto(queryClient, payWith, token, amount)
+      .then((found) => {
+        if (!cancelled) setQuote(found ? { kind: 'ready', quote: found } : { kind: 'unavailable' })
+      })
+      .catch(() => {
+        if (!cancelled) setQuote({ kind: 'unavailable' })
+      })
+    return () => {
+      cancelled = true
+    }
+    // `amount` is fixed by the invoice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [swapping, queryClient, payWith, token])
+
+  const tokenInfo = token ? tokenByAddress(token) : undefined
+  const directHeld = direct.balance.status === 'ok' ? BigInt(direct.balance.amount) : undefined
+
+  const options = [
+    {
+      id: DIRECT,
+      label: asset.symbol,
+      detail:
+        direct.balance.status === 'ok'
+          ? `Balance ${formatAmount(direct.balance.amount, { decimals: asset.decimals })}`
+          : direct.balance.status === 'loading'
+            ? 'Loading…'
+            : direct.balance.status === 'needs-permit'
+              ? 'Private balance'
+              : 'Balance could not be read',
+      image: asset.image
+    },
+    ...(!asset.private && token && otherWays && held.has(token)
+      ? [
+          {
+            id: UNWRAP,
+            label: tokenInfo ? privateSymbol(tokenInfo) : token,
+            detail: `Balance ${formatAmount(held.get(token)!.toString(), { decimals: asset.decimals })} · unwrapped`,
+            image: tokenInfo ? tokenImageUrl(tokenInfo) : undefined
+          }
+        ]
+      : []),
+    ...swappable
+      .filter((candidate) => held.has(candidate))
+      .map((candidate) => {
+        const info = tokenByAddress(candidate)
+        return {
+          id: candidate,
+          label: info ? privateSymbol(info) : candidate,
+          detail: `Balance ${formatAmount(held.get(candidate)!.toString(), {
+            decimals: info?.decimals ?? 6
+          })} · swapped on ShadeSwap`,
+          image: info ? tokenImageUrl(info) : undefined
+        }
+      })
+  ]
+  const selected = options.find((option) => option.id === payWith) ?? options[0]
+  const paySymbol = selected.label
+
+  const payDetail = !swapping
+    ? selected.detail
+    : quote.kind === 'ready'
+      ? `≈ ${formatAmount(quote.quote.amountIn.toString(), { decimals: payToken?.decimals ?? 6 })} ${paySymbol} · swapped on ShadeSwap`
+      : quote.kind === 'loading'
+        ? 'Getting a price…'
+        : selected.detail
+
+  // Why the chosen way of paying cannot cover the invoice, if it cannot.
+  let payError: string | undefined
+  if (payWith === DIRECT && directHeld !== undefined && directHeld < amount)
+    payError = `Not enough ${asset.symbol}.`
+  if (payWith === UNWRAP && token && (held.get(token) ?? 0n) < amount) payError = `Not enough ${paySymbol}.`
+  if (swapping) {
+    if (quote.kind === 'unavailable') payError = 'ShadeSwap cannot fill this amount right now.'
+    if (quote.kind === 'ready') {
+      if (quote.quote.amountIn > (held.get(payWith) ?? 0n)) payError = `Not enough ${paySymbol}.`
+      else if (quote.quote.impactBps > MAX_IMPACT_BPS) {
+        payError = `This trade would move the price by ${(quote.quote.impactBps / 100).toFixed(1)}%.`
+      }
+    }
+  }
+
+  const ready =
+    Boolean(client && queryClient && address) && !payError && (!swapping || quote.kind === 'ready')
+
+  const pay = async () => {
+    if (!client || !queryClient || !address || !ready) return
+    const source: PaySource =
+      payWith === DIRECT
+        ? { kind: 'direct' }
+        : payWith === UNWRAP
+          ? { kind: 'unwrap' }
+          : { kind: 'swap', token: payWith, quote: (quote as { kind: 'ready'; quote: Quote }).quote }
+
+    setStatus({ kind: 'sending' })
+    try {
+      const plan = await paymentMessages(queryClient, address, invoice.to, asset, amount, source)
+      const tx = await sendTx(client, plan.messages, plan.gasLimit, plan.msgTypes, {
+        label: `Pay ${invoice.amount} ${asset.symbol}`,
+        detail:
+          payWith === DIRECT
+            ? `to ${shortenAddress(invoice.to)}`
+            : `with ${paySymbol}, to ${shortenAddress(invoice.to)}`
+      })
+      if (tx.code !== 0) {
+        setStatus({ kind: 'failed', message: tx.rawLog || `The chain rejected it (code ${tx.code}).` })
+        return
+      }
+      setStatus({ kind: 'done', hash: tx.transactionHash })
+      direct.refresh()
+      onPaid?.()
+    } catch (error) {
+      setStatus({ kind: 'failed', message: errorMessage(error) })
+    }
+  }
+
+  if (status.kind === 'done') {
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="flex items-start gap-3">
+          <CheckCircle2 size={18} aria-hidden className="mt-0.5 shrink-0 text-positive" />
+          <p className="text-base">Paid.</p>
+        </div>
+        <a
+          className="inline-flex items-center gap-1.5 text-base text-accent underline underline-offset-4"
+          href={explorerTxUrl(status.hash)}
+          target="_blank"
+          rel="noreferrer noopener"
+        >
+          View transaction
+          <ExternalLink size={14} aria-hidden />
+        </a>
+      </div>
+    )
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Pay invoice">
-      {actions.state.kind === 'done' ? (
-        <div className="flex flex-col gap-4">
-          <div className="flex items-start gap-3">
-            <CheckCircle2 size={18} aria-hidden className="mt-0.5 shrink-0 text-positive" />
-            <p className="text-base">Paid.</p>
-          </div>
-          <a
-            className="inline-flex items-center gap-1.5 text-base text-accent underline underline-offset-4"
-            href={explorerTxUrl(actions.state.hash)}
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            View transaction
-            <ExternalLink size={14} aria-hidden />
-          </a>
-        </div>
-      ) : (
-        <>
-          <div className="flex flex-col items-center gap-3 rounded-card border border-border bg-surface px-4 py-5 text-center">
-            <span className="text-label text-text-muted">You&rsquo;re paying</span>
-            <AssetAmount amount={invoice.amount} symbol={asset.symbol} image={asset.image} />
-          </div>
+    <>
+      <div className="flex flex-col items-center gap-3 rounded-card border border-border bg-surface px-4 py-5 text-center">
+        <span className="text-label text-text-muted">You&rsquo;re paying</span>
+        <AssetAmount amount={invoice.amount} symbol={asset.symbol} image={asset.image} />
+      </div>
 
-          {/* The recipient is not repeated here: the pay page behind this dialog
-              names them, with the address, and that is where it is checked. */}
-          <dl className="-mt-2 flex flex-col gap-2 rounded-card border border-border bg-surface px-4 py-3 text-base">
-            <div className="flex items-center justify-between gap-3">
-              <dt className="text-text-muted">Your balance</dt>
-              <dd className={cn('flex items-center gap-1.5', short && 'text-negative')}>
-                {balance.status === 'loading' ? (
-                  <>
-                    <Loader2 size={14} aria-hidden className="animate-spin text-text-faint" />
-                    <span className="text-text-faint">Loading…</span>
-                  </>
-                ) : balance.status === 'ok' ? (
-                  `${formatAmount(balance.amount, { decimals: asset.decimals })} ${asset.symbol}`
-                ) : balance.status === 'needs-permit' ? (
-                  /* A private balance is only readable with the query permit;
-                     one signature, no transaction. */
-                  <button
-                    type="button"
-                    onClick={() => void signPermit()}
-                    disabled={signing}
-                    className="text-accent underline underline-offset-4 disabled:opacity-50"
-                  >
-                    {signing ? 'Signing…' : 'Sign permit to show'}
-                  </button>
-                ) : (
-                  <span className="text-text-faint" title={balance.message}>
-                    Could not be read
-                  </span>
-                )}
-              </dd>
-            </div>
-          </dl>
+      {/* What pays for it — the same picker row as Send and gas credits. The
+          recipient is not repeated: the pay page behind this dialog names them,
+          with the address, and that is where it is checked. */}
+      <button
+        type="button"
+        onClick={() => setPicking(true)}
+        aria-haspopup="dialog"
+        className="state-layer -mt-2 flex items-center gap-3 rounded-card border border-border bg-surface px-4 py-3 text-left"
+      >
+        {selected.image ? <img src={selected.image} alt="" className="size-8 shrink-0 rounded-pill" /> : null}
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="text-base font-medium">Pay with {selected.label}</span>
+          <span className="truncate text-label text-text-faint">{payDetail}</span>
+        </span>
+        <ChevronDown size={16} aria-hidden className="shrink-0 text-text-muted" />
+      </button>
 
-          <p className="flex items-start gap-2 text-label text-text-muted">
-            {asset.private ? (
-              <>
-                <ShieldCheck size={14} aria-hidden className="mt-px shrink-0 text-accent" />A SNIP-20 transfer
-                is encrypted. The chain records that you called the contract, not who was paid or how much.
-              </>
-            ) : (
-              <>
-                <Eye size={14} aria-hidden className="mt-px shrink-0" />
-                {asset.symbol} moves through the bank module, so the amount and both addresses are public.
-              </>
-            )}
-          </p>
+      <PickerDialog
+        open={picking}
+        onClose={() => setPicking(false)}
+        label="Pay with"
+        options={options}
+        value={payWith}
+        onChange={(id) => setPayWith(id)}
+      />
 
-          {actions.state.kind === 'failed' ? (
-            <p className="break-address text-base text-negative" role="alert">
-              {actions.state.message}
-            </p>
-          ) : null}
+      {/* A private balance is only readable with the query permit; one
+          signature, no transaction — and it is also what lets other tokens pay. */}
+      {!permit ? (
+        <button
+          type="button"
+          onClick={() => void direct.signPermit()}
+          disabled={direct.signing}
+          className="-mt-2 self-start text-label text-accent underline underline-offset-4 disabled:opacity-50"
+        >
+          {direct.signing ? 'Signing…' : 'Sign the permit to pay with your private tokens'}
+        </button>
+      ) : null}
 
-          <Button
-            variant="primary"
-            block
-            size="lg"
-            loading={actions.state.kind === 'sending'}
-            disabled={short}
-            onClick={pay}
-          >
-            {short ? `Not enough ${asset.symbol}` : `Pay ${invoice.amount} ${asset.symbol}`}
-          </Button>
-        </>
-      )}
-    </Modal>
+      {payError ? (
+        <span className="-mt-2 text-base text-negative" role="alert">
+          {payError}
+        </span>
+      ) : null}
+
+      <p className="flex items-start gap-2 text-label text-text-muted">
+        {asset.private ? (
+          <>
+            <ShieldCheck size={14} aria-hidden className="mt-px shrink-0 text-accent" />A SNIP-20 transfer is
+            encrypted. The chain records that you called the contract, not who was paid or how much.
+          </>
+        ) : (
+          <>
+            <Eye size={14} aria-hidden className="mt-px shrink-0" />
+            {asset.symbol} moves through the bank module, so the amount and both addresses are public.
+          </>
+        )}
+      </p>
+
+      {status.kind === 'failed' ? (
+        <p className="break-address text-base text-negative" role="alert">
+          {status.message}
+        </p>
+      ) : null}
+
+      <Button
+        variant="primary"
+        block
+        size="lg"
+        loading={status.kind === 'sending'}
+        disabled={!ready}
+        onClick={() => void pay()}
+      >
+        {`Pay ${invoice.amount} ${asset.symbol}`}
+      </Button>
+    </>
   )
 }
