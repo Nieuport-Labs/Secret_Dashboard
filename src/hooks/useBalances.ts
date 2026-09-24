@@ -5,7 +5,8 @@ import { hedged, mapWithLimit } from '@/lib/concurrency'
 import { errorMessage } from '@/lib/errors'
 import { fiatValue } from '@/lib/format'
 import { fetchPrices } from '@/lib/prices'
-import { queryBalance, type BalanceOutcome, type Snip20Auth } from '@/lib/snip20'
+import { grpcAvailable } from '@/lib/grpcQuery'
+import { queryBalance, queryBalancesBatched, type BalanceOutcome, type Snip20Auth } from '@/lib/snip20'
 import { loadWatchlist, rememberTokens } from '@/lib/watchlist'
 import { allTokenAddresses, allTokens, tokenByAddress, type TokenInfo } from '@/tokens/registry'
 import { tokenAddressForBankDenom } from '@/tokens/routes'
@@ -315,6 +316,27 @@ export function useBalances(auth: Snip20Auth | undefined, owner?: string, contra
       }
       setScrtPrice(prices.get(SCRT_PRICE_ID))
 
+      // With the gRPC path up, most tokens come back a batch at a time; only
+      // what that could not read goes through the lanes below.
+      let done = 0
+      const progress = (count: number) => {
+        done += count
+        if (!cancelled && sweep) setScanProgress([done, contracts.length])
+      }
+      let batched: Map<string, BalanceOutcome> | undefined
+      if (grpcAvailable()) {
+        let reported = 0
+        batched = await queryBalancesBatched(client, auth!, contracts, (answered) => {
+          progress(answered - reported)
+          reported = answered
+        }).catch(() => undefined)
+      }
+      const settled = batched
+        ? contracts.filter((contract) => batched!.get(contract)?.status !== 'error')
+        : []
+      const remaining = contracts.filter((contract) => !settled.includes(contract))
+      if (batched) done = settled.length
+
       /*
        * Spread across every LCD that answers, a lane each: two providers finish
        * a sweep in about half the time one does. A read that is slow or fails
@@ -322,12 +344,11 @@ export function useBalances(auth: Snip20Auth | undefined, owner?: string, contra
        */
       const pool = await queryClientPool()
       const lanes = pool.length > 0 ? pool : [client]
-      let done = 0
-      const outcomes = (
+      const laneOutcomes = (
         await Promise.all(
           lanes.map((laneClient, lane) =>
             mapWithLimit(
-              contracts.filter((_, index) => index % lanes.length === lane),
+              remaining.filter((_, index) => index % lanes.length === lane),
               QUERY_CONCURRENCY,
               async (contract) => {
                 // The backup asks the next node along, or the same one again
@@ -341,14 +362,17 @@ export function useBalances(auth: Snip20Auth | undefined, owner?: string, contra
                   // A permit problem is an answer, not a slow node.
                   (answer) => answer.status !== 'error'
                 )
-                done += 1
-                if (!cancelled && sweep) setScanProgress([done, contracts.length])
+                progress(1)
                 return [contract, outcome] as const
               }
             )
           )
         )
       ).flat()
+      const outcomes = [
+        ...settled.map((contract) => [contract, batched!.get(contract)!] as const),
+        ...laneOutcomes
+      ]
 
       if (cancelled) return
 

@@ -1,6 +1,7 @@
 import type { SecretNetworkClient } from 'secretjs'
 
 import { codeHashFor } from '@/lib/codeHash'
+import { ContractQueryError, grpcAvailable, grpcQueryContract, markGrpcDown } from '@/lib/grpcQuery'
 import { mapWithLimit } from '@/lib/concurrency'
 
 /**
@@ -15,7 +16,7 @@ import { mapWithLimit } from '@/lib/concurrency'
  * Shade's own client uses it the same way, for pair data (shade.js
  * `batchQuery$`).
  *
- * Only for small queries. secretjs sends a contract query as a GET with the
+ * Through the LCD, only for small queries. secretjs sends a contract query as a GET with the
  * encrypted query in the URL, and the batch is one query: its URL holds every
  * query in it, base64'd twice over and encrypted. A permit names every token
  * it covers, which makes one permit query several kB on its own — twenty of
@@ -87,21 +88,24 @@ async function one(client: SecretNetworkClient, item: BatchItem): Promise<BatchR
 
 async function throughRouter(
   client: SecretNetworkClient,
-  items: BatchItem[]
+  items: BatchItem[],
+  viaGrpc: boolean
 ): Promise<Map<string, BatchResult>> {
-  const reply = (await client.query.compute.queryContract({
-    contract_address: ROUTER,
-    code_hash: await codeHashFor(client, ROUTER),
-    query: {
-      batch: {
-        queries: items.map((item) => ({
-          id: encode(item.id),
-          contract: { address: item.contract.address, code_hash: item.contract.codeHash },
-          query: encode(item.query)
-        }))
-      }
+  const query = {
+    batch: {
+      queries: items.map((item) => ({
+        id: encode(item.id),
+        contract: { address: item.contract.address, code_hash: item.contract.codeHash },
+        query: encode(item.query)
+      }))
     }
-  })) as RouterReply
+  }
+  const codeHash = await codeHashFor(client, ROUTER)
+  const reply = (
+    viaGrpc
+      ? await grpcQueryContract(client, ROUTER, codeHash, query)
+      : await client.query.compute.queryContract({ contract_address: ROUTER, code_hash: codeHash, query })
+  ) as RouterReply
 
   const responses = reply?.batch?.responses
   if (!Array.isArray(responses)) throw new Error('The batch router did not answer with a batch.')
@@ -124,22 +128,33 @@ let routerDown = false
 async function run(
   client: SecretNetworkClient,
   chunk: BatchItem[],
-  results: Map<string, BatchResult>
+  results: Map<string, BatchResult>,
+  viaGrpc: boolean
 ): Promise<void> {
   if (!routerDown && chunk.length > 1) {
     try {
-      const answered = await throughRouter(client, chunk)
+      const answered = await throughRouter(client, chunk, viaGrpc)
       for (const item of chunk) {
         results.set(item.id, answered.get(item.id) ?? { ok: false, error: 'No answer in the batch.' })
       }
       return
-    } catch {
+    } catch (error) {
+      // The gRPC path itself failing (not the chain answering with an error)
+      // switches it off, and this chunk goes the LCD way instead — re-chunked,
+      // since what fits in a request body may not fit in a URL.
+      if (viaGrpc && !(error instanceof ContractQueryError)) {
+        markGrpcDown()
+        await Promise.all(
+          chunksOf(chunk, chunk.length, false).map((part) => run(client, part, results, false))
+        )
+        return
+      }
       // Most likely the batch ran past the node's query gas limit: halve it.
       if (chunk.length >= SMALLEST_SPLIT * 2) {
         const half = Math.ceil(chunk.length / 2)
         await Promise.all([
-          run(client, chunk.slice(0, half), results),
-          run(client, chunk.slice(half), results)
+          run(client, chunk.slice(0, half), results, viaGrpc),
+          run(client, chunk.slice(half), results, viaGrpc)
         ])
         return
       }
@@ -150,14 +165,18 @@ async function run(
   chunk.forEach((item, index) => results.set(item.id, single[index]))
 }
 
-/** Chunks no longer than `size` queries or `URL_BUDGET` characters; an oversized query stands alone. */
-function chunksOf(items: BatchItem[], size: number): BatchItem[][] {
+/**
+ * Chunks no longer than `size` queries or — through the LCD, where the query
+ * rides in the URL — `URL_BUDGET` characters; an oversized query stands alone.
+ * Through gRPC the query is a request body, and only the count matters.
+ */
+function chunksOf(items: BatchItem[], size: number, inUrl: boolean): BatchItem[][] {
   const chunks: BatchItem[][] = []
   let current: BatchItem[] = []
   let length = 0
   for (const item of items) {
     const itemLength = encode(item.query).length + encode(item.id).length + 200
-    if (current.length > 0 && (current.length >= size || length + itemLength > URL_BUDGET)) {
+    if (current.length > 0 && (current.length >= size || (inUrl && length + itemLength > URL_BUDGET))) {
       chunks.push(current)
       current = []
       length = 0
@@ -183,10 +202,11 @@ export async function batchQuery(
   const results = new Map<string, BatchResult>()
   if (items.length === 0) return results
 
+  const viaGrpc = grpcAvailable()
   let done = 0
   // A few requests at a time, whatever they carry.
-  await mapWithLimit(chunksOf(items, size), 3, async (chunk) => {
-    await run(client, chunk, results)
+  await mapWithLimit(chunksOf(items, size, !viaGrpc), viaGrpc ? 8 : 3, async (chunk) => {
+    await run(client, chunk, results, viaGrpc)
     done += chunk.length
     onChunk?.(done, items.length)
   })

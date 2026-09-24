@@ -1,6 +1,8 @@
 import type { SecretNetworkClient } from 'secretjs'
 
+import { batchQuery } from '@/lib/batchQuery'
 import { codeHashFor } from '@/lib/codeHash'
+import { mapWithLimit } from '@/lib/concurrency'
 import { errorMessage } from '@/lib/errors'
 import { covers, withPermit, type Permit } from '@/lib/permit'
 
@@ -149,6 +151,57 @@ export async function queryBalances(
     contractAddresses.map(async (address) => [address, await queryBalance(client, auth, address)] as const)
   )
   return new Map(entries)
+}
+
+/**
+ * Balances for many tokens through the batch router, a handful per request.
+ *
+ * Only worth it where the query can travel as a request body — the gRPC path
+ * (`lib/grpcQuery.ts`): a permit is several kB, and through the LCD's URL each
+ * one goes alone anyway (`lib/batchQuery.ts`). A token that could not be read
+ * this way says so in its outcome, and the caller reads it on its own.
+ */
+export async function queryBalancesBatched(
+  client: SecretNetworkClient,
+  auth: Snip20Auth,
+  contractAddresses: string[],
+  onProgress?: (done: number, total: number) => void
+): Promise<Map<string, BalanceOutcome>> {
+  const outcomes = new Map<string, BalanceOutcome>()
+  const asked = contractAddresses.filter((address) => {
+    if (auth.kind === 'permit' && !covers(auth.permit, address)) {
+      outcomes.set(address, { status: 'not-covered' })
+      return false
+    }
+    return true
+  })
+
+  const hashes = new Map<string, string>()
+  await mapWithLimit(asked, 12, async (address) => {
+    const hash = await codeHashFor(client, address).catch(() => undefined)
+    if (hash) hashes.set(address, hash)
+  })
+
+  const query = balanceQuery(auth)
+  const answers = await batchQuery(
+    client,
+    asked
+      .filter((address) => hashes.has(address))
+      .map((address) => ({ id: address, contract: { address, codeHash: hashes.get(address)! }, query })),
+    // Each permit is checked by signature inside the router's one query; ten
+    // stays well inside a node's query gas, and a refused batch is halved.
+    { size: 10, onChunk: onProgress }
+  )
+
+  for (const address of asked) {
+    const answer = answers.get(address)
+    if (!answer) outcomes.set(address, { status: 'error', message: 'No answer.' })
+    else if (answer.ok) outcomes.set(address, balanceOutcome(answer.value as BalanceReply))
+    else if (/unauthorized|permit|signature/i.test(answer.error)) {
+      outcomes.set(address, { status: 'unauthorized', message: answer.error })
+    } else outcomes.set(address, { status: 'error', message: answer.error })
+  }
+  return outcomes
 }
 
 export interface Transfer {

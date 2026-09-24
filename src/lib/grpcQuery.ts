@@ -1,0 +1,102 @@
+import type { SecretNetworkClient } from 'secretjs'
+
+/**
+ * A Secret contract query sent through `api/secret-query.ts`, which forwards it
+ * over gRPC — a request body instead of a URL, so a query of any size fits.
+ *
+ * The encryption is secretjs's own, done here in the browser with the query
+ * client's keys, the same steps as `client.query.compute.queryContract`: the
+ * server in between only ever holds ciphertext.
+ *
+ * Used where the LCD's URL limit bites — a batch of permit queries through the
+ * batch router (`lib/batchQuery.ts`). If this path fails once, it is switched
+ * off for the page and everything goes back to the LCD.
+ */
+
+const ENDPOINT = '/api/secret-query'
+
+interface Encryption {
+  encrypt(codeHash: string, message: object): Promise<Uint8Array>
+  decrypt(ciphertext: Uint8Array, nonce: Uint8Array): Promise<Uint8Array>
+}
+
+/**
+ * The client's own encryption — typed private by secretjs, but it is the one
+ * `queryContract` uses, and reusing it keeps the node's key fetched once.
+ */
+function encryption(client: SecretNetworkClient): Encryption {
+  return (client as unknown as { encryptionUtils: Encryption }).encryptionUtils
+}
+
+let down = false
+
+export function grpcAvailable(): boolean {
+  return !down
+}
+
+export function markGrpcDown(): void {
+  down = true
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(binary)
+}
+
+function fromBase64(value: string): Uint8Array {
+  const binary = atob(value)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
+
+const utf8 = new TextDecoder()
+
+/** secretjs's reading of a decrypted answer: base64 of the JSON, as UTF-8 bytes. */
+function readAnswer(decrypted: Uint8Array): unknown {
+  if (decrypted.length === 0) return {}
+  return JSON.parse(utf8.decode(fromBase64(utf8.decode(decrypted))))
+}
+
+/** A contract error names itself inside the node's message, encrypted for us. */
+async function readError(client: SecretNetworkClient, message: string, nonce: Uint8Array): Promise<string> {
+  const match =
+    /encrypted: (.+?): (?:instantiate|execute|query|reply to|migrate) contract failed/.exec(message) ??
+    /(?:instantiate|execute|query|reply to|migrate) contract failed: encrypted: ([\w+/=]+)/.exec(message)
+  if (!match) return message
+  try {
+    return utf8.decode(await encryption(client).decrypt(fromBase64(match[1]), nonce))
+  } catch {
+    return message
+  }
+}
+
+export class ContractQueryError extends Error {}
+
+export async function grpcQueryContract(
+  client: SecretNetworkClient,
+  contract: string,
+  codeHash: string,
+  query: object
+): Promise<unknown> {
+  const encrypted = await encryption(client).encrypt(codeHash.replace('0x', '').toLowerCase(), query)
+  const nonce = encrypted.slice(0, 32)
+
+  const response = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ contract, query: toBase64(encrypted) })
+  })
+  const reply = (await response.json().catch(() => ({}))) as { data?: string; error?: string }
+
+  if (response.ok && typeof reply.data === 'string') {
+    return readAnswer(await encryption(client).decrypt(fromBase64(reply.data), nonce))
+  }
+  // 502 is the chain answering with an error; anything else is the path itself failing.
+  if (response.status === 502 && reply.error) {
+    throw new ContractQueryError(await readError(client, reply.error, nonce))
+  }
+  throw new Error(reply.error ?? `secret-query answered ${response.status}`)
+}
