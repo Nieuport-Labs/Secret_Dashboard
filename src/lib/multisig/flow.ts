@@ -42,6 +42,7 @@ import {
 import { buildMsgs, computeEntries, defaultGasFor, type DeclaredMsg } from '@/lib/multisig/messages'
 import { docsEqual, signBytes, signBytesHash } from '@/lib/multisig/signdoc'
 import { buildDocFor } from '@/lib/multisig/verify'
+import { trackTx } from '@/lib/txProgress'
 import type { AminoSignDoc, KeplrLike } from '@/lib/wallet'
 
 let secretjs: Promise<typeof import('secretjs')> | undefined
@@ -374,5 +375,15 @@ export async function broadcastProposal(params: {
       : {})
   })
 
-  return client.tx.broadcastSignedTx(params.txBytes, { waitForCommit: true })
+  // Already signed by every member, so the card starts at the block.
+  const tracker = trackTx('Multisig transaction')
+  tracker.confirming()
+  try {
+    const tx = await client.tx.broadcastSignedTx(params.txBytes, { waitForCommit: true })
+    tracker.settle(tx)
+    return tx
+  } catch (error) {
+    tracker.fail(error)
+    throw error
+  }
 }

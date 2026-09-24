@@ -8,6 +8,7 @@ import {
 
 import { DENOM, GAS_GRANT, GAS_PRICE_USCRT, GAS_REVOKE } from '@/chains/secret4'
 import { errorMessage } from '@/lib/errors'
+import { broadcastTracked } from '@/lib/txProgress'
 import { availableFee, isUsable, parseFeeGrant, type FeeGrant } from '@/lib/feegrant-sdk'
 import { toBaseUnits as toMicroUnits } from '@/lib/format'
 
@@ -202,12 +203,10 @@ export async function grantAllowance(
   input: GrantInput,
   feeGranter?: string
 ): Promise<TxResponse> {
-  return client.tx.feegrant.grantAllowance(
-    {
-      granter,
-      grantee: input.grantee.trim(),
-      allowance: buildAllowance(input)
-    },
+  return broadcastTracked(
+    'Fee grant',
+    client,
+    [new MsgGrantAllowance({ granter, grantee: input.grantee.trim(), allowance: buildAllowance(input) })],
     txOptions(GAS_GRANT, feeGranter)
   )
 }
@@ -229,7 +228,7 @@ export async function updateAllowance(
     new MsgRevokeAllowance({ granter, grantee }),
     new MsgGrantAllowance({ granter, grantee, allowance: buildAllowance(input) })
   ]
-  return client.tx.broadcast(messages, txOptions(GAS_GRANT + GAS_REVOKE, feeGranter))
+  return broadcastTracked('Update fee grant', client, messages, txOptions(GAS_GRANT + GAS_REVOKE, feeGranter))
 }
 
 /** Revoke a single fee grant. */
@@ -239,7 +238,12 @@ export async function revokeAllowance(
   grantee: string,
   feeGranter?: string
 ): Promise<TxResponse> {
-  return client.tx.feegrant.revokeAllowance({ granter, grantee }, txOptions(GAS_REVOKE, feeGranter))
+  return broadcastTracked(
+    'Revoke fee grant',
+    client,
+    [new MsgRevokeAllowance({ granter, grantee })],
+    txOptions(GAS_REVOKE, feeGranter)
+  )
 }
 
 /** Revoke every listed grant in one transaction - powers "Suspend all". */
@@ -250,7 +254,12 @@ export async function revokeAll(
   feeGranter?: string
 ): Promise<TxResponse> {
   const messages: Msg[] = grantees.map((grantee) => new MsgRevokeAllowance({ granter, grantee }))
-  return client.tx.broadcast(messages, txOptions(GAS_REVOKE * grantees.length, feeGranter))
+  return broadcastTracked(
+    'Revoke fee grants',
+    client,
+    messages,
+    txOptions(GAS_REVOKE * grantees.length, feeGranter)
+  )
 }
 
 /** Aggregate figures backing the two summary cards. */

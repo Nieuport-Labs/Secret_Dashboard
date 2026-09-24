@@ -40,11 +40,11 @@ export function useWalletActions(onSuccess?: () => void) {
   const [state, setState] = useState<ActionState>({ kind: 'idle' })
 
   const broadcast = useCallback(
-    async (messages: Msg[], gasLimit: number, msgTypes: string[]) => {
+    async (messages: Msg[], gasLimit: number, msgTypes: string[], label: string) => {
       if (!client || !address) return
       setState({ kind: 'sending' })
       try {
-        const tx = await sendTx(client, messages, gasLimit, msgTypes)
+        const tx = await sendTx(client, messages, gasLimit, msgTypes, label)
 
         if (tx.code !== 0) {
           setState({ kind: 'failed', message: tx.rawLog || `The chain rejected it (code ${tx.code}).` })
@@ -68,7 +68,8 @@ export function useWalletActions(onSuccess?: () => void) {
       await broadcast(
         [new MsgSend({ from_address: address, to_address: recipient, amount: [{ denom, amount }] })],
         GAS.send,
-        [MSG_SEND]
+        [MSG_SEND],
+        'Send'
       )
     },
     [address, broadcast]
@@ -93,7 +94,8 @@ export function useWalletActions(onSuccess?: () => void) {
           })
         ],
         GAS.snip20Transfer,
-        [MSG_EXECUTE_CONTRACT]
+        [MSG_EXECUTE_CONTRACT],
+        'Private send'
       )
     },
     [address, queryClient, broadcast]
@@ -130,7 +132,8 @@ export function useWalletActions(onSuccess?: () => void) {
           forward: params.forward
         }),
         withdrawGasLimit(params.chain, Boolean(unwrap)),
-        unwrap ? [MSG_EXECUTE_CONTRACT, MSG_TRANSFER] : [MSG_TRANSFER]
+        unwrap ? [MSG_EXECUTE_CONTRACT, MSG_TRANSFER] : [MSG_TRANSFER],
+        `Send to ${params.chain.name}`
       )
     },
     [address, queryClient, broadcast]
@@ -158,7 +161,8 @@ export function useWalletActions(onSuccess?: () => void) {
           })
         ],
         GAS.wrap,
-        [MSG_EXECUTE_CONTRACT]
+        [MSG_EXECUTE_CONTRACT],
+        'Wrap'
       )
     },
     [address, queryClient, broadcast]
@@ -180,7 +184,8 @@ export function useWalletActions(onSuccess?: () => void) {
           })
         ],
         GAS.unwrap,
-        [MSG_EXECUTE_CONTRACT]
+        [MSG_EXECUTE_CONTRACT],
+        'Unwrap'
       )
     },
     [address, queryClient, broadcast]
@@ -206,7 +211,8 @@ export function useWalletActions(onSuccess?: () => void) {
           })
         ],
         GAS.derivativeUnbond,
-        [MSG_EXECUTE_CONTRACT]
+        [MSG_EXECUTE_CONTRACT],
+        'Unstake stkd-SCRT'
       )
     },
     [address, queryClient, broadcast]
@@ -227,7 +233,8 @@ export function useWalletActions(onSuccess?: () => void) {
         })
       ],
       GAS.derivativeClaim,
-      [MSG_EXECUTE_CONTRACT]
+      [MSG_EXECUTE_CONTRACT],
+      'Claim unstaked SCRT'
     )
   }, [address, queryClient, broadcast])
 

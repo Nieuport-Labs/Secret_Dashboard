@@ -46,7 +46,7 @@ export function useGovernanceActions(onSuccess?: () => void) {
         const outgoing = viaGrant ? await execMessage(address, [message]) : message
         const gas = viaGrant ? GAS.vote + GAS.authzExec : GAS.vote
 
-        const tx = await sendTx(client, [outgoing], gas, [viaGrant ? MSG_EXEC : MSG_VOTE])
+        const tx = await sendTx(client, [outgoing], gas, [viaGrant ? MSG_EXEC : MSG_VOTE], 'Vote')
 
         if (tx.code !== 0) {
           setState({ kind: 'failed', message: tx.rawLog || `The chain rejected it (code ${tx.code}).` })

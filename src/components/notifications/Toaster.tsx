@@ -1,8 +1,10 @@
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ExternalLink, Loader2, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
+import { cn } from '@/lib/cn'
 import { useNotifications, type Toast } from '@/store/notifications'
+import { useTransactions, type TrackedTx, type TxStage } from '@/store/transactions'
 
 /**
  * The toast stack (Figma 34:688, 36:79, 36:88, 36:3).
@@ -10,12 +12,17 @@ import { useNotifications, type Toast } from '@/store/notifications'
  * Bottom-right on desktop, full width above the nav bar on a phone. Announced
  * politely: an arriving token is worth telling a screen reader about, but not
  * worth interrupting whatever it was reading.
+ *
+ * Transactions in flight share the stack, above the toasts — see
+ * `lib/txProgress.ts`.
  */
 export default function Toaster() {
   const toasts = useNotifications((state) => state.toasts)
   const dismiss = useNotifications((state) => state.dismiss)
+  const transactions = useTransactions((state) => state.transactions)
+  const dismissTx = useTransactions((state) => state.dismiss)
 
-  if (toasts.length === 0) return null
+  if (toasts.length === 0 && transactions.length === 0) return null
 
   return (
     <div
@@ -23,6 +30,9 @@ export default function Toaster() {
       aria-live="polite"
       className="pointer-events-none fixed inset-x-4 bottom-24 z-40 flex flex-col items-end gap-2.5 lg:inset-x-auto lg:bottom-6 lg:right-6"
     >
+      {transactions.map((tx) => (
+        <TxCard key={tx.id} tx={tx} onDismiss={() => dismissTx(tx.id)} />
+      ))}
       {toasts.map((toast) => (
         <ToastCard key={toast.id} toast={toast} onDismiss={() => dismiss(toast.id)} />
       ))}
@@ -88,6 +98,95 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
           )}
         </>
       )}
+    </div>
+  )
+}
+
+const STEPS: Array<{ stage: TxStage; label: string }> = [
+  { stage: 'signing', label: 'Sign' },
+  { stage: 'confirming', label: 'Confirm' },
+  { stage: 'done', label: 'Done' }
+]
+
+const STAGE_TEXT: Record<TxStage, string> = {
+  signing: 'Approve it in your wallet.',
+  confirming: 'Sent. Waiting for a block to include it…',
+  done: 'Confirmed.',
+  failed: 'Failed.'
+}
+
+/**
+ * One transaction, updated in place as it moves along. The three steps are
+ * the real ones — the wallet prompt, the block, the result — not a timer
+ * dressed up as progress, so a step that takes a while simply stays lit.
+ */
+function TxCard({ tx, onDismiss }: { tx: TrackedTx; onDismiss: () => void }) {
+  const failed = tx.stage === 'failed'
+  const reached = failed ? -1 : STEPS.findIndex((step) => step.stage === tx.stage)
+
+  return (
+    <div className="glass-panel pointer-events-auto w-full max-w-[340px] rounded-card p-4 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
+      <div className="flex items-start gap-2.5">
+        {failed ? (
+          <AlertCircle size={16} aria-hidden className="mt-0.5 shrink-0 text-negative" />
+        ) : tx.stage === 'done' ? (
+          <CheckCircle2 size={16} aria-hidden className="mt-0.5 shrink-0 text-positive" />
+        ) : (
+          <Loader2 size={16} aria-hidden className="mt-0.5 shrink-0 animate-spin text-accent" />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-base font-medium">{tx.label}</p>
+          <p className={cn('mt-0.5 text-sm', failed ? 'break-address text-negative' : 'text-text-muted')}>
+            {failed && tx.message ? tx.message : STAGE_TEXT[tx.stage]}
+          </p>
+          {tx.stage === 'done' && tx.note ? <p className="mt-1 text-sm text-text-muted">{tx.note}</p> : null}
+        </div>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          className="state-layer -mr-1 -mt-1 shrink-0 rounded-control p-1 text-text-muted"
+        >
+          <X size={14} aria-hidden />
+        </button>
+      </div>
+
+      {failed ? null : (
+        <ol className="mt-3 grid grid-cols-3 gap-1.5" aria-label="Progress">
+          {STEPS.map((step, index) => (
+            <li key={step.stage} className="flex flex-col gap-1">
+              <span
+                className={cn(
+                  'h-1 rounded-pill transition-colors duration-[var(--duration-medium)]',
+                  index < reached || tx.stage === 'done'
+                    ? 'bg-accent'
+                    : index === reached
+                      ? 'bg-accent motion-safe:animate-pulse'
+                      : 'bg-surface-3'
+                )}
+              />
+              <span
+                className={cn('text-label', index <= reached ? 'text-text-muted' : 'text-text-faint')}
+                aria-current={index === reached ? 'step' : undefined}
+              >
+                {step.label}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {tx.url ? (
+        <a
+          href={tx.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="mt-3 inline-flex items-center gap-1.5 text-sm text-accent underline underline-offset-4"
+        >
+          View transaction
+          <ExternalLink size={12} aria-hidden />
+        </a>
+      ) : null}
     </div>
   )
 }

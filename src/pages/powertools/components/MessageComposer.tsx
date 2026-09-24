@@ -8,6 +8,7 @@ import Picker from '@/components/ui/Picker'
 import { DENOM, explorerTxUrl, GAS_PRICE_USCRT, withGasBuffer } from '@/chains/secret4'
 import { errorMessage } from '@/lib/errors'
 import { MESSAGE_TEMPLATES } from '@/lib/messageTemplates'
+import { broadcastTracked, labelFor } from '@/lib/txProgress'
 import { useFeePayer } from '@/store/feePayer'
 import { useWallet } from '@/store/wallet'
 
@@ -28,7 +29,11 @@ interface Row {
   error?: string
 }
 
-type SendState = { kind: 'idle' } | { kind: 'sending' } | { kind: 'done'; hash: string } | { kind: 'failed'; message: string }
+type SendState =
+  | { kind: 'idle' }
+  | { kind: 'sending' }
+  | { kind: 'done'; hash: string }
+  | { kind: 'failed'; message: string }
 
 const TYPE_OPTIONS = Object.entries(MESSAGE_TEMPLATES)
   .sort(([, a], [, b]) => a.module.localeCompare(b.module))
@@ -108,7 +113,9 @@ export default function MessageComposer() {
    *  row is clean. Called from an event handler, never during render. */
   const validate = (): Array<{ type: string; content: Record<string, unknown> }> | undefined => {
     const results = rows.map((row) => ({ row, result: parseRow(row) }))
-    setRows(results.map(({ row, result }) => ({ ...row, error: 'error' in result ? result.error : undefined })))
+    setRows(
+      results.map(({ row, result }) => ({ ...row, error: 'error' in result ? result.error : undefined }))
+    )
     if (results.some(({ result }) => 'error' in result)) return undefined
     return results.map(({ row, result }) => ({
       type: row.type!,
@@ -133,7 +140,7 @@ export default function MessageComposer() {
       }
 
       const limit = await estimateGas(client, messages)
-      const tx = await client.tx.broadcast(messages, {
+      const tx = await broadcastTracked(labelFor(typeUrls), client, messages, {
         gasLimit: limit,
         gasPriceInFeeDenom: GAS_PRICE_USCRT,
         feeDenom: DENOM,
@@ -204,7 +211,13 @@ export default function MessageComposer() {
         ))}
       </div>
 
-      <Button variant="soft" shape="control" className="self-center" icon={<Plus size={14} aria-hidden />} onClick={addRow}>
+      <Button
+        variant="soft"
+        shape="control"
+        className="self-center"
+        icon={<Plus size={14} aria-hidden />}
+        onClick={addRow}
+      >
         Add message
       </Button>
 

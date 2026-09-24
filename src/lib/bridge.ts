@@ -7,6 +7,7 @@ import type { Route } from '@/tokens/routes'
 import { MSG_TRANSFER } from '@/lib/msgTypes'
 import type { HookedTransfer } from '@/lib/ibcMemo'
 import { redeemMsg } from '@/lib/snip20'
+import { signAndBroadcast, trackTx } from '@/lib/txProgress'
 
 /**
  * Sending an IBC transfer from a source chain into Secret.
@@ -74,6 +75,7 @@ export async function sendDeposit({ chain, sender, legs, gasLimit }: SendOptions
     gasPrice: GasPrice.fromString(`0.025${chain.feeDenom}`)
   })
 
+  const tracker = trackTx(`Bridge from ${chain.name}`)
   try {
     const messages = legs.map((leg) => ({
       typeUrl: MSG_TRANSFER,
@@ -91,16 +93,34 @@ export async function sendDeposit({ chain, sender, legs, gasLimit }: SendOptions
       }
     }))
 
-    const result = await client.signAndBroadcast(sender, messages, {
-      amount: [{ denom: chain.feeDenom, amount: String(Math.ceil(gasLimit * 0.025)) }],
-      gas: String(gasLimit)
-    })
+    // Signed and broadcast as two calls rather than one `signAndBroadcast`,
+    // so the progress card can tell waiting on the wallet from waiting on
+    // the source chain.
+    const { TxRaw } = await import('cosmjs-types/cosmos/tx/v1beta1/tx')
+    const signed = await client.sign(
+      sender,
+      messages,
+      {
+        amount: [{ denom: chain.feeDenom, amount: String(Math.ceil(gasLimit * 0.025)) }],
+        gas: String(gasLimit)
+      },
+      ''
+    )
+    tracker.confirming()
+    const result = await client.broadcastTx(TxRaw.encode(signed).finish())
 
     if (result.code !== 0) {
       throw new Error(result.rawLog || `The source chain rejected it (code ${result.code}).`)
     }
 
+    tracker.done(
+      result.transactionHash,
+      'It reaches Secret once a relayer carries it, usually within a minute.'
+    )
     return { hash: result.transactionHash, height: result.height }
+  } catch (error) {
+    tracker.fail(error)
+    throw error
   } finally {
     client.disconnect()
   }
@@ -244,12 +264,26 @@ function forwardHop(
  * which means it costs SCRT for gas, and can therefore use the app's fee payer.
  */
 export async function sendWithdraw({ client, feeGranter, ...options }: WithdrawOptions): Promise<SendResult> {
-  const tx = await client.tx.broadcast(await withdrawMessages(options), {
-    gasLimit: withdrawGasLimit(options.chain, Boolean(options.unwrap)),
-    gasPriceInFeeDenom: GAS_PRICE_USCRT,
-    feeDenom: DENOM,
-    feeGranter
-  })
+  const tracker = trackTx(`Bridge to ${options.chain.name}`)
+  let messages: Msg[]
+  try {
+    messages = await withdrawMessages(options)
+  } catch (error) {
+    tracker.fail(error)
+    throw error
+  }
+  const tx = await signAndBroadcast(
+    client,
+    messages,
+    {
+      gasLimit: withdrawGasLimit(options.chain, Boolean(options.unwrap)),
+      gasPriceInFeeDenom: GAS_PRICE_USCRT,
+      feeDenom: DENOM,
+      feeGranter
+    },
+    tracker
+  )
+  tracker.settle(tx, `It reaches ${options.chain.name} once a relayer carries it, usually within a minute.`)
 
   if (tx.code !== 0) {
     throw new Error(tx.rawLog || `Secret rejected it (code ${tx.code}).`)
