@@ -3,6 +3,7 @@ import { Secp256k1, Secp256k1Signature, sha256 } from '@cosmjs/crypto'
 import { fromBase64, toBase64, toUtf8 } from '@cosmjs/encoding'
 
 import {
+  linksProblem,
   parseRecordBody,
   type ProfileRecordBody,
   type SignedProfileRecord
@@ -178,6 +179,10 @@ export async function POST(request: Request): Promise<Response> {
   if (typeof body === 'string') return json({ error: body }, 400)
   if (!ADDRESS.test(body.address)) return json({ error: 'bad address' }, 400)
   if (body.signedAt > Date.now() + MAX_CLOCK_SKEW_MS) return json({ error: 'signed in the future' }, 400)
+
+  // Only new saves: a record stored before these rules must still read back.
+  const badLink = body.profile ? linksProblem(body.profile.links) : undefined
+  if (badLink) return json({ error: badLink }, 400)
 
   const problem = await verify(record, body)
   if (problem) return json({ error: problem }, 401)

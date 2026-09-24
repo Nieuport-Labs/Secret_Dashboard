@@ -5,6 +5,7 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
+import SocialLogo, { hasSocialLogo } from '@/components/ui/SocialLogo'
 import PublicWalletCorner from '@/components/layout/PublicWalletCorner'
 import ConnectToSendModal from '@/components/wallet/ConnectToSendModal'
 import InvoiceModal from '@/components/wallet/InvoiceModal'
@@ -38,14 +39,23 @@ function LinkChip({ link }: { link: ProfileLink }) {
   const label = LINK_KINDS.find((kind) => kind.kind === link.kind)?.label ?? link.kind
   const href = linkHref(link)
 
-  const className =
-    'flex items-center gap-1.5 rounded-pill border border-border px-3 py-1.5 text-sm text-text-muted'
+  // The logo says which service; its name stays for screen readers and on hover.
+  const mark = hasSocialLogo(link.kind) ? (
+    <span className="shrink-0 text-text" title={label}>
+      <SocialLogo kind={link.kind} />
+      <span className="sr-only">{label}</span>
+    </span>
+  ) : (
+    <span>{label}</span>
+  )
+
+  const className = 'flex items-center gap-1.5 rounded-pill px-2 py-1 text-sm text-text-muted'
 
   if (!href) {
     return (
       <span className={className}>
-        {label}
-        <span className="text-text-faint">{link.value}</span>
+        {mark}
+        <span>{link.value}</span>
       </span>
     )
   }
@@ -53,9 +63,14 @@ function LinkChip({ link }: { link: ProfileLink }) {
   return (
     /* `noreferrer` as well as `noopener`: these destinations are chosen by the
        profile's owner, and a visitor's referrer is not theirs to hand over. */
-    <a href={href} target="_blank" rel="noreferrer noopener" className={cn(className, 'state-layer')}>
-      {label}
-      <span className="text-text-faint">{link.value}</span>
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      className={cn(className, 'state-layer hover:text-text')}
+    >
+      {mark}
+      <span>{link.value}</span>
     </a>
   )
 }

@@ -21,7 +21,7 @@ import type {
   RecordProfile,
   SignedProfileRecord
 } from '../src/lib/profileRecord.ts'
-import { effectiveProfile } from '../src/lib/profileRecord.ts'
+import { effectiveProfile, linkProblem, normaliseLinkValue } from '../src/lib/profileRecord.ts'
 
 let passed = 0
 let failed = 0
@@ -204,6 +204,69 @@ const first = await sign(alice.signer, alice.address, {
     profile: null
   })
   check('a removal is stored like any newer copy', (await post(tombstone)).status === 200)
+}
+
+{
+  const badHandle = await sign(alice.signer, alice.address, {
+    v: 1,
+    address: alice.address,
+    signedAt: now + 20,
+    profile: { ...ALICE, links: [{ kind: 'x', value: 'not a handle' }] }
+  })
+  check('a malformed handle is refused on save', (await post(badHandle)).status === 400)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Link formats                                                                */
+/* -------------------------------------------------------------------------- */
+
+{
+  const normalised: Array<[string, string, string]> = [
+    ['x', '@alice_1', 'alice_1'],
+    ['x', 'https://twitter.com/alice?s=20', 'alice'],
+    ['x', 'x.com/alice', 'alice'],
+    ['telegram', 'https://t.me/alice_bob', 'alice_bob'],
+    ['github', 'github.com/octo-cat/repo', 'octo-cat'],
+    ['discord', '@Alice.B', 'alice.b'],
+    ['discord', 'Alice#1234', 'Alice#1234'],
+    ['website', '  example.com ', 'example.com']
+  ]
+  for (const [kind, raw, expected] of normalised) {
+    const got = normaliseLinkValue(kind, raw)
+    check(`${kind} "${raw}" normalises to "${expected}"`, got === expected, got)
+  }
+
+  const valid: Array<[string, string]> = [
+    ['x', 'alice_1'],
+    ['telegram', 'alice_bob'],
+    ['github', 'octo-cat'],
+    ['discord', 'alice.b'],
+    ['discord', 'Alice#1234'],
+    ['website', 'example.com'],
+    ['website', 'https://sub.example.co.uk/path?q=1'],
+    ['mastodon', 'anything goes for unknown kinds']
+  ]
+  for (const [kind, value] of valid) {
+    check(`${kind} "${value}" is accepted`, linkProblem(kind, value) === undefined, linkProblem(kind, value))
+  }
+
+  const invalid: Array<[string, string]> = [
+    ['x', 'sixteen_chars_xx'],
+    ['x', 'has space'],
+    ['x', 'https://facebook.com/alice'],
+    ['telegram', 'abcd'],
+    ['telegram', '1alice'],
+    ['github', '-octo'],
+    ['github', 'octo--cat'],
+    ['discord', 'a..b'],
+    ['discord', 'x'],
+    ['website', 'javascript:alert(1)'],
+    ['website', 'localhost'],
+    ['website', 'exa mple.com']
+  ]
+  for (const [kind, value] of invalid) {
+    check(`${kind} "${value}" is refused`, linkProblem(kind, value) !== undefined)
+  }
 }
 
 /* -------------------------------------------------------------------------- */

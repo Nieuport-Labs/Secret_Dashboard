@@ -2,6 +2,7 @@ import type { SecretNetworkClient } from 'secretjs'
 
 import { PROFILE_REGISTRY_ADDRESS } from '@/chains/secret4'
 import { codeHashFor } from '@/lib/codeHash'
+import { normaliseLinkValue } from '@/lib/profileRecord'
 
 /**
  * Client for the public profile registry (`contracts/profile`).
@@ -198,7 +199,7 @@ export function setProfileMsg(draft: ProfileDraft): object {
       bio: draft.bio.trim(),
       avatar: draft.avatar,
       links: draft.links
-        .map((link) => ({ kind: link.kind, value: link.value.trim() }))
+        .map((link) => ({ kind: link.kind, value: normaliseLinkValue(link.kind, link.value) }))
         .filter((link) => link.value !== '')
     }
   }
