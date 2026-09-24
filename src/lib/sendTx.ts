@@ -46,10 +46,11 @@ import { useWallet } from '@/store/wallet'
 /** How long the pending-profile check may delay a send before it is skipped. */
 const PROFILE_TIMEOUT_MS = 2500
 /**
- * The refill check reads more — the grant list, the sSCRT balance, two code
- * hashes — and skipping it leaves the account short of gas, so it gets longer.
+ * The refill check reads more — the grant list, the sSCRT balance, code
+ * hashes, and when a swap is needed the pools and the balances it could spend
+ * — and skipping it leaves the account short of gas, so it gets longer.
  */
-const REFILL_TIMEOUT_MS = 6000
+const REFILL_TIMEOUT_MS = 10_000
 
 const FAILED_KEY = 'secret-dashboard:profile-attach-failed'
 

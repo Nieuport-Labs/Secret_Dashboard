@@ -11,6 +11,7 @@ Object.defineProperty(globalThis, 'window', { configurable: true, value: globalT
 const { CREDIT_FLOOR, refillAmount } = await import('../src/lib/autoRefill.ts')
 const { canUnwrap } = await import('../src/store/settings.ts')
 const { SSCRT_ADDRESS } = await import('../src/tokens/registry.ts')
+const { findRoutes, swapIn, swapOut } = await import('../src/lib/shadeSwap.ts')
 
 let passed = 0
 let failed = 0
@@ -38,6 +39,60 @@ check('easy mode unwraps sSCRT', canUnwrap('easy', SSCRT_ADDRESS))
 check('easy mode does not unwrap anything else', !canUnwrap('easy', ATOM))
 check('unanswered counts as easy', !canUnwrap(undefined, ATOM))
 check('expert mode unwraps anything', canUnwrap('expert', ATOM))
+
+/* Pool arithmetic ---------------------------------------------------------- */
+
+// A pool of 1,000,000 X against 2,000,000 Y with a 0.3% fee.
+const X = 1_000_000_000_000n
+const Y = 2_000_000_000_000n
+const FEE_NUM = 3n
+const FEE_DEN = 1000n
+
+{
+  const out = swapOut(X, Y, 1_000_000n, FEE_NUM, FEE_DEN)
+  // 1 X at 2 Y each, less 0.3%, less a hair of price impact.
+  check('a small trade gets the price less the fee', out > 1_993_000n && out <= 1_994_000n, out.toString())
+
+  const back = swapIn(X, Y, out, FEE_NUM, FEE_DEN)!
+  check('the inverse asks at least what was paid', back >= 1_000_000n, back.toString())
+  check('and not much more', back - 1_000_000n < 10n, back.toString())
+  check('what it asks for really buys the amount', swapOut(X, Y, back, FEE_NUM, FEE_DEN) >= out)
+}
+
+check('nothing in, nothing out', swapOut(X, Y, 0n, FEE_NUM, FEE_DEN) === 0n)
+check('asking for the whole pool is refused', swapIn(X, Y, Y, FEE_NUM, FEE_DEN) === undefined)
+
+{
+  const ref = (address: string) => ({ address, codeHash: 'h' })
+  const pair = (address: string, a: string, b: string) => ({
+    contract: ref(address),
+    token0: ref(a),
+    token1: ref(b)
+  })
+  const pairs = [
+    pair('p1', 'ATOM', 'SILK'),
+    pair('p2', 'SILK', 'SSCRT'),
+    pair('p3', 'ATOM', 'SSCRT'),
+    pair('p4', 'USDC', 'SILK')
+  ]
+
+  const routes = findRoutes(pairs, 'ATOM', 'SSCRT')
+  check(
+    'a direct pair is a route',
+    routes.some((route) => route.length === 1 && route[0].pair.contract.address === 'p3')
+  )
+  check(
+    'and so is two hops through a shared token',
+    routes.some(
+      (route) => route.length === 2 && route[0].to.address === 'SILK' && route[1].to.address === 'SSCRT'
+    )
+  )
+  check(
+    'with every hop pointing the right way',
+    routes.every((route) => route[0].from.address === 'ATOM')
+  )
+  check('a token with no way there has no route', findRoutes(pairs, 'OSMO', 'SSCRT').length === 0)
+}
 
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)
