@@ -10,13 +10,7 @@ import { PickerDialog } from '@/components/ui/Picker'
 import { DENOM } from '@/chains/secret4'
 import { cn } from '@/lib/cn'
 import { shortenAddress } from '@/lib/format'
-import {
-  invoiceAssets,
-  invoiceBaseUnits,
-  invoiceUri,
-  invoiceUrl,
-  type Invoice
-} from '@/lib/invoice'
+import { invoiceAssets, invoiceBaseUnits, invoiceUri, invoiceUrl, type Invoice } from '@/lib/invoice'
 import { fetchPrices } from '@/lib/prices'
 import { usePrivacy } from '@/store/privacy'
 import { useSettings } from '@/store/settings'
@@ -252,6 +246,7 @@ function InvoiceCreated({
           symbol={invoice.asset.symbol}
           image={invoice.asset.image}
           size="md"
+          layout="stacked"
         />
         <span className="text-label text-text-muted">
           {invoice.asset.private ? 'Private transfer' : 'Public transfer'}

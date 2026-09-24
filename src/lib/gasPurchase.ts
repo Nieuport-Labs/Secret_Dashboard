@@ -3,7 +3,7 @@ import type { Msg, SecretNetworkClient } from 'secretjs'
 import { DENOM, GAS, GAS_VAULT_ADDRESS } from '@/chains/secret4'
 import { codeHashFor } from '@/lib/codeHash'
 import { covers, type Permit } from '@/lib/permit'
-import { findRoutes, listPairs, quoteExactOut, type Quote } from '@/lib/shadeSwap'
+import { findRoutes, listPairs, quoteExactOut, type Quote, type Route } from '@/lib/shadeSwap'
 import { redeemMsg } from '@/lib/snip20'
 import { allTokenAddresses, SSCRT_ADDRESS, STKD_SCRT_ADDRESS } from '@/tokens/registry'
 
@@ -16,10 +16,22 @@ import { allTokenAddresses, SSCRT_ADDRESS, STKD_SCRT_ADDRESS } from '@/tokens/re
  * gas credits dialog, where someone picks the token themselves.
  */
 
-/** The swap's minimum return sits this far under its quote. */
-export const SLIPPAGE_BPS = 100n
-/** A trade that moves the pools' price by more than this is not made. */
-export const MAX_IMPACT_BPS = 300
+/**
+ * How far under its quote a swap's minimum return may sit, set per trade from
+ * how much that trade moves the pools' price: at least 1%, as much as the
+ * price impact above that, and never more than 5%. A trade that moves the
+ * price further than that still goes through at the price quoted — the impact
+ * is already in the quote — it just is not given more room than 5% on top.
+ */
+export const MIN_SLIPPAGE_BPS = 100
+export const MAX_SLIPPAGE_BPS = 500
+
+export function slippageFor(impactBps: number): bigint {
+  return BigInt(Math.min(MAX_SLIPPAGE_BPS, Math.max(MIN_SLIPPAGE_BPS, Math.ceil(impactBps))))
+}
+
+/** A quote with the slippage it was padded by. */
+export type PaddedQuote = Quote & { slippageBps: bigint }
 
 /** Unwrap plus the vault's execute; a swap adds its own. */
 export const PURCHASE_GAS = GAS.unwrap + GAS.buyGasCredit
@@ -96,17 +108,20 @@ export async function quoteInto(
   token: string,
   target: string,
   amount: bigint
-): Promise<Quote | undefined> {
+): Promise<PaddedQuote | undefined> {
   const pairs = await listPairs(client)
-  const padded = (amount * 10_000n) / (10_000n - SLIPPAGE_BPS)
-  const quotes = await Promise.all(
-    findRoutes(pairs, token, target)
-      .slice(0, 4)
-      .map((route) => quoteExactOut(client, route, padded).catch(() => undefined))
-  )
-  return quotes
-    .filter((quote): quote is Quote => quote !== undefined)
-    .sort((a, b) => (a.amountIn === b.amountIn ? 0 : a.amountIn < b.amountIn ? -1 : 1))[0]
+  const cheapest = async (routes: Route[], out: bigint) =>
+    (await Promise.all(routes.map((route) => quoteExactOut(client, route, out).catch(() => undefined))))
+      .filter((quote): quote is Quote => quote !== undefined)
+      .sort((a, b) => (a.amountIn === b.amountIn ? 0 : a.amountIn < b.amountIn ? -1 : 1))[0]
+
+  // The trade as asked, to see how much it moves the price; then the same
+  // route again, padded by the slippage that impact calls for.
+  const bare = await cheapest(findRoutes(pairs, token, target).slice(0, 4), amount)
+  if (!bare) return undefined
+  const slippageBps = slippageFor(bare.impactBps)
+  const padded = await cheapest([bare.route], (amount * 10_000n) / (10_000n - slippageBps))
+  return padded ? { ...padded, slippageBps } : undefined
 }
 
 /** `quoteInto` for sSCRT, which is what gas credits are bought with. */
@@ -114,6 +129,6 @@ export function quoteForSscrt(
   client: SecretNetworkClient,
   token: string,
   amount: bigint
-): Promise<Quote | undefined> {
+): Promise<PaddedQuote | undefined> {
   return quoteInto(client, token, SSCRT_ADDRESS, amount)
 }

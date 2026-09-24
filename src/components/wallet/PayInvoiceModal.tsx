@@ -9,9 +9,10 @@ import { explorerTxUrl } from '@/chains/secret4'
 import { useAssetBalance } from '@/hooks/useAssetBalance'
 import { useBalances } from '@/hooks/useBalances'
 import { usePermit } from '@/hooks/usePermit'
+import { cn } from '@/lib/cn'
 import { errorMessage } from '@/lib/errors'
 import { formatAmount, shortenAddress } from '@/lib/format'
-import { MAX_IMPACT_BPS, quoteInto, swappableTokens } from '@/lib/gasPurchase'
+import { quoteInto, swappableTokens } from '@/lib/gasPurchase'
 import { invoiceBaseUnits, type Invoice } from '@/lib/invoice'
 import { paymentMessages, settlementToken, type PaySource } from '@/lib/invoicePayment'
 import type { Quote } from '@/lib/shadeSwap'
@@ -212,9 +213,6 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
     if (quote.kind === 'unavailable') payError = 'ShadeSwap cannot fill this amount right now.'
     if (quote.kind === 'ready') {
       if (quote.quote.amountIn > (held.get(payWith) ?? 0n)) payError = `Not enough ${paySymbol}.`
-      else if (quote.quote.impactBps > MAX_IMPACT_BPS) {
-        payError = `This trade would move the price by ${(quote.quote.impactBps / 100).toFixed(1)}%.`
-      }
     }
   }
 
@@ -274,9 +272,30 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
 
   return (
     <>
-      <div className="flex flex-col items-center gap-3 rounded-card border border-border bg-surface px-4 py-5 text-center">
+      {/* The amount, in the same card Send and gas credits open with — fixed
+          here, since the invoice set it. */}
+      <div className="flex flex-col gap-4 rounded-card border border-border bg-surface p-4">
         <span className="text-label text-text-muted">You&rsquo;re paying</span>
-        <AssetAmount amount={invoice.amount} symbol={asset.symbol} image={asset.image} />
+        <div className="flex flex-col items-center gap-2 py-3">
+          <AssetAmount amount={invoice.amount} symbol={asset.symbol} image={asset.image} layout="stacked" />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="min-w-0 truncate text-label text-text-muted">To {shortenAddress(invoice.to)}</span>
+          <span
+            className={cn(
+              'flex shrink-0 items-center gap-1 rounded-pill border border-border px-2.5 py-1 text-label font-medium',
+              asset.private ? 'text-accent' : 'text-text-muted'
+            )}
+            title={
+              asset.private
+                ? 'A SNIP-20 transfer: the chain records a contract call, not who was paid or how much.'
+                : 'A bank transfer: the amount and both addresses are public.'
+            }
+          >
+            {asset.private ? <ShieldCheck size={12} aria-hidden /> : <Eye size={12} aria-hidden />}
+            {asset.private ? 'Private' : 'Public'}
+          </span>
+        </div>
       </div>
 
       {/* What pays for it — the same picker row as Send and gas credits. The
@@ -308,14 +327,15 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
       {/* A private balance is only readable with the query permit; one
           signature, no transaction — and it is also what lets other tokens pay. */}
       {!permit ? (
-        <button
-          type="button"
+        <Button
+          variant="text"
+          size="sm"
+          className="-mt-3 self-center"
+          loading={direct.signing}
           onClick={() => void direct.signPermit()}
-          disabled={direct.signing}
-          className="-mt-2 self-start text-label text-accent underline underline-offset-4 disabled:opacity-50"
         >
-          {direct.signing ? 'Signing…' : 'Sign the permit to pay with your private tokens'}
-        </button>
+          Sign permit to pay with private tokens
+        </Button>
       ) : null}
 
       {payError ? (
@@ -323,20 +343,6 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
           {payError}
         </span>
       ) : null}
-
-      <p className="flex items-start gap-2 text-label text-text-muted">
-        {asset.private ? (
-          <>
-            <ShieldCheck size={14} aria-hidden className="mt-px shrink-0 text-accent" />A SNIP-20 transfer is
-            encrypted. The chain records that you called the contract, not who was paid or how much.
-          </>
-        ) : (
-          <>
-            <Eye size={14} aria-hidden className="mt-px shrink-0" />
-            {asset.symbol} moves through the bank module, so the amount and both addresses are public.
-          </>
-        )}
-      </p>
 
       {status.kind === 'failed' ? (
         <p className="break-address text-base text-negative" role="alert">

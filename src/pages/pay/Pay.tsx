@@ -91,7 +91,12 @@ export default function Pay() {
             it is the part a payer can check, it just no longer has to lead.
           */}
           <div className="flex flex-col items-center gap-3 md:items-start">
-            <AssetAmount amount={invoice.amount} symbol={invoice.asset.symbol} image={invoice.asset.image} />
+            <AssetAmount
+              amount={invoice.amount}
+              symbol={invoice.asset.symbol}
+              image={invoice.asset.image}
+              className="md:justify-start"
+            />
             <span className="rounded-pill border border-border px-2 py-0.5 text-label text-text-muted">
               {invoice.asset.private ? 'Private transfer' : 'Public transfer'}
             </span>

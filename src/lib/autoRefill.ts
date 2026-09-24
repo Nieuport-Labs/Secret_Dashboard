@@ -6,11 +6,10 @@ import { estimateFee } from '@/lib/feegrant-sdk'
 import { MSG_EXECUTE_CONTRACT } from '@/lib/msgTypes'
 
 import {
-  MAX_IMPACT_BPS,
   PURCHASE_GAS,
   purchaseMessages,
   quoteForSscrt,
-  SLIPPAGE_BPS,
+  slippageFor,
   swappableTokens
 } from '@/lib/gasPurchase'
 import { loadPermit, type Permit } from '@/lib/permit'
@@ -135,9 +134,8 @@ interface SwapPlan {
  * position someone chose, not spare change.
  *
  * The chosen token pays for exactly `need` (plus slippage) when it can; when
- * it cannot, its whole balance goes, and the refill is smaller. A token whose
- * trade would move the pool's price by more than 3% is passed over for the
- * next one rather than sold at a bad rate.
+ * it cannot, its whole balance goes, and the refill is smaller. Slippage
+ * follows the trade's price impact (`slippageFor`).
  */
 async function planSwap(address: string, permit: Permit, need: bigint): Promise<SwapPlan | undefined> {
   const { queryClient } = useWallet.getState()
@@ -178,7 +176,7 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
     // Enough to cover `need` with room for slippage: pay only for that.
     const exact = await quoteForSscrt(queryClient, token, need)
 
-    if (exact && exact.amountIn <= balance && exact.impactBps <= MAX_IMPACT_BPS) {
+    if (exact && exact.amountIn <= balance) {
       return {
         message: await swapMessage(address, exact.route, exact.amountIn, need),
         gas: swapGas(exact.route),
@@ -187,8 +185,7 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
     }
 
     // Not enough of it, so all of it.
-    if (best.impactBps > MAX_IMPACT_BPS) continue
-    const minOut = (best.amountOut * (10_000n - SLIPPAGE_BPS)) / 10_000n
+    const minOut = (best.amountOut * (10_000n - slippageFor(best.impactBps))) / 10_000n
     if (minOut < MIN_SWAP_OUT) continue
     return {
       message: await swapMessage(address, best.route, best.amountIn, minOut),

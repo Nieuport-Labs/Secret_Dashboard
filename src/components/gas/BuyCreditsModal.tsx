@@ -19,13 +19,7 @@ import { useBalances } from '@/hooks/useBalances'
 import { cn } from '@/lib/cn'
 import { errorMessage } from '@/lib/errors'
 import { formatAmount, toBaseUnits } from '@/lib/format'
-import {
-  MAX_IMPACT_BPS,
-  PURCHASE_GAS,
-  purchaseMessages,
-  quoteForSscrt,
-  swappableTokens
-} from '@/lib/gasPurchase'
+import { PURCHASE_GAS, purchaseMessages, quoteForSscrt, swappableTokens } from '@/lib/gasPurchase'
 import { buyGasCredit } from '@/lib/gasVault'
 import { MSG_EXECUTE_CONTRACT } from '@/lib/msgTypes'
 import { swapGas, swapMessage, type Quote } from '@/lib/shadeSwap'
@@ -173,9 +167,6 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
       payError = 'ShadeSwap cannot fill this amount right now. Try a smaller one.'
     if (quote.kind === 'ready') {
       if (quote.quote.amountIn > (held.get(payWith) ?? 0n)) payError = `More ${paySymbol} than you hold.`
-      else if (quote.quote.impactBps > MAX_IMPACT_BPS) {
-        payError = `This trade would move the price by ${(quote.quote.impactBps / 100).toFixed(1)}%. Try a smaller amount.`
-      }
     }
   }
 
