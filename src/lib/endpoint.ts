@@ -19,6 +19,7 @@ const PROBE_TIMEOUT_MS = 8000
 
 /** A resolved endpoint is cached for the page load, not across reloads. */
 const resolved = new Map<string, Promise<string>>()
+const resolvedAll = new Map<string, Promise<string[]>>()
 
 /** Split a settings value. Endpoint settings accept a comma-separated list. */
 export function parseEndpointList(value: string | undefined | null): string[] {
@@ -113,6 +114,26 @@ export function resolveLcdUrl(overrides?: string): Promise<string> {
   return pending
 }
 
+/**
+ * Every candidate LCD that answers for this chain, probed together, in the
+ * order they were listed. For spreading independent reads across providers —
+ * see `queryClientPool` — never for choosing where to broadcast.
+ */
+export function resolveAllLcdUrls(overrides?: string): Promise<string[]> {
+  const candidates = parseEndpointList(overrides)
+  const list = candidates.length > 0 ? candidates : DEFAULT_LCD_URLS
+  const key = `lcd-all:${list.join(',')}`
+
+  const cached = resolvedAll.get(key)
+  if (cached) return cached
+
+  const pending = Promise.all(list.map(probeLcd)).then((results) =>
+    results.filter((result) => result.ok).map((result) => result.url)
+  )
+  resolvedAll.set(key, pending)
+  return pending
+}
+
 export function resolveRpcUrl(overrides?: string): Promise<string> {
   const candidates = parseEndpointList(overrides)
   const list = candidates.length > 0 ? candidates : DEFAULT_RPC_URLS
@@ -133,6 +154,7 @@ export function resolveRpcUrl(overrides?: string): Promise<string> {
 /** Forget resolved endpoints, e.g. after the user changes them in Settings. */
 export function forgetResolvedEndpoints(): void {
   resolved.clear()
+  resolvedAll.clear()
 }
 
 /** The Tendermint WebSocket for an RPC URL, which is where SNIP-52 listens. */

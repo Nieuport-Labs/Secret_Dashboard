@@ -11,7 +11,57 @@ import { allTokenAddresses, allTokens, tokenByAddress, type TokenInfo } from '@/
 import { tokenAddressForBankDenom } from '@/tokens/routes'
 import { DENOM } from '@/chains/secret4'
 import { useSettings } from '@/store/settings'
-import { useWallet } from '@/store/wallet'
+import { queryClientPool, useWallet } from '@/store/wallet'
+
+const CACHE_KEY = (address: string) => `secret-dashboard:balances:v1:${address}`
+
+/**
+ * The last balances read for an account, kept in this browser so the list is
+ * there the moment the page opens instead of after a sweep. Amounts only, for
+ * tokens that answered; the next read replaces them, and a token missing from
+ * it is not carried over. Nothing leaves the device: this is what the wallet
+ * screen already showed, stored where only this browser reads it.
+ */
+function cachedBalances(address: string): TokenBalance[] {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY(address))
+    if (!raw) return []
+    const entries = JSON.parse(raw) as Array<[string, string]>
+    return entries.flatMap(([contract, amount]) => {
+      const token = tokenByAddress(contract)
+      return token ? [{ token, outcome: { status: 'ok' as const, amount } }] : []
+    })
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Keep what a read found. A watchlist read covers fewer tokens than a sweep,
+ * so it updates the entries it read and keeps the others; a sweep replaces
+ * the lot.
+ */
+function rememberBalances(address: string, rows: TokenBalance[], sweep: boolean): void {
+  try {
+    const read = new Map(
+      rows.flatMap((row) =>
+        row.outcome.status === 'ok' ? [[row.token.address, row.outcome.amount] as const] : []
+      )
+    )
+    const kept = sweep
+      ? new Map<string, string>()
+      : new Map(
+          cachedBalances(address).map((row) => [
+            row.token.address,
+            (row.outcome as { amount: string }).amount
+          ])
+        )
+    for (const [contract, amount] of read) kept.set(contract, amount)
+    localStorage.setItem(CACHE_KEY(address), JSON.stringify([...kept].filter(([, amount]) => amount !== '0')))
+  } catch {
+    // Only a head start.
+  }
+}
 
 /** CoinGecko's id for SCRT itself. */
 const SCRT_PRICE_ID = 'secret'
@@ -150,6 +200,15 @@ export function useBalances(auth: Snip20Auth | undefined, owner?: string, contra
 
   const scanAll = useCallback(() => setRequest((r) => ({ nonce: r.nonce + 1, sweep: true })), [])
 
+  // Last visit's balances, on screen at once while this visit's read runs.
+  useEffect(() => {
+    if (!address || pinned || auth === undefined) return
+    const cached = cachedBalances(address)
+    if (cached.length > 0) setTokens((current) => (current.length > 0 ? current : cached))
+    // Once per account; the read that follows replaces these.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, authKey])
+
   useEffect(() => {
     if (!address) return
     const timer = setInterval(refresh, REFRESH_INTERVAL_MS)
@@ -243,14 +302,34 @@ export function useBalances(auth: Snip20Auth | undefined, owner?: string, contra
       }
       setScrtPrice(prices.get(SCRT_PRICE_ID))
 
-      const outcomes = await mapWithLimit(
-        contracts,
-        QUERY_CONCURRENCY,
-        async (contract) => [contract, await queryBalance(client, auth!, contract)] as const,
-        (done, total) => {
-          if (!cancelled && sweep) setScanProgress([done, total])
-        }
-      )
+      /*
+       * Spread across every LCD that answers, a lane of six each: a public
+       * node queues encrypted queries past a handful, so two providers finish
+       * a sweep in about half the time one does. A read another node could not
+       * answer is asked once more of the main one before it counts as failed.
+       */
+      const pool = await queryClientPool()
+      const lanes = pool.length > 0 ? pool : [client]
+      let done = 0
+      const outcomes = (
+        await Promise.all(
+          lanes.map((laneClient, lane) =>
+            mapWithLimit(
+              contracts.filter((_, index) => index % lanes.length === lane),
+              QUERY_CONCURRENCY,
+              async (contract) => {
+                let outcome = await queryBalance(laneClient, auth!, contract)
+                if (outcome.status === 'error' && laneClient !== client) {
+                  outcome = await queryBalance(client, auth!, contract)
+                }
+                done += 1
+                if (!cancelled && sweep) setScanProgress([done, contracts.length])
+                return [contract, outcome] as const
+              }
+            )
+          )
+        )
+      ).flat()
 
       if (cancelled) return
 
@@ -276,7 +355,10 @@ export function useBalances(auth: Snip20Auth | undefined, owner?: string, contra
       // Anything with a balance is worth reading again next time without a
       // sweep — but only when this read was the registry-wide kind. A pinned
       // read knows less than the watchlist does and must not overwrite it.
-      if (!pinned) rememberTokens(address, held)
+      if (!pinned) {
+        rememberTokens(address, held)
+        rememberBalances(address, rows, sweep)
+      }
 
       setTokens(rows)
       setLoading(false)

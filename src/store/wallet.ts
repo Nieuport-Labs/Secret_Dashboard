@@ -3,7 +3,7 @@ import { create } from 'zustand'
 
 import { CHAIN_ID } from '@/chains/secret4'
 import { forgetCodeHashes } from '@/lib/codeHash'
-import { describeNetworkError, resolveLcdUrl } from '@/lib/endpoint'
+import { describeNetworkError, resolveAllLcdUrls, resolveLcdUrl } from '@/lib/endpoint'
 import { connect, WalletNotInstalledError, type Connection, type WalletId } from '@/lib/wallet'
 import { useSettings } from '@/store/settings'
 
@@ -140,6 +140,39 @@ export const useWallet = create<WalletState>()((set, get) => ({
     })
   }
 }))
+
+const poolClients = new Map<string, Promise<SecretNetworkClient>>()
+
+/**
+ * Read-only clients for every LCD that answers, the resolved one first.
+ *
+ * A public node answers a handful of encrypted queries at a time and queues
+ * the rest, so a long run of independent reads — a registry-wide balance
+ * sweep — finishes sooner spread across providers than lined up at one.
+ * Falls back to the one client there is when nothing else answers.
+ */
+export async function queryClientPool(): Promise<SecretNetworkClient[]> {
+  const { queryClient } = useWallet.getState()
+  if (!queryClient) return []
+  try {
+    const primary = await resolveLcdUrl(useSettings.getState().lcdOverride)
+    const others = (await resolveAllLcdUrls(useSettings.getState().lcdOverride)).filter(
+      (url) => url !== primary
+    )
+    const extra = await Promise.all(
+      others.map((url) => {
+        const existing = poolClients.get(url)
+        if (existing) return existing
+        const built = buildQueryClient(url)
+        poolClients.set(url, built)
+        return built
+      })
+    )
+    return [queryClient, ...extra]
+  } catch {
+    return [queryClient]
+  }
+}
 
 /**
  * Drop everything keyed by the account and reconnect.
