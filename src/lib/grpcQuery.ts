@@ -9,7 +9,7 @@ import type { SecretNetworkClient } from 'secretjs'
  * server in between only ever holds ciphertext.
  *
  * Used where the LCD's URL limit bites — a batch of permit queries through the
- * batch router (`lib/batchQuery.ts`). If this path fails once, it is switched
+ * batch router (`lib/batchQuery.ts`). If this path keeps failing, it is switched
  * off for the page and everything goes back to the LCD.
  */
 
@@ -28,14 +28,24 @@ function encryption(client: SecretNetworkClient): Encryption {
   return (client as unknown as { encryptionUtils: Encryption }).encryptionUtils
 }
 
-let down = false
+/**
+ * Failures of the path itself in a row. A single one is a dropped connection
+ * or a cold function and is simply retried; this many in a row means the proxy
+ * or its node is really down, and the page stops using it.
+ */
+const FAILURES_TO_GIVE_UP = 3
+let failures = 0
 
 export function grpcAvailable(): boolean {
-  return !down
+  return failures < FAILURES_TO_GIVE_UP
 }
 
-export function markGrpcDown(): void {
-  down = true
+export function grpcFailed(): void {
+  failures += 1
+}
+
+export function grpcAnswered(): void {
+  if (failures < FAILURES_TO_GIVE_UP) failures = 0
 }
 
 function toBase64(bytes: Uint8Array): string {

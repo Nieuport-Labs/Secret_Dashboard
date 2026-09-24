@@ -190,7 +190,7 @@ export async function queryBalancesBatched(
       .map((address) => ({ id: address, contract: { address, codeHash: hashes.get(address)! }, query })),
     // Each permit is checked by signature inside the router's one query; ten
     // stays well inside a node's query gas, and a refused batch is halved.
-    { size: 10, onChunk: onProgress }
+    { size: 10, onChunk: onProgress, lcdFallback: false }
   )
 
   for (const address of asked) {

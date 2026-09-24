@@ -94,12 +94,30 @@ let session: ClientHttp2Session | undefined
 
 function sessionFor(): ClientHttp2Session {
   if (session && !session.closed && !session.destroyed) return session
-  session = connect(ENDPOINT)
-  session.on('error', () => {
+  const fresh = connect(ENDPOINT)
+  const forget = () => {
+    if (session === fresh) session = undefined
+  }
+  // A node closes idle connections (GOAWAY); a warm function must not keep
+  // handing out one that is going away.
+  fresh.on('error', forget)
+  fresh.on('goaway', forget)
+  fresh.on('close', forget)
+  fresh.unref()
+  session = fresh
+  return fresh
+}
+
+/** A connection that failed under a request is dropped, and the request tried once more on a new one. */
+async function unaryWithRetry(message: Buffer): Promise<Buffer> {
+  try {
+    return await unary(message)
+  } catch (error) {
+    if (error instanceof GrpcStatusError) throw error
+    session?.destroy()
     session = undefined
-  })
-  session.unref()
-  return session
+    return unary(message)
+  }
 }
 
 function unary(message: Buffer): Promise<Buffer> {
@@ -165,13 +183,14 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    const data = await unary(encodeRequest(body.contract, Buffer.from(body.query, 'base64')))
+    const data = await unaryWithRetry(encodeRequest(body.contract, Buffer.from(body.query, 'base64')))
     return json({ data: data.toString('base64') })
   } catch (error) {
     // A contract error comes back as a gRPC status carrying the (encrypted)
     // reason; the browser decrypts it. 502 says the chain answered; 503 says
     // the node could not be reached at all, so the browser stops using this.
     const message = error instanceof Error ? error.message : 'gRPC call failed'
+    if (!(error instanceof GrpcStatusError)) console.error('secret-query transport failure:', message)
     return json({ error: message }, error instanceof GrpcStatusError ? 502 : 503)
   }
 }

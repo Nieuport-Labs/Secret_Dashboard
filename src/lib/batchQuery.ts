@@ -1,7 +1,13 @@
 import type { SecretNetworkClient } from 'secretjs'
 
 import { codeHashFor } from '@/lib/codeHash'
-import { ContractQueryError, grpcAvailable, grpcQueryContract, markGrpcDown } from '@/lib/grpcQuery'
+import {
+  ContractQueryError,
+  grpcAnswered,
+  grpcAvailable,
+  grpcFailed,
+  grpcQueryContract
+} from '@/lib/grpcQuery'
 import { mapWithLimit } from '@/lib/concurrency'
 
 /**
@@ -122,6 +128,14 @@ async function throughRouter(
   return results
 }
 
+interface Via {
+  grpc: boolean
+  /** A gRPC chunk that failed once is asked once more before anything else. */
+  retried: boolean
+  /** Whether a chunk the gRPC path could not carry goes through the LCD here, or comes back failed. */
+  lcdFallback: boolean
+}
+
 /** Set once the router has failed outright this page load, so a missing router costs one attempt, not one per call. */
 let routerDown = false
 
@@ -129,23 +143,38 @@ async function run(
   client: SecretNetworkClient,
   chunk: BatchItem[],
   results: Map<string, BatchResult>,
-  viaGrpc: boolean
+  via: Via
 ): Promise<void> {
   if (!routerDown && chunk.length > 1) {
     try {
-      const answered = await throughRouter(client, chunk, viaGrpc)
+      const answered = await throughRouter(client, chunk, via.grpc)
+      if (via.grpc) grpcAnswered()
       for (const item of chunk) {
         results.set(item.id, answered.get(item.id) ?? { ok: false, error: 'No answer in the batch.' })
       }
       return
     } catch (error) {
-      // The gRPC path itself failing (not the chain answering with an error)
-      // switches it off, and this chunk goes the LCD way instead — re-chunked,
-      // since what fits in a request body may not fit in a URL.
-      if (viaGrpc && !(error instanceof ContractQueryError)) {
-        markGrpcDown()
+      if (via.grpc && !(error instanceof ContractQueryError)) {
+        // The gRPC path itself failed, not the chain. One hiccup — a dropped
+        // connection, a cold function — is asked again the same way; only
+        // repeated failures switch the path off (`grpcFailed`).
+        grpcFailed()
+        if (!via.retried && grpcAvailable()) {
+          await run(client, chunk, results, { ...via, retried: true })
+          return
+        }
+        if (!via.lcdFallback) {
+          // The caller reads these its own way (useBalances: hedged, across LCDs).
+          const message = error instanceof Error ? error.message : String(error)
+          for (const item of chunk) results.set(item.id, { ok: false, error: message })
+          return
+        }
+        // Through the LCD instead, re-chunked for the URL: what fits in a
+        // request body may not fit there.
         await Promise.all(
-          chunksOf(chunk, chunk.length, false).map((part) => run(client, part, results, false))
+          chunksOf(chunk, chunk.length, true).map((part) =>
+            run(client, part, results, { grpc: false, retried: false, lcdFallback: true })
+          )
         )
         return
       }
@@ -153,8 +182,8 @@ async function run(
       if (chunk.length >= SMALLEST_SPLIT * 2) {
         const half = Math.ceil(chunk.length / 2)
         await Promise.all([
-          run(client, chunk.slice(0, half), results, viaGrpc),
-          run(client, chunk.slice(half), results, viaGrpc)
+          run(client, chunk.slice(0, half), results, via),
+          run(client, chunk.slice(half), results, via)
         ])
         return
       }
@@ -197,7 +226,19 @@ function chunksOf(items: BatchItem[], size: number, inUrl: boolean): BatchItem[]
 export async function batchQuery(
   client: SecretNetworkClient,
   items: BatchItem[],
-  { size = BATCH_SIZE, onChunk }: { size?: number; onChunk?: (done: number, total: number) => void } = {}
+  {
+    size = BATCH_SIZE,
+    onChunk,
+    lcdFallback = true
+  }: {
+    size?: number
+    onChunk?: (done: number, total: number) => void
+    /**
+     * `false` returns what the gRPC path could not carry as failed, for the
+     * caller to read its own way, instead of sending it through the LCD here.
+     */
+    lcdFallback?: boolean
+  } = {}
 ): Promise<Map<string, BatchResult>> {
   const results = new Map<string, BatchResult>()
   if (items.length === 0) return results
@@ -206,7 +247,7 @@ export async function batchQuery(
   let done = 0
   // A few requests at a time, whatever they carry.
   await mapWithLimit(chunksOf(items, size, !viaGrpc), viaGrpc ? 8 : 3, async (chunk) => {
-    await run(client, chunk, results, viaGrpc)
+    await run(client, chunk, results, { grpc: viaGrpc, retried: false, lcdFallback })
     done += chunk.length
     onChunk?.(done, items.length)
   })

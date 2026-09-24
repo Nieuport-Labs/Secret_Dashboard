@@ -87,6 +87,101 @@ const items = (count: number) =>
     query: n === 3 ? { fail: true } : { n }
   }))
 
+/*
+ * The gRPC path (`lib/grpcQuery.ts`), faked end to end: the client's
+ * "encryption" is a 32-byte nonce in front of the JSON, and `fetch` plays the
+ * proxy, answering through the same fake router. These run first, while the
+ * path is still up for the page.
+ */
+const utf8 = new TextEncoder()
+const fromUtf8 = new TextDecoder()
+const b64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64')
+
+function grpcClient(fake: Fake): SecretNetworkClient {
+  const base = client(fake) as unknown as Record<string, unknown>
+  return {
+    ...base,
+    encryptionUtils: {
+      encrypt: async (_hash: string, message: object) =>
+        new Uint8Array([...new Uint8Array(32), ...utf8.encode(JSON.stringify(message))]),
+      decrypt: async (ciphertext: Uint8Array) => ciphertext
+    }
+  } as unknown as SecretNetworkClient
+}
+
+interface Proxy {
+  /** Answers 503 to this many requests before it works; `Infinity` never works. */
+  failFirst: number
+  calls: number
+}
+
+function proxy(fake: Fake, state: Proxy): void {
+  const lcd = client(fake)
+  globalThis.fetch = (async (_url: string, init: { body: string }) => {
+    state.calls += 1
+    if (state.calls <= state.failFirst) {
+      return new Response(JSON.stringify({ error: 'connection reset' }), { status: 503 })
+    }
+    const { contract, query } = JSON.parse(init.body) as { contract: string; query: string }
+    const message = JSON.parse(fromUtf8.decode(Buffer.from(query, 'base64').subarray(32))) as Query
+    const reply = await lcd.query.compute.queryContract({
+      contract_address: contract,
+      code_hash: 'h',
+      query: message
+    })
+    const data = b64(utf8.encode(b64(utf8.encode(JSON.stringify(reply)))))
+    return new Response(JSON.stringify({ data }), { status: 200 })
+  }) as unknown as typeof fetch
+}
+
+{
+  const { batchQuery } = await import(`../src/lib/batchQuery.ts?grpc${1}`)
+  const { grpcAvailable } = await import('@/lib/grpcQuery')
+  const fake: Fake = { routerLimit: 100, routerCalls: [], singleCalls: 0 }
+  const state: Proxy = { failFirst: 1, calls: 0 }
+  proxy(fake, state)
+  const results = await batchQuery(grpcClient(fake), items(10), { size: 10 })
+  check('gRPC: one failed request is asked again the same way', state.calls === 2 && fake.singleCalls === 0, {
+    state,
+    fake
+  })
+  check('gRPC: and answered', doubled(results.get('q9')) === 18)
+  check('gRPC: one hiccup does not switch the path off', grpcAvailable())
+}
+
+{
+  const { batchQuery } = await import(`../src/lib/batchQuery.ts?grpc${2}`)
+  const fake: Fake = { routerLimit: 100, routerCalls: [], singleCalls: 0 }
+  proxy(fake, { failFirst: Infinity, calls: 0 })
+  const results = await batchQuery(grpcClient(fake), items(5), { size: 10, lcdFallback: false })
+  check(
+    'gRPC: without LCD fallback, what it could not carry comes back failed, for the caller',
+    fake.singleCalls === 0 && fake.routerCalls.length === 0 && results.get('q0')?.ok === false,
+    fake
+  )
+}
+
+{
+  const { batchQuery } = await import(`../src/lib/batchQuery.ts?grpc${3}`)
+  const { grpcAvailable } = await import('@/lib/grpcQuery')
+  const fake: Fake = { routerLimit: 100, routerCalls: [], singleCalls: 0 }
+  proxy(fake, { failFirst: Infinity, calls: 0 })
+  const permit = 'x'.repeat(4_000)
+  const big = Array.from({ length: 6 }, (_, n) => ({
+    id: `g${n}`,
+    contract: { address: `secret1g${n}`, codeHash: 'h' },
+    query: { n, permit }
+  }))
+  const results = await batchQuery(grpcClient(fake), big, { size: 10 })
+  check(
+    'gRPC: falling back to the LCD, permit queries are not batched into a URL',
+    fake.routerCalls.length === 0 && fake.singleCalls === 6,
+    fake
+  )
+  check('gRPC: and answered', doubled(results.get('g5')) === 10)
+  check('gRPC: repeated failures switch the path off', !grpcAvailable())
+}
+
 {
   const { batchQuery } = await import(`../src/lib/batchQuery.ts?${Date.now()}`)
   const fake: Fake = { routerLimit: 100, routerCalls: [], singleCalls: 0 }
