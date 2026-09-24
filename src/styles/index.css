@@ -86,32 +86,23 @@
 }
 
 /*
- * The featured card's weather.
+ * The featured card's windows fanning out.
  *
- * Two accent-coloured clouds drifting behind a blurred pane, on a very long
- * cycle. The point is that the card is never quite the same twice without ever
- * being a thing that moves — anything faster than this reads as an
- * advertisement and the eye starts refusing it. Reduced motion stops it dead,
- * via the global rule at the bottom of this file, and what is left is a still
- * gradient that was always the composition.
+ * All three rise from one point below the middle of the stage and travel up
+ * and outwards to their own offsets, once, as the card appears. `backwards`
+ * fill rather than `forwards`: once the animation is over the resting
+ * transform belongs to the element's own style again, so the hover spread
+ * below can transition from it. Reduced motion shortens this to nothing,
+ * which leaves the windows already in place.
  */
-@keyframes featured-drift-a {
-  0%,
-  100% {
-    transform: translate3d(-6%, -12%, 0) scale(1);
+@keyframes featured-fan {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 4rem)) scale(0.7);
   }
-  50% {
-    transform: translate3d(14%, 8%, 0) scale(1.25);
-  }
-}
-
-@keyframes featured-drift-b {
-  0%,
-  100% {
-    transform: translate3d(12%, 14%, 0) scale(1.15);
-  }
-  50% {
-    transform: translate3d(-10%, -6%, 0) scale(0.9);
+  to {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--x)), calc(-50% + var(--y))) rotate(var(--r)) scale(0.85);
   }
 }
 
@@ -289,10 +280,9 @@
   }
 
   /*
-   * A surface with that weather inside it. The blobs are pseudo-elements so the
-   * card's own markup stays a link with a heading in it, and `isolation`
-   * confines the whole effect to this element's stacking context — otherwise
-   * the negative z-index would put them behind the page instead.
+   * The featured card: a still accent glow in one corner, and a stage the
+   * dashboard's miniatures sit on. `isolation` keeps the glow's negative
+   * z-index inside the card instead of behind the page.
    */
   .featured-surface {
     position: relative;
@@ -300,32 +290,86 @@
     overflow: hidden;
   }
 
-  .featured-surface::before,
-  .featured-surface::after {
+  .featured-surface::before {
     content: '';
     position: absolute;
     z-index: -1;
+    right: -10%;
+    top: -20%;
     width: 60%;
     padding-bottom: 60%;
     border-radius: var(--radius-pill);
-    filter: blur(60px);
-    will-change: transform;
-  }
-
-  .featured-surface::before {
-    top: -30%;
-    left: -5%;
     background: var(--color-accent);
-    opacity: 0.28;
-    animation: featured-drift-a 22s var(--ease-standard) infinite;
+    opacity: 0.08;
+    filter: blur(80px);
   }
 
-  .featured-surface::after {
-    right: -10%;
-    bottom: -40%;
-    background: var(--color-accent-strong);
-    opacity: 0.2;
-    animation: featured-drift-b 28s var(--ease-standard) infinite;
+  /*
+   * Hover adds a further nudge, up and away from the others (--hx, --hy),
+   * rather than scaling the resting offset — scaling would push the front
+   * window down, since it sits below the middle.
+   */
+  .featured-window {
+    --dx: 0rem;
+    --dy: 0rem;
+    position: absolute;
+    left: 50%;
+    /* Below the middle, so the windows read as rising out of the card. */
+    top: calc(50% + 1.75rem);
+    display: block;
+    width: 17.5rem;
+    padding: 1rem;
+    border-radius: var(--radius-card);
+    border: 1px solid var(--color-border);
+    /* Surfaces are translucent tokens; laid over the page colour so the windows
+       stacked behind do not show through. */
+    background: linear-gradient(var(--color-surface-1), var(--color-surface-1)), var(--color-bg);
+    box-shadow: var(--shadow-panel);
+    transform: translate(calc(-50% + var(--x) + var(--dx)), calc(-50% + var(--y) + var(--dy))) rotate(var(--r))
+      scale(0.85);
+    transition: transform var(--duration-long) var(--ease-standard);
+    animation: featured-fan 900ms var(--ease-standard) backwards;
+  }
+
+  .group:hover .featured-window {
+    --dx: var(--hx);
+    --dy: var(--hy);
+  }
+
+  /* Validator, back left. */
+  .featured-window--a {
+    --x: -4.25rem;
+    --y: -0.75rem;
+    --r: -7deg;
+    --hx: -1rem;
+    --hy: -0.75rem;
+    z-index: 1;
+    animation-delay: 80ms;
+  }
+
+  /* Send, back right. */
+  .featured-window--b {
+    --x: 5rem;
+    --y: -1.5rem;
+    --r: 7deg;
+    --hx: 1rem;
+    --hy: -0.75rem;
+    z-index: 2;
+    width: 14rem;
+    animation-delay: 160ms;
+  }
+
+  /* Receive, in front. */
+  .featured-window--c {
+    --x: 0.5rem;
+    --y: 2.25rem;
+    --r: -1deg;
+    --hx: 0rem;
+    --hy: -0.5rem;
+    z-index: 3;
+    width: 20rem;
+    background: linear-gradient(var(--color-surface-2), var(--color-surface-2)), var(--color-bg);
+    animation-delay: 240ms;
   }
 
   .state-layer {

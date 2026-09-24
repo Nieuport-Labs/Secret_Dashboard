@@ -1,39 +1,19 @@
-import { ArrowUpRight, Search } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { ArrowLeftRight, ArrowUpRight, Copy, EyeOff, ReceiptText, Search, X } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { DISPLAY_DENOM } from '@/chains/secret4'
-import { collectTags, featuredDapp, fetchDapps, WHERE_TO_BUY, type Dapp } from '@/lib/dapps'
+import { collectTags, DAPPS, FEATURED, WHERE_TO_BUY, type Dapp } from '@/lib/dapps'
 import { cn } from '@/lib/cn'
-import { errorMessage } from '@/lib/errors'
 
 /** Secret dApps, and where to get SCRT if you have none. */
 export default function Ecosystem() {
-  const [dapps, setDapps] = useState<Dapp[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | undefined>()
   const [query, setQuery] = useState('')
   const [tag, setTag] = useState<string | undefined>()
 
-  useEffect(() => {
-    let cancelled = false
-    fetchDapps()
-      .then((list) => {
-        if (!cancelled) setDapps(list)
-      })
-      .catch((caught: unknown) => {
-        if (!cancelled) setError(errorMessage(caught))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
+  const dapps = DAPPS
+  const featured = FEATURED
   const tags = useMemo(() => collectTags(dapps), [dapps])
-  const featured = useMemo(() => featuredDapp(dapps), [dapps])
 
   const filtering = Boolean(query.trim() || tag)
 
@@ -55,7 +35,7 @@ export default function Ecosystem() {
     <div className="mx-auto flex max-w-[1180px] flex-col gap-10">
       <h1 className="text-display">Ecosystem</h1>
 
-      {!filtering ? <FeaturedApp dapp={featured} loading={loading} /> : null}
+      {!filtering ? <FeaturedApp dapp={featured} /> : null}
 
       <section className="flex flex-col gap-5">
         <div className="flex items-center gap-2.5 rounded-control border border-border bg-surface px-3 py-2">
@@ -81,18 +61,7 @@ export default function Ecosystem() {
           </div>
         ) : null}
 
-        {loading ? (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy>
-            {[0, 1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="h-24 animate-pulse card" />
-            ))}
-          </div>
-        ) : error ? (
-          <p className="card p-4 text-base text-text-muted" role="alert">
-            {error} This is the published registry, not something this dashboard maintains, so it may simply
-            be unreachable right now.
-          </p>
-        ) : visible.length === 0 ? (
+        {visible.length === 0 ? (
           <p className="card p-4 text-base text-text-muted">
             Nothing matches. {dapps.length} apps are listed in total.
           </p>
@@ -169,51 +138,153 @@ export default function Ecosystem() {
  * The one app the page puts its arm around.
  *
  * A promotional slot, and it says so: "Featured" in the corner, so nobody
- * mistakes the top of the page for the most-used app or the one this dashboard
- * endorses hardest. Everything in it — name, description, icon, link — comes
- * from the same registry as the grid below, so it cannot drift out of date on
- * its own.
+ * mistakes the top of the page for the most-used app. Name, description, icon
+ * and link come from the same list as the grid below.
  *
- * The motion is in CSS (`.featured-surface`), not here: two accent clouds
- * drifting on a twenty-second cycle behind the text, which stops entirely for
- * anyone who has asked for reduced motion.
+ * The right-hand side is a still life of the dashboard itself — a validator,
+ * Send and Receive, drawn as inert miniatures rather than the real panels,
+ * which would need a wallet to render. They fan out from one another as the
+ * card appears and a little further on hover; the motion lives in CSS
+ * (`.featured-window`) and reduced motion leaves them already fanned out.
  */
-function FeaturedApp({ dapp, loading }: { dapp: Dapp; loading: boolean }) {
-  if (loading) return <div className="h-40 animate-pulse card sm:h-44" aria-busy />
-
+function FeaturedApp({ dapp }: { dapp: Dapp }) {
   return (
     <a
       href={dapp.link}
       target="_blank"
       rel="noreferrer noopener"
-      className={cn(
-        'featured-surface card group flex flex-col gap-5 p-6 sm:flex-row sm:items-center sm:gap-7 sm:p-8',
-        'transition-transform duration-[var(--duration-medium)] ease-[var(--ease-standard)]',
-        'motion-safe:hover:-translate-y-0.5'
-      )}
+      className="featured-surface card group relative flex flex-col sm:h-52 sm:flex-row sm:items-center"
     >
-      <DappIcon dapp={dapp} size="lg" />
+      <div className="relative z-10 flex min-w-0 items-center gap-5 p-6 sm:w-[50%] sm:shrink-0 sm:p-7">
+        <DappIcon dapp={dapp} size="lg" />
 
-      <div className="min-w-0 flex-1">
-        <p className="text-label font-medium uppercase tracking-[0.12em] text-accent">Featured</p>
-        <h2 className="mt-1.5 flex items-center gap-2 text-headline">
-          <span className="truncate">{dapp.name}</span>
-          <ArrowUpRight
-            size={20}
-            aria-hidden
-            className={cn(
-              'shrink-0 text-text-muted',
-              'transition-transform duration-[var(--duration-short)] ease-[var(--ease-standard)]',
-              'motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:-translate-y-0.5'
-            )}
-          />
-        </h2>
-        <p className="mt-2 max-w-[60ch] text-base text-text-muted">{dapp.description}</p>
-        {dapp.tags.length > 0 ? (
-          <p className="mt-3 text-label text-text-faint">{dapp.tags.join(' · ')}</p>
-        ) : null}
+        <div className="min-w-0">
+          <p className="text-label font-medium uppercase tracking-[0.12em] text-accent">Featured</p>
+          <h2 className="mt-1.5 flex items-center gap-2 text-headline">
+            <span className="truncate">{dapp.name}</span>
+            <ArrowUpRight
+              size={20}
+              aria-hidden
+              className={cn(
+                'shrink-0 text-text-muted',
+                'transition-transform duration-[var(--duration-short)] ease-[var(--ease-standard)]',
+                'motion-safe:group-hover:translate-x-0.5 motion-safe:group-hover:-translate-y-0.5'
+              )}
+            />
+          </h2>
+          <p className="mt-1.5 line-clamp-2 max-w-[48ch] text-base text-text-muted">{dapp.description}</p>
+          {dapp.tags.length > 0 ? (
+            <p className="mt-2 text-label text-text-faint">{dapp.tags.join(' · ')}</p>
+          ) : null}
+        </div>
+      </div>
+
+      <div aria-hidden className="featured-stage relative h-44 shrink-0 sm:h-auto sm:min-w-0 sm:flex-1 sm:self-stretch">
+        <ValidatorWindow />
+        <SendWindow />
+        <ReceiveWindow />
       </div>
     </a>
+  )
+}
+
+/** Grey bars standing in for text the miniature does not need to say. */
+function Lines({ widths }: { widths: string[] }) {
+  return (
+    <span className="flex flex-col gap-1.5">
+      {widths.map((width, i) => (
+        <span key={i} className="block h-1.5 rounded-pill bg-surface-3" style={{ width }} />
+      ))}
+    </span>
+  )
+}
+
+function ValidatorWindow() {
+  return (
+    <span className="featured-window featured-window--a">
+      <span className="flex items-center gap-2.5">
+        <span className="size-8 shrink-0 rounded-pill bg-accent-container" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold">Validator</span>
+          <span className="block truncate text-[11px] text-text-muted">5.0% commission · 5.4% voting power</span>
+        </span>
+        <X size={12} className="shrink-0 text-text-faint" />
+      </span>
+      <span className="mt-4 block">
+        <Lines widths={['95%', '88%', '70%', '52%']} />
+      </span>
+      <span className="mt-4 flex gap-2">
+        <span className="flex-1 rounded-control bg-accent-container py-1.5 text-center text-xs font-medium text-accent">
+          Stake
+        </span>
+        <span className="flex-1 rounded-control bg-surface-2 py-1.5 text-center text-xs font-medium text-text-muted">
+          Unstake
+        </span>
+      </span>
+      <span className="mt-3 block text-[11px] text-text-muted">Amount</span>
+      <span className="mt-1 block rounded-control bg-surface-2 px-2.5 py-1.5 text-xs text-text-faint">0.0</span>
+    </span>
+  )
+}
+
+function SendWindow() {
+  return (
+    <span className="featured-window featured-window--b">
+      <span className="block text-base font-semibold">Send</span>
+      <span className="mt-3 block rounded-control bg-surface-2 p-3">
+        <span className="block text-[11px] text-text-muted">You&rsquo;re sending</span>
+        <span className="mt-2 block text-right text-3xl font-semibold text-text-muted">0</span>
+        <span className="mt-1 block text-right text-[11px] text-text-faint">SCRT</span>
+      </span>
+      <span className="mt-3 flex justify-end gap-1.5">
+        {['25%', '50%', 'Max'].map((label) => (
+          <span key={label} className="rounded-pill border border-border px-2 py-0.5 text-[10px] text-text-muted">
+            {label}
+          </span>
+        ))}
+      </span>
+      <span className="mt-3 block">
+        <Lines widths={['80%', '60%']} />
+      </span>
+    </span>
+  )
+}
+
+function ReceiveWindow() {
+  return (
+    <span className="featured-window featured-window--c">
+      <span className="flex items-center justify-between">
+        <span className="text-base font-semibold">Receive</span>
+        <X size={12} className="text-text-faint" />
+      </span>
+      <span className="mt-3 flex gap-3">
+        <span className="flex size-24 shrink-0 items-center justify-center gap-1 rounded-control bg-surface-2 text-[11px] text-text-muted">
+          <EyeOff size={12} />
+          Hidden
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[11px] text-text-muted">Your address</span>
+          <span className="mt-1 block truncate font-mono text-[11px]">secret1••••••…••••</span>
+          <span className="mt-2 inline-flex items-center gap-1 rounded-control bg-surface-2 px-2 py-1 text-[11px] font-medium">
+            <Copy size={11} />
+            Copy address
+          </span>
+          <span className="mt-2 block">
+            <Lines widths={['100%', '85%']} />
+          </span>
+        </span>
+      </span>
+      <span className="mt-3 flex gap-2">
+        <span className="flex flex-1 items-center justify-center gap-1.5 rounded-pill bg-surface-2 py-1.5 text-[11px] font-medium">
+          <ArrowLeftRight size={11} />
+          Bridge in
+        </span>
+        <span className="flex flex-1 items-center justify-center gap-1.5 rounded-pill bg-accent py-1.5 text-[11px] font-medium text-accent-text">
+          <ReceiptText size={11} />
+          Create invoice
+        </span>
+      </span>
+    </span>
   )
 }
 
