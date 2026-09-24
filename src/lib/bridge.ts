@@ -42,6 +42,13 @@ export interface Leg {
   transfer: HookedTransfer
   /** Overrides the chain default when the route names its own channel. */
   channel?: string
+  /**
+   * Set when the packet goes through another chain first — `transfer` is
+   * then already the forwarding memo. For following it: the chain it passes
+   * through, the channel that chain sends it on over, and who it is finally
+   * for.
+   */
+  forward?: { via: SourceChain; channel: string; receiver: string }
 }
 
 export interface SendOptions {
@@ -93,7 +100,7 @@ export async function sendDeposit({
   const tracker = trackTx({
     label: summary?.label ?? `Bridge from ${chain.name}`,
     detail: summary?.detail,
-    chains: [chain.name, 'Secret']
+    chains: [chain.name, ...(legs[0].forward ? [legs[0].forward.via.name] : []), 'Secret']
   })
   try {
     const messages = legs.map((leg) => ({
@@ -142,12 +149,25 @@ export async function sendDeposit({
     // one, travels on its own and is not what the card is about.
     const [packet] = sentPackets(result.events as readonly TxEvent[], legs[0].channel ?? chain.depositChannel)
     if (packet) {
+      const hop = legs[0].forward
       void followPacket(
         tracker,
         packet,
-        [{ chainId: CHAIN_ID, name: 'Secret', lcds: DEFAULT_LCD_URLS }],
+        [
+          ...(hop
+            ? [
+                {
+                  chainId: hop.via.chainId,
+                  name: hop.via.name,
+                  lcds: [hop.via.lcd],
+                  forwardChannel: hop.channel
+                }
+              ]
+            : []),
+          { chainId: CHAIN_ID, name: 'Secret', lcds: DEFAULT_LCD_URLS }
+        ],
         2,
-        legs[0].transfer.receiver
+        hop?.receiver ?? legs[0].transfer.receiver
       )
     } else {
       tracker.stall('Sent, but the transfer could not be found in the transaction to follow it.')

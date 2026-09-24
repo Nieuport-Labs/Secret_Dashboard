@@ -32,7 +32,9 @@ export interface Route {
   needsSkip?: boolean
   /**
    * Not the far end's own channel: the packet goes to the token's home chain
-   * first, which passes it on over `channel` — see `FORWARDS` below.
+   * first, which passes it on over `channel` — see `FORWARDS` below. On a
+   * withdrawal that is the home chain's channel to the destination; on a
+   * deposit, its channel to Secret.
    */
   forward?: { via: string; channel: string }
 }
@@ -413,7 +415,10 @@ export const DEPOSIT_ROUTES: Route[] = [
   {
     token: 'secret1l5d0vncwnlln0tz0m4tp9rgm740xl7th6es0q0',
     chainId: 'osmosis-1',
-    denom: 'ibc/D176154B0C63D1F9C6DCFB4F70349EBF2E2B5A87A05902F57A6AE92B863E9AEC',
+    // stTIA as Osmosis knows it — transfer/channel-326/stutia. The reference
+    // table carried stOSMO's voucher here (…D176154B…), checked on Osmosis's
+    // own denom traces on 2026-09-24.
+    denom: 'ibc/698350B8A61D575025F3ED13E9AC9C0F45C89DEFE92F76D5838F1D3C1A7FF7C9',
     needsSkip: true
   },
   { token: 'secret1l5d0vncwnlln0tz0m4tp9rgm740xl7th6es0q0', chainId: 'stride-1', denom: 'stutia' },
@@ -2312,73 +2317,130 @@ function index(routes: Route[]): Map<string, Route[]> {
  * Cosmos kind (Injective, Evmos) is left out: the hop address below is derived
  * from the recipient's, and there it would not be theirs.
  */
-const FORWARDS: Array<{ token: string; via: string; channel: string; to: string }> = [
+interface Forward {
+  token: string
+  /** The token's home chain, which does the forwarding both ways. */
+  via: string
+  /** Home chain → Osmosis. */
+  toOsmosis: string
+  /** Home chain → Secret — the far end of Secret's own channel to it. */
+  toSecret: string
+  /** The token as Osmosis holds it, and Osmosis's channel to the home chain. */
+  onOsmosis: { denom: string; channel: string }
+}
+
+const FORWARDS: Forward[] = [
   // ATOM, over Cosmos Hub.
   {
     token: 'secret19e75l25r6sa6nhdf4lggjmgpw0vmpfvsw5cnpe',
     via: 'cosmoshub-4',
-    channel: 'channel-141',
-    to: 'osmosis-1'
+    toOsmosis: 'channel-141',
+    toSecret: 'channel-235',
+    onOsmosis: {
+      denom: 'ibc/27394FB092D2ECCD56123C74F36E4C1F926001CEADA9CA97EA622B25F41E5EB2',
+      channel: 'channel-0'
+    }
   },
   // USDC, over Noble.
   {
     token: 'secret1chsejpk9kfj4vt9ec6xvyguw539gsdtr775us2',
     via: 'noble-1',
-    channel: 'channel-1',
-    to: 'osmosis-1'
+    toOsmosis: 'channel-1',
+    toSecret: 'channel-17',
+    onOsmosis: {
+      denom: 'ibc/498A0751C798A0D9A389AA3691123DADA57DAA4FE165D5C75894505B876BA6E4',
+      channel: 'channel-750'
+    }
   },
   // TIA, over Celestia.
   {
     token: 'secret1s9h6mrp4k9gll4zfv5h78ll68hdq8ml7jrnn20',
     via: 'celestia',
-    channel: 'channel-2',
-    to: 'osmosis-1'
+    toOsmosis: 'channel-2',
+    toSecret: 'channel-14',
+    onOsmosis: {
+      denom: 'ibc/D79E7D83AB399BFFF93433E54FAA480C191248FC556924A2A8351AE2638B3877',
+      channel: 'channel-6994'
+    }
   },
   // stATOM and stTIA, over Stride.
   {
     token: 'secret155w9uxruypsltvqfygh5urghd5v0zc6f9g69sq',
     via: 'stride-1',
-    channel: 'channel-5',
-    to: 'osmosis-1'
+    toOsmosis: 'channel-5',
+    toSecret: 'channel-40',
+    onOsmosis: {
+      denom: 'ibc/C140AFD542AE77BD7DCC83F13FDD8C5E5BB8C4929785E6EC2F4C636F98F17901',
+      channel: 'channel-326'
+    }
   },
   {
     token: 'secret1l5d0vncwnlln0tz0m4tp9rgm740xl7th6es0q0',
     via: 'stride-1',
-    channel: 'channel-5',
-    to: 'osmosis-1'
+    toOsmosis: 'channel-5',
+    toSecret: 'channel-40',
+    onOsmosis: {
+      denom: 'ibc/698350B8A61D575025F3ED13E9AC9C0F45C89DEFE92F76D5838F1D3C1A7FF7C9',
+      channel: 'channel-326'
+    }
   }
 ]
 
+const OSMOSIS = 'osmosis-1'
+
+/** A real single-hop route between the pair, which a forward must not shadow. A needsSkip entry is the multi-hop placeholder a forward replaces, not a route. */
+function hasDirect(routes: Route[], token: string, chainId: string): boolean {
+  return routes.some((route) => route.token === token && route.chainId === chainId && !route.needsSkip)
+}
+
 /**
- * The forwards as withdraw routes to their final chain. The denomination and
- * channel are the first hop's, since that is the packet Secret actually sends.
- * A forward whose first hop is missing, or which would shadow a direct route,
- * is dropped rather than guessed at.
+ * The forwards as withdraw routes to Osmosis. The denomination and channel
+ * are the first hop's, since that is the packet Secret actually sends. A
+ * forward whose first hop is missing is dropped rather than guessed at.
  */
-const FORWARDED_WITHDRAW_ROUTES: Route[] = FORWARDS.flatMap(({ token, via, channel, to }) => {
+const FORWARDED_WITHDRAW_ROUTES: Route[] = FORWARDS.flatMap(({ token, via, toOsmosis }) => {
   const first = WITHDRAW_ROUTES.find(
     (route) => route.token === token && route.chainId === via && !route.needsSkip
   )
-  // A needsSkip entry for the same pair is the multi-hop placeholder this replaces, not a direct route.
-  const direct = WITHDRAW_ROUTES.some(
-    (route) => route.token === token && route.chainId === to && !route.needsSkip
-  )
-  if (!first || direct) return []
+  if (!first || hasDirect(WITHDRAW_ROUTES, token, OSMOSIS)) return []
   return [
     {
       token,
-      chainId: to,
+      chainId: OSMOSIS,
       denom: first.denom,
       channel: first.channel,
       gas: first.gas,
-      forward: { via, channel }
+      forward: { via, channel: toOsmosis }
     }
   ]
 })
 
+/**
+ * And the other way: from Osmosis, through the home chain, to Secret. The
+ * packet Osmosis sends carries the token as Osmosis knows it, over Osmosis's
+ * channel to the home chain; `forward.channel` is the home chain's to Secret.
+ * Every channel and denomination here was read off the chains themselves on
+ * 2026-09-24 — each channel open, each pointing where its name says, and each
+ * Osmosis denomination the hash of that channel's path to the base token.
+ */
+const FORWARDED_DEPOSIT_ROUTES: Route[] = FORWARDS.flatMap(({ token, via, toSecret, onOsmosis }) =>
+  hasDirect(DEPOSIT_ROUTES, token, OSMOSIS)
+    ? []
+    : [
+        {
+          token,
+          chainId: OSMOSIS,
+          denom: onOsmosis.denom,
+          channel: onOsmosis.channel,
+          forward: { via, channel: toSecret }
+        }
+      ]
+)
+
+const INBOUND_ROUTES = [...DEPOSIT_ROUTES, ...FORWARDED_DEPOSIT_ROUTES]
 const OUTBOUND_ROUTES = [...WITHDRAW_ROUTES, ...FORWARDED_WITHDRAW_ROUTES]
 
-const DEPOSITS_BY_TOKEN = index(DEPOSIT_ROUTES)
+const DEPOSITS_BY_TOKEN = index(INBOUND_ROUTES)
 const WITHDRAWALS_BY_TOKEN = index(OUTBOUND_ROUTES)
 
 /** Chains this token can be bridged in from. Single-hop routes only. */
@@ -2396,12 +2458,12 @@ export function depositRoute(token: string, chainId: string): Route | undefined 
 
 /** Every token that can be bridged in from this chain. */
 export function tokensFromChain(chainId: string): string[] {
-  return [...new Set(DEPOSIT_ROUTES.filter((r) => r.chainId === chainId && !r.needsSkip).map((r) => r.token))]
+  return [...new Set(INBOUND_ROUTES.filter((r) => r.chainId === chainId && !r.needsSkip).map((r) => r.token))]
 }
 
 /** Every chain any token can be bridged in from. */
 export function chainsWithDeposits(): string[] {
-  return [...new Set(DEPOSIT_ROUTES.filter((r) => !r.needsSkip).map((r) => r.chainId))]
+  return [...new Set(INBOUND_ROUTES.filter((r) => !r.needsSkip).map((r) => r.chainId))]
 }
 
 export function withdrawRoute(token: string, chainId: string): Route | undefined {

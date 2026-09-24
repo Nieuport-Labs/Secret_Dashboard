@@ -23,7 +23,8 @@ import { codeHashFor } from '@/lib/codeHash'
 import { errorMessage } from '@/lib/errors'
 import { fittingGasSliceUsd, quoteGasSlice, shouldOfferGas } from '@/lib/getGas'
 import { formatAmount, fromBaseUnits, shortenAddress, toBaseUnits } from '@/lib/format'
-import { plainTransfer, wrapDepositMemo } from '@/lib/ibcMemo'
+import { forwardedTransfer, plainTransfer, wrapDepositMemo } from '@/lib/ibcMemo'
+import { decodeBech32, encodeBech32 } from '@/lib/bech32'
 import { MSG_EXECUTE_CONTRACT, MSG_TRANSFER } from '@/lib/msgTypes'
 import { fetchPrices } from '@/lib/prices'
 import { fetchSkipGasLeg, fetchSkipGasRoute, planSkipAddresses, type SkipGasRoute } from '@/lib/skipGo'
@@ -328,13 +329,30 @@ export default function Bridge() {
         // The main transfer, wrapped on arrival when asked. The code hash is
         // read from the chain: a stale one makes the hook fail and the tokens
         // land public instead, the opposite of what was asked for.
+        const direct = wrap
+          ? wrapDepositMemo(token.address, await codeHashFor(queryClient, token.address), secretAddress)
+          : plainTransfer(secretAddress)
+
+        // Through the token's home chain, when that is the route: the same
+        // transfer, handed to the home chain to pass on — the wrap hook rides
+        // along to Secret untouched. The gas leg below is its own packet and
+        // is planned by Skip exactly as before.
+        const via = route.forward ? sourceChain(route.forward.via) : undefined
+        const hopKey = decodeBech32(source.address)
+        if (route.forward && (!via || !hopKey)) throw new Error('This route cannot be sent right now.')
+
         legs.push({
           denom: route.denom,
           amount: mainAmount,
           channel: route.channel,
-          transfer: wrap
-            ? wrapDepositMemo(token.address, await codeHashFor(queryClient, token.address), secretAddress)
-            : plainTransfer(secretAddress)
+          transfer:
+            route.forward && via && hopKey
+              ? forwardedTransfer(direct, encodeBech32(via.prefix, hopKey.bytes), route.forward.channel)
+              : direct,
+          forward:
+            route.forward && via
+              ? { via, channel: route.forward.channel, receiver: direct.receiver }
+              : undefined
         })
 
         if (useGas) {
@@ -361,7 +379,7 @@ export default function Bridge() {
           chain,
           sender: source.address,
           legs,
-          gasLimit: depositGasLimit(chain, route, legs.length, wrap),
+          gasLimit: depositGasLimit(chain, route, legs.length, wrap || Boolean(route.forward)),
           summary: {
             label: `Bridge ${amount} ${token.symbol} from ${chain.name}`,
             detail: `to ${shortenAddress(secretAddress)}${wrap ? ', wrapped on arrival' : ''}`
@@ -757,6 +775,19 @@ export default function Bridge() {
                 the two hops.
               </>
             ) : null}
+          </p>
+        ) : null}
+
+        {/*
+          The same trip the other way: the Osmosis-native token goes home
+          first, and its home chain sends it on to Secret. Worth saying,
+          since it is slower than a direct transfer and passes through a
+          chain nobody picked.
+        */}
+        {depositing && route?.forward && token ? (
+          <p className="text-label text-text-faint">
+            Goes through {sourceChain(route.forward.via)?.name ?? 'its home chain'}, which passes it on to
+            Secret{wrap ? ' — still wrapped on arrival' : ''}. Allow a few minutes for the two hops.
           </p>
         ) : null}
       </div>
