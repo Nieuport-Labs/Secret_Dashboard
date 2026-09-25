@@ -4,6 +4,8 @@ import { next } from '@vercel/edge'
 // nodenext`, which — unlike this repo's own `bundler` resolution — requires
 // the extension a relative ESM import will actually resolve to at runtime.
 import { isValidBech32 } from './src/lib/bech32.js'
+import { SSCRT_ADDRESS, TOKENS } from './src/tokens/list.js'
+import { bankDenomFor } from './src/tokens/routes.js'
 
 /**
  * Gives link-preview bots a real title, description and image per URL — a
@@ -113,6 +115,45 @@ function shorten(address: string, head = 10, tail = 6): string {
   return address.length <= head + tail + 1 ? address : `${address.slice(0, head)}…${address.slice(-tail)}`
 }
 
+/**
+ * What an invoice's asset id is called, and whether it is paid privately —
+ * the same naming `invoiceAssets()` in `src/lib/invoice.ts` gives it, from
+ * the same built-in list. `undefined` for an id that list cannot name, such
+ * as a token someone added by hand: the preview then falls back to the plain
+ * card rather than printing a contract address where a ticker should be.
+ */
+function invoiceAsset(id: string): { symbol: string; decimals: number; private: boolean } | undefined {
+  if (id === 'uscrt') return { symbol: 'SCRT', decimals: 6, private: false }
+  if (id.startsWith('secret1')) {
+    const token = TOKENS.find((candidate) => candidate.address === id)
+    if (!token) return undefined
+    return {
+      symbol: token.address === SSCRT_ADDRESS ? 'sSCRT' : token.symbol,
+      decimals: token.decimals,
+      private: true
+    }
+  }
+  if (id.startsWith('ibc/')) {
+    const token = TOKENS.find((candidate) => bankDenomFor(candidate.address) === id)
+    return token ? { symbol: token.symbol, decimals: token.decimals, private: false } : undefined
+  }
+  return undefined
+}
+
+/**
+ * The amount as a person typed it, or `undefined` when it is not one this
+ * asset can hold. Checked as strictly as `parseInvoice` checks it, so the
+ * preview never promises an amount the pay page would then refuse.
+ */
+function invoiceAmount(raw: string, decimals: number): string | undefined {
+  const amount = raw.trim()
+  const match = /^(\d{1,15})(?:\.(\d+))?$/.exec(amount)
+  if (!match) return undefined
+  if ((match[2]?.length ?? 0) > decimals) return undefined
+  if (!/[1-9]/.test(amount)) return undefined
+  return amount
+}
+
 interface Meta {
   title: string
   description: string
@@ -142,6 +183,30 @@ async function resolveMeta(url: URL): Promise<Meta> {
     }
     // Fetch failed or the id does not exist — fall through to the generic
     // governance card rather than serving a broken one.
+  }
+
+  if (segments[0] === 'pay' && segments.length === 2 && isValidBech32(segments[1], 'secret')) {
+    const to = segments[1]
+    const assetId = url.searchParams.get('asset') ?? ''
+    const asset = invoiceAsset(assetId)
+    const amount = asset ? invoiceAmount(url.searchParams.get('amount') ?? '', asset.decimals) : undefined
+    if (asset && amount) {
+      const total = `${amount} ${asset.symbol}`
+      return {
+        title: `Pay ${total} · Secret Dashboard`,
+        description: `An invoice for ${total}${asset.private ? ', paid privately' : ''} to ${shorten(to)} on Secret Network. Open it to check the details and pay.`,
+        url: `${origin}/pay/${to}?${new URLSearchParams({ asset: assetId, amount })}`,
+        image: `${origin}/api/og?${new URLSearchParams({
+          kind: 'invoice',
+          to,
+          amount,
+          symbol: asset.symbol,
+          ...(asset.private ? { private: '1' } : {})
+        })}`
+      }
+    }
+    // An invoice this cannot read gets the generic card: the pay page will
+    // explain what is wrong with it, and a preview should not guess.
   }
 
   if (segments.length === 1 && segments[0].startsWith('secret1') && isValidBech32(segments[0], 'secret')) {
