@@ -5,6 +5,7 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
+import SocialIcon from '@/components/ui/SocialIcon'
 import PublicWalletCorner from '@/components/layout/PublicWalletCorner'
 import ConnectToSendModal from '@/components/wallet/ConnectToSendModal'
 import InvoiceModal from '@/components/wallet/InvoiceModal'
@@ -15,12 +16,10 @@ import { cn } from '@/lib/cn'
 import { shortenAddress } from '@/lib/format'
 import { linkHref, LINK_KINDS, type ProfileLink } from '@/lib/profile'
 import { profileUrl } from '@/lib/profileLink'
-import { useBalances } from '@/hooks/useBalances'
-import { usePermit } from '@/hooks/usePermit'
+import { useWalletData } from '@/hooks/walletData'
 import { useProfileIdentity } from '@/hooks/useProfileIdentity'
 import { usePrivacy } from '@/store/privacy'
 import { useWallet } from '@/store/wallet'
-import { permitAuth } from '@/lib/snip20'
 
 /** What the QR and the copy button are pointed at. */
 type Target = 'link' | 'address'
@@ -39,13 +38,22 @@ function LinkChip({ link }: { link: ProfileLink }) {
   const href = linkHref(link)
 
   const className =
-    'flex items-center gap-1.5 rounded-pill border border-border px-3 py-1.5 text-sm text-text-muted'
+    'flex items-center gap-2 rounded-pill border border-border px-3 py-1.5 text-sm text-text-muted'
+
+  // The network by its logo; its name is still there for a screen reader and
+  // on hover.
+  const content = (
+    <>
+      <SocialIcon kind={link.kind} size={15} />
+      <span className="sr-only">{label}:</span>
+      <span className="text-text-faint">{link.value}</span>
+    </>
+  )
 
   if (!href) {
     return (
-      <span className={className}>
-        {label}
-        <span className="text-text-faint">{link.value}</span>
+      <span className={className} title={label}>
+        {content}
       </span>
     )
   }
@@ -53,9 +61,14 @@ function LinkChip({ link }: { link: ProfileLink }) {
   return (
     /* `noreferrer` as well as `noopener`: these destinations are chosen by the
        profile's owner, and a visitor's referrer is not theirs to hand over. */
-    <a href={href} target="_blank" rel="noreferrer noopener" className={cn(className, 'state-layer')}>
-      {label}
-      <span className="text-text-faint">{link.value}</span>
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      title={label}
+      className={cn(className, 'state-layer')}
+    >
+      {content}
     </a>
   )
 }
@@ -97,8 +110,7 @@ export default function Profile() {
    * profile's owner is not the source of anything here, and their private
    * holdings are unreadable from this page in any case.
    */
-  const { permit } = usePermit()
-  const balances = useBalances(permit && permitAuth(permit))
+  const { balances } = useWalletData()
 
   // The tab, so a profile is findable among a dozen of them. Crawlers do not
   // run this, which is why a shared link's card is the static one from
@@ -167,7 +179,7 @@ export default function Profile() {
         rather than with the switch. On a phone it is one column, identity
         first, so the name is the first thing read.
       */}
-      <div className="mx-auto grid w-full max-w-[860px] flex-1 content-center gap-x-12 gap-y-8 pb-[12vh] pt-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-start md:gap-y-4">
+      <div className="mx-auto grid w-full max-w-[860px] flex-1 content-center gap-x-6 gap-y-8 pb-[12vh] pt-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-start md:gap-y-4">
         <div className="flex min-w-0 flex-col items-center gap-5 text-center md:col-start-2 md:row-start-2 md:items-start md:text-left">
           <h1 className="text-display break-words">{identity.name ?? shortenAddress(address, 10, 6)}</h1>
 

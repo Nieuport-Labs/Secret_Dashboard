@@ -29,8 +29,7 @@ import { MSG_EXECUTE_CONTRACT, MSG_TRANSFER } from '@/lib/msgTypes'
 import { fetchPrices } from '@/lib/prices'
 import { fetchSkipGasLeg, fetchSkipGasRoute, planSkipAddresses, type SkipGasRoute } from '@/lib/skipGo'
 import { cn } from '@/lib/cn'
-import { useBalances } from '@/hooks/useBalances'
-import { usePermit } from '@/hooks/usePermit'
+import { useWalletData } from '@/hooks/walletData'
 import { useSourceWallet } from '@/hooks/useSourceWallet'
 import {
   chainsWithDeposits,
@@ -45,7 +44,6 @@ import { transactionsCovered, useFeePayer } from '@/store/feePayer'
 import { useConnectDialog } from '@/store/connectDialog'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
-import { permitAuth } from '@/lib/snip20'
 
 type Status =
   | { kind: 'idle' }
@@ -73,8 +71,8 @@ export default function Bridge() {
   const signingClient = useWallet((state) => state.client)
   const granterFor = useFeePayer((state) => state.granterFor)
   const settings = useSettings()
-  const { permit } = usePermit()
-  const balances = useBalances(permit && permitAuth(permit))
+  // The shell's reads, so the bridge and the wallet agree and nothing is read twice.
+  const { balances } = useWalletData()
 
   const [direction, setDirection] = useState<Direction>('deposit')
   const [chainId, setChainId] = useState<string | undefined>()

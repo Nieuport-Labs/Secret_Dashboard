@@ -20,8 +20,9 @@ import { useBalances } from '@/hooks/useBalances'
 import { cn } from '@/lib/cn'
 import { errorMessage } from '@/lib/errors'
 import { formatAmount, toBaseUnits } from '@/lib/format'
-import { claimStarterGrant } from '@/lib/faucet'
-import { estimateFee } from '@/lib/feegrant-sdk'
+import { queryNativeBalance } from '@/lib/bank'
+import { claimStarterGrant, faucetGranter } from '@/lib/faucet'
+import { availableFee, estimateFee } from '@/lib/feegrant-sdk'
 import {
   balancesOf,
   purchaseGas,
@@ -34,7 +35,7 @@ import { buyGasCredit } from '@/lib/gasVault'
 import { MSG_EXECUTE_CONTRACT } from '@/lib/msgTypes'
 import { swapMessage, type Quote } from '@/lib/shadeSwap'
 import { broadcastTracked } from '@/lib/txProgress'
-import { transactionsCovered, useFeePayer } from '@/store/feePayer'
+import { transactionsCovered, useFeePayer, vaultCredit } from '@/store/feePayer'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 import { privateSymbol, SSCRT_ADDRESS, tokenByAddress, tokenImageUrl } from '@/tokens/registry'
@@ -85,6 +86,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
   const client = useWallet((state) => state.client)
   const queryClient = useWallet((state) => state.queryClient)
   const granterFor = useFeePayer((state) => state.granterFor)
+  const grants = useFeePayer((state) => state.grants)
   const refreshGrants = useFeePayer((state) => state.refresh)
   const { permit } = usePermit()
   const currency = useSettings((state) => state.currency)
@@ -195,6 +197,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
     payWith !== NATIVE &&
     balances.native !== undefined &&
     !granterFor(gasLimit, [MSG_EXECUTE_CONTRACT]) &&
+    (vaultCredit(grants) ?? 0n) < BigInt(estimateFee(gasLimit, GAS_PRICE_USCRT)) &&
     BigInt(balances.native) < BigInt(estimateFee(gasLimit, GAS_PRICE_USCRT))
 
   const ready =
@@ -202,6 +205,60 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
     !amountError &&
     !payError &&
     (!swapping || quote.kind === 'ready')
+
+  /*
+   * Who pays a purchase's fee, in this order — the faucet strictly last:
+   *
+   * 1. a grant the fee payer would pick anyway (gas credits, a sponsor);
+   * 2. gas credits even when the fee setting says otherwise, since the
+   *    alternative is a free grant somebody else pays for;
+   * 3. the account's own SCRT, read fresh rather than from a list that may
+   *    not have loaded — an unread balance is not an empty one;
+   * 4. the community faucet: a grant it already made here if one is left,
+   *    else a new one.
+   */
+  const feePayerFor = async (
+    gasLimit: number,
+    types: string[]
+  ): Promise<{ feeGranter?: string; gasPrice: number } | { error: string }> => {
+    const fee = BigInt(estimateFee(gasLimit, GAS_PRICE_USCRT))
+    const granted = granterFor(gasLimit, types)
+    if (granted) return { feeGranter: granted, gasPrice: GAS_PRICE_USCRT }
+    const vault = grants.find((grant) => grant.granter === GAS_VAULT_ADDRESS)
+    if (
+      vault &&
+      (availableFee(vault) ?? fee) >= fee &&
+      (!vault.allowedMessages || types.every((type) => vault.allowedMessages!.includes(type)))
+    )
+      return { feeGranter: GAS_VAULT_ADDRESS, gasPrice: GAS_PRICE_USCRT }
+    const native = BigInt(
+      balances.native ?? (await queryNativeBalance(queryClient!, address!).catch(() => '0'))
+    )
+    if (native >= fee) return { gasPrice: GAS_PRICE_USCRT }
+
+    // At the usual price if it fits, else at the lowest every node takes.
+    const priceWithin = (limit: bigint) =>
+      [GAS_PRICE_USCRT, LOWEST_GAS_PRICE_USCRT].find(
+        (candidate) => BigInt(estimateFee(gasLimit, candidate)) <= limit
+      )
+    const starter = faucetGranter()
+    const standing = grants.find(
+      (grant) =>
+        grant.granter === starter && (!grant.expiration || grant.expiration.getTime() > Date.now() + 60_000)
+    )
+    const standingLeft = standing ? (availableFee(standing) ?? fee) : 0n
+    const standingPrice = standing ? priceWithin(standingLeft) : undefined
+    if (standing && standingPrice !== undefined) return { feeGranter: standing.granter, gasPrice: standingPrice }
+
+    const claimed = await claimStarterGrant(address!)
+    const price = priceWithin(claimed.spendLimit)
+    if (price === undefined) {
+      return {
+        error: `This route's fee (${formatAmount(estimateFee(gasLimit, LOWEST_GAS_PRICE_USCRT))} ${DISPLAY_DENOM}) is more than the Secret faucet covers (${formatAmount(claimed.spendLimit.toString())} ${DISPLAY_DENOM}). Pay with sSCRT, which needs no swap.`
+      }
+    }
+    return { feeGranter: claimed.granter, gasPrice: price }
+  }
 
   const buy = async () => {
     if (!client || !queryClient || !address || !baseUnits || !ready) return
@@ -235,24 +292,12 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
         )
         const gasLimit = purchaseGas(route?.route)
         const types = messages.map(() => MSG_EXECUTE_CONTRACT)
-        let feeGranter = granterFor(gasLimit, types)
-        let gasPrice = GAS_PRICE_USCRT
-        if (!feeGranter && BigInt(balances.native ?? '0') < BigInt(estimateFee(gasLimit, GAS_PRICE_USCRT))) {
-          const starter = await claimStarterGrant(address)
-          // At the usual price if it fits, else at the lowest every node takes.
-          const price = [GAS_PRICE_USCRT, LOWEST_GAS_PRICE_USCRT].find(
-            (candidate) => BigInt(estimateFee(gasLimit, candidate)) <= starter.spendLimit
-          )
-          if (price === undefined) {
-            setStatus({
-              kind: 'failed',
-              message: `This route's fee (${formatAmount(estimateFee(gasLimit, LOWEST_GAS_PRICE_USCRT))} ${DISPLAY_DENOM}) is more than the Secret faucet covers (${formatAmount(starter.spendLimit.toString())} ${DISPLAY_DENOM}). Pay with sSCRT, which needs no swap.`
-            })
-            return
-          }
-          feeGranter = starter.granter
-          gasPrice = price
+        const payer = await feePayerFor(gasLimit, types)
+        if ('error' in payer) {
+          setStatus({ kind: 'failed', message: payer.error })
+          return
         }
+        const { feeGranter, gasPrice } = payer
         tx = await broadcastTracked(
           { label: `Buy ${amount} ${creditsUnit}`, detail: `with ${paySymbol}` },
           client,

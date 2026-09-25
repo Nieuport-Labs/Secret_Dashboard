@@ -56,6 +56,14 @@ export const DAPPS: Dapp[] = [
     tags: ['Data', 'Wallet']
   },
   {
+    name: 'Shade Protocol',
+    link: 'https://app.shadeprotocol.io/',
+    description:
+      'Private DeFi on Secret: ShadeSwap, the SILK stablecoin, lending and liquid staking with stkd-SCRT.',
+    icon: '/img/dapps/dapp_shade_206fbe8b01_U9LBd0ib1-.webp',
+    tags: ['dApp', 'DeFi']
+  },
+  {
     name: 'Keplr Wallet',
     link: 'https://wallet.keplr.app/',
     description: 'The interchain wallet for the Cosmos ecosystem.',

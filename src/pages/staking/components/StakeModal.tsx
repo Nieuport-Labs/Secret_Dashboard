@@ -1,19 +1,22 @@
 import { ChevronDown, ExternalLink, Globe } from 'lucide-react'
 import { useState } from 'react'
 
+import AmountField from '@/components/ui/AmountField'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import { PickerDialog } from '@/components/ui/Picker'
 import ValidatorAvatar from '@/pages/staking/components/ValidatorAvatar'
 import { hostnameOf, socialIcon, withScheme } from '@/pages/staking/components/validatorSocial'
-import { DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
+import { DECIMALS, DISPLAY_DENOM, explorerTxUrl } from '@/chains/secret4'
 import type { ActionState } from '@/hooks/useStakingActions'
 import { useValidatorProfile } from '@/hooks/useValidatorProfile'
-import { formatAmount, fromBaseUnits, toBaseUnits } from '@/lib/format'
+import { formatAmount, toBaseUnits } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { Delegation, Validator } from '@/lib/staking'
+import { SSCRT_ADDRESS, tokenByAddress, tokenImageUrl } from '@/tokens/registry'
 
 type Mode = 'delegate' | 'undelegate' | 'redelegate'
+type Source = 'scrt' | 'sscrt'
 
 interface Props {
   validator: Validator
@@ -27,6 +30,12 @@ interface Props {
   networkShare?: number
   /** Native SCRT, in base units. */
   available?: string
+  /**
+   * sSCRT, in base units, when staking out of it is offered: unwrapped and
+   * staked in one transaction. Left out where only public SCRT can stake — a
+   * multisig proposal, say.
+   */
+  sscrtAvailable?: string
   unbondingSeconds: number
   state: ActionState
   /** Which tab opens. Defaults to unstaking when there is something staked. */
@@ -40,10 +49,13 @@ interface Props {
    */
   submitLabel?: string
   onClose: () => void
-  onDelegate: (amount: string) => void
+  onDelegate: (amount: string, fromSscrt: boolean) => void
   onUndelegate: (amount: string) => void
   onRedelegate: (toValidator: string, amount: string) => void
 }
+
+const sscrtToken = tokenByAddress(SSCRT_ADDRESS)
+const sscrtImage = sscrtToken ? tokenImageUrl(sscrtToken) : undefined
 
 const MODES: Array<{ value: Mode; label: string }> = [
   { value: 'delegate', label: 'Stake' },
@@ -59,6 +71,7 @@ export default function StakeModal({
   images,
   networkShare,
   available,
+  sscrtAvailable,
   unbondingSeconds,
   state,
   initialMode,
@@ -81,8 +94,13 @@ export default function StakeModal({
   const [pickingDestination, setPickingDestination] = useState(false)
   const destinationValidator = validators.find((v) => v.address === destination)
 
+  // What a stake is paid from. sSCRT is only offered when there is some.
+  const [source, setSource] = useState<Source>('scrt')
+  const offerSscrt = sscrtAvailable !== undefined && BigInt(sscrtAvailable) > 0n
+  const fromSscrt = mode === 'delegate' && offerSscrt && source === 'sscrt'
+
   const staked = delegation?.amount ?? '0'
-  const max = mode === 'delegate' ? (available ?? '0') : staked
+  const max = mode === 'delegate' ? ((fromSscrt ? sscrtAvailable : available) ?? '0') : staked
 
   let baseUnits = '0'
   let amountError: string | undefined
@@ -96,7 +114,7 @@ export default function StakeModal({
   const days = Math.round(unbondingSeconds / 86_400)
 
   const submit = () => {
-    if (mode === 'delegate') onDelegate(baseUnits)
+    if (mode === 'delegate') onDelegate(baseUnits, fromSscrt)
     else if (mode === 'undelegate') onUndelegate(baseUnits)
     else onRedelegate(destination, baseUnits)
   }
@@ -243,33 +261,45 @@ export default function StakeModal({
             </div>
           ) : null}
 
-          <label className="flex flex-col gap-2">
-            <span className="flex items-center justify-between text-base font-medium">
-              Amount
-              <button
-                type="button"
-                onClick={() => setAmount(fromBaseUnits(max))}
-                className="state-layer rounded-control px-2 py-0.5 text-sm text-text-muted"
-              >
-                {mode === 'delegate' ? 'Available' : 'Staked'} {formatAmount(max)}
-              </button>
-            </span>
-            <div className="flex items-center gap-2 rounded-control border border-border bg-surface px-3 py-2.5">
-              <input
-                inputMode="decimal"
-                value={amount}
-                onChange={(event) => setAmount(event.target.value)}
-                placeholder="0.0"
-                className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-text-faint"
-              />
-              <span className="shrink-0 text-base text-text-muted">{DISPLAY_DENOM}</span>
-            </div>
-            {amountError ? (
-              <span className="text-base text-negative" role="alert">
-                {amountError}
-              </span>
-            ) : null}
-          </label>
+          {/*
+            The same amount field as Send and Wrap, slider included. Staking
+            takes public SCRT; sSCRT is offered beside it and unwrapped in the
+            same transaction, so it costs no extra step or signature.
+          */}
+          <AmountField
+            amount={amount}
+            onAmount={setAmount}
+            symbol={fromSscrt ? 'sSCRT' : DISPLAY_DENOM}
+            image={fromSscrt ? sscrtImage : '/img/secret-mark.svg'}
+            available={max}
+            availableLabel={mode === 'delegate' ? 'Available' : 'Staked'}
+            decimals={DECIMALS}
+            error={amountError}
+            options={
+              mode === 'delegate' && offerSscrt
+                ? [
+                    {
+                      id: 'scrt',
+                      label: DISPLAY_DENOM,
+                      detail: `Available ${formatAmount(available ?? '0')} · public`,
+                      image: '/img/secret-mark.svg'
+                    },
+                    {
+                      id: 'sscrt',
+                      label: 'sSCRT',
+                      detail: `Available ${formatAmount(sscrtAvailable ?? '0')} · unwrapped and staked in one transaction`,
+                      image: sscrtImage
+                    }
+                  ]
+                : undefined
+            }
+            optionsLabel="Stake from"
+            value={source}
+            onSelect={(id) => {
+              setSource(id as Source)
+              setAmount('')
+            }}
+          />
 
           {/*
             The unbonding period is the single most surprising thing about

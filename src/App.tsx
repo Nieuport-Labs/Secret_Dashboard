@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react'
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 
 import AppShell from '@/components/layout/AppShell'
+import WalletDataProvider from '@/components/wallet/WalletDataProvider'
 import { homeFor } from '@/components/layout/navigation'
 import { useMultisigSync } from '@/hooks/useMultisigSync'
 import { onAccountChange } from '@/lib/wallet'
@@ -118,25 +119,29 @@ export default function App() {
         still beats this one, and the page rejects anything that is not a valid
         address rather than claiming it.
       */}
-      <Route
-        path="/:address"
-        element={
-          <Suspense fallback={null}>
-            <Profile />
-          </Suspense>
-        }
-      />
+      {/* The account's reads, for the corner's gas credits and arrivals and
+          for the tip or payment itself — without the shell's rail. */}
+      <Route element={<PublicShell />}>
+        <Route
+          path="/:address"
+          element={
+            <Suspense fallback={null}>
+              <Profile />
+            </Suspense>
+          }
+        />
 
-      {/* An invoice — see `lib/invoice.ts`. Outside the shell like a profile,
-          and for the same visitor. */}
-      <Route
-        path="/pay/:address"
-        element={
-          <Suspense fallback={null}>
-            <Pay />
-          </Suspense>
-        }
-      />
+        {/* An invoice — see `lib/invoice.ts`. Outside the shell like a profile,
+            and for the same visitor. */}
+        <Route
+          path="/pay/:address"
+          element={
+            <Suspense fallback={null}>
+              <Pay />
+            </Suspense>
+          }
+        />
+      </Route>
 
       <Route element={<Shell />}>
         <Route path="/" element={<Navigate to={home} replace />} />
@@ -344,5 +349,19 @@ function Shell() {
     <AppShell>
       <Outlet />
     </AppShell>
+  )
+}
+
+/**
+ * The profile and invoice pages' frame: no rail and no header, but the same
+ * reads of the connected account the shell makes, so the wallet corner can
+ * show gas credits and whether arrivals are live, and a tip or payment reads
+ * the balances once rather than again for itself.
+ */
+function PublicShell() {
+  return (
+    <WalletDataProvider>
+      <Outlet />
+    </WalletDataProvider>
   )
 }

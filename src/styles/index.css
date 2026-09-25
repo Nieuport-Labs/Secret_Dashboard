@@ -165,16 +165,33 @@
     opacity: 0.4;
   }
 
+  /*
+   * The chosen part of the track is filled in the accent, up to the thumb's
+   * centre, so the thumb sits at the end of a bar rather than floating on a
+   * line. `--fill` (0–100, set inline) is where; the stop is worked out over
+   * the width the thumb's centre can travel, which is the track less the
+   * thumb. Firefox draws the same with its own progress element.
+   */
   .slider::-webkit-slider-runnable-track {
     height: 4px;
     border-radius: var(--radius-pill);
-    background: var(--color-border-strong);
+    background: linear-gradient(
+      to right,
+      var(--color-accent) 0 calc(var(--fill, 0) * (100% - 14px) / 100 + 7px),
+      var(--color-border-strong) 0
+    );
   }
 
   .slider::-moz-range-track {
     height: 4px;
     border-radius: var(--radius-pill);
     background: var(--color-border-strong);
+  }
+
+  .slider::-moz-range-progress {
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--color-accent);
   }
 
   .slider::-webkit-slider-thumb {

@@ -50,7 +50,8 @@ import { SSCRT_ADDRESS } from '@/tokens/registry'
  *    ShadeSwap first (`planSwap` picks which).
  *
  * When all of that comes to less than 5 it buys what it can; when it comes to
- * nothing, it says where to get some instead.
+ * nothing, it offers the gas credits dialog — where any token can pay, and the
+ * community faucet covers the fee — or the bridge.
  *
  * The same rules as the profile write that also rides along (see `sendTx`):
  * the refill must never be why someone's own transaction failed. So it is left
@@ -62,8 +63,6 @@ import { SSCRT_ADDRESS } from '@/tokens/registry'
 export const CREDIT_FLOOR = 5_000_000n
 
 export const REFILL_GAS = PURCHASE_GAS
-
-export const SHADE_SWAP_URL = 'https://app.shadeprotocol.io/swap'
 
 /**
  * A refill just sent (or just refused) is not tried again for a while: the
@@ -118,7 +117,7 @@ function noticeNoSscrt(): void {
   useNotifications.getState().push({
     kind: 'gas-empty',
     message:
-      'Your gas credits are below 5 and there is nothing to refill them with — no SCRT, no sSCRT, and no token to swap for it. You can get SCRT/sSCRT on Shade Swap.'
+      'Your gas credits are below 5 and auto-refill found nothing it could use. Buy credits with any private token you hold, or bridge some in.'
   })
 }
 

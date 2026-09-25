@@ -2,8 +2,8 @@ import { AlertCircle, CheckCircle2, Clock, ExternalLink, Fuel, Loader2, X } from
 import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
-import { SHADE_SWAP_URL } from '@/lib/autoRefill'
 import { cn } from '@/lib/cn'
+import { useBuyCreditsDialog } from '@/store/buyCreditsDialog'
 import { useNotifications, type Toast } from '@/store/notifications'
 import { useTransactions, type TrackedTx } from '@/store/transactions'
 
@@ -43,6 +43,7 @@ export default function Toaster() {
 
 function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
   const navigate = useNavigate()
+  const showBuy = useBuyCreditsDialog((state) => state.show)
 
   return (
     <div className="glass-panel pointer-events-auto w-full rounded-card p-4 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
@@ -58,16 +59,29 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
             <p className="text-base">{toast.message}</p>
           </div>
           <div className="mt-3 flex gap-2.5">
-            <a
-              href={SHADE_SWAP_URL}
-              target="_blank"
-              rel="noreferrer noopener"
-              onClick={onDismiss}
-              className="state-layer inline-flex flex-1 items-center justify-center gap-1.5 rounded-control bg-accent-strong px-4 py-2 text-base font-medium text-[var(--color-accent-text)]"
+            {/* In the app, not off to a swap site: the dialog swaps any
+                token the account holds, fee included. */}
+            <Button
+              variant="primary"
+              shape="control"
+              className="flex-1"
+              onClick={() => {
+                onDismiss()
+                showBuy()
+              }}
             >
-              Get SCRT/sSCRT
-              <ExternalLink size={14} aria-hidden />
-            </a>
+              Buy gas credits
+            </Button>
+            <Button
+              variant="secondary"
+              shape="control"
+              onClick={() => {
+                onDismiss()
+                navigate('/bridge')
+              }}
+            >
+              Bridge
+            </Button>
             <Button variant="secondary" shape="control" onClick={onDismiss}>
               Dismiss
             </Button>

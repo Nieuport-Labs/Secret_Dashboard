@@ -7,8 +7,6 @@ import { PickerDialog } from '@/components/ui/Picker'
 import StakeModal from '@/pages/staking/components/StakeModal'
 import ValidatorRow from '@/pages/staking/components/ValidatorRow'
 import { DISPLAY_DENOM } from '@/chains/secret4'
-import { useBalances } from '@/hooks/useBalances'
-import { usePermit } from '@/hooks/usePermit'
 import { useStaking } from '@/hooks/useStaking'
 import { useStakingActions } from '@/hooks/useStakingActions'
 import { useValidatorImages } from '@/hooks/useValidatorImages'
@@ -20,7 +18,7 @@ import { shareOfBonded, type Validator } from '@/lib/staking'
 import { useConnectDialog } from '@/store/connectDialog'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
-import { permitAuth } from '@/lib/snip20'
+import { SSCRT_ADDRESS } from '@/tokens/registry'
 
 /**
  * Staking, and Secret's own auto-restake.
@@ -33,8 +31,9 @@ export default function Staking() {
   const openConnect = useConnectDialog((state) => state.show)
   const address = useWallet((state) => state.address)
   const currency = useSettings((state) => state.currency)
-  const { permit } = usePermit()
-  const balances = useBalances(permit && permitAuth(permit))
+  // The shell's reads, not a second copy: this page and the wallet cannot
+  // disagree about a balance, and nothing is read twice.
+  const { balances, derivative } = useWalletData()
   const staking = useStaking()
   // Delegating, undelegating and claiming all move SCRT out of or into the
   // spendable balance, not just the staking totals — both need to hear about it.
@@ -43,11 +42,10 @@ export default function Staking() {
     balances.refresh()
   })
 
-  // Read once for the whole shell, so this page and the wallet cannot disagree
-  // about what is in Shade's queue.
-  const { derivative } = useWalletData()
-
   const images = useValidatorImages(staking.validators)
+
+  const sscrtOutcome = balances.tokens.find((entry) => entry.token.address === SSCRT_ADDRESS)?.outcome
+  const sscrtHeld = sscrtOutcome?.status === 'ok' ? sscrtOutcome.amount : undefined
 
   /*
    * Both queues as one list. They end in the same place — SCRT in this account
@@ -474,13 +472,14 @@ export default function Staking() {
           images={images}
           networkShare={shareOfBonded(managing, totalBonded)}
           available={balances.native}
+          sscrtAvailable={sscrtHeld}
           unbondingSeconds={staking.unbondingSeconds}
           state={actions.state}
           onClose={() => {
             setManaging(undefined)
             actions.reset()
           }}
-          onDelegate={(amount) => void actions.delegate(managing.address, amount)}
+          onDelegate={(amount, fromSscrt) => void actions.delegate(managing.address, amount, fromSscrt)}
           onUndelegate={(amount) => void actions.undelegate(managing.address, amount)}
           onRedelegate={(to, amount) => void actions.redelegate(managing.address, to, amount)}
         />
