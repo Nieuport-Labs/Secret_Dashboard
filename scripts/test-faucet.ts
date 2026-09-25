@@ -73,6 +73,17 @@ const call = (body: unknown) =>
   check('a bad address is never sent on', (await call({ address: 'cosmos1abc' })).status === 400)
 }
 
+{
+  delete process.env.FEE_FAUCET_URL
+  const response = await call({ address: USER })
+  const reply = (await response.json()) as { error?: string }
+  check(
+    'with no faucet set up it says so, rather than failing to reach one',
+    response.status === 503 && /set up/.test(reply.error ?? ''),
+    reply
+  )
+}
+
 server.close()
 console.log(`\n${passed} passed, ${failed} failed`)
 process.exit(failed > 0 ? 1 : 0)

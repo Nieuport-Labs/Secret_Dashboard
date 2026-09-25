@@ -57,9 +57,9 @@ export default function Onboarding() {
           <p>
             Every transaction costs a fraction of a {DISPLAY_DENOM}, which is why an account holding none
             cannot do anything at all — not even accept help. This dashboard works around that: gas credits
-            can be bought with any private token you hold, with the first purchase&rsquo;s fee covered by the
-            Secret community faucet; someone else can cover your fees with a grant; and bridging in can swap a
-            slice of what you send into gas on the way.
+            can be bought with any private token you hold, with the first purchase&rsquo;s fee covered by a
+            starter grant from the dashboard; someone else can cover your fees with a grant; and bridging in
+            can swap a slice of what you send into gas on the way.
           </p>
           <p>
             Unlike most chains, what your transaction <em>does</em> is encrypted. Anyone can see that you sent
