@@ -248,21 +248,13 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
     )
     const standingLeft = standing ? (availableFee(standing) ?? fee) : 0n
     const standingPrice = standing ? priceWithin(standingLeft) : undefined
-    if (standing && standingPrice !== undefined)
-      return { feeGranter: standing.granter, gasPrice: standingPrice }
+    if (standing && standingPrice !== undefined) return { feeGranter: standing.granter, gasPrice: standingPrice }
 
-    let claimed
-    try {
-      claimed = await claimStarterGrant(address!)
-    } catch (error) {
-      return {
-        error: `You have no ${DISPLAY_DENOM} and no gas credits to pay this purchase's fee, and a starter grant could not be had: ${errorMessage(error)} Bridge in a little ${DISPLAY_DENOM} (Bridge → Get gas), or ask someone to send you some.`
-      }
-    }
+    const claimed = await claimStarterGrant(address!)
     const price = priceWithin(claimed.spendLimit)
     if (price === undefined) {
       return {
-        error: `This route's fee (${formatAmount(estimateFee(gasLimit, LOWEST_GAS_PRICE_USCRT))} ${DISPLAY_DENOM}) is more than the starter grant covers (${formatAmount(claimed.spendLimit.toString())} ${DISPLAY_DENOM}). Pay with sSCRT, which needs no swap.`
+        error: `This route's fee (${formatAmount(estimateFee(gasLimit, LOWEST_GAS_PRICE_USCRT))} ${DISPLAY_DENOM}) is more than the Secret faucet covers (${formatAmount(claimed.spendLimit.toString())} ${DISPLAY_DENOM}). Pay with sSCRT, which needs no swap.`
       }
     }
     return { feeGranter: claimed.granter, gasPrice: price }
@@ -375,7 +367,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
         ? `≈ ${formatAmount(quote.quote.amountIn.toString(), { decimals: payToken?.decimals ?? 6 })} ${paySymbol} · swapped on ShadeSwap`
         : quote.kind === 'loading'
           ? 'Getting a price…'
-          : selected.detail) + (nothingPays ? ' · fee covered by a starter grant' : '')
+          : selected.detail) + (nothingPays ? ' · fee paid by the Secret faucet' : '')
 
   if (status.kind === 'done') {
     return (
