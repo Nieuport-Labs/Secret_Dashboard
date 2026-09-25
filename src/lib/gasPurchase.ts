@@ -1,6 +1,6 @@
 import type { Msg, SecretNetworkClient } from 'secretjs'
 
-import { DENOM, GAS, GAS_PRICE_USCRT, GAS_VAULT_ADDRESS } from '@/chains/secret4'
+import { DENOM, GAS, GAS_BUFFER, GAS_PRICE_USCRT, GAS_VAULT_ADDRESS } from '@/chains/secret4'
 import { codeHashFor } from '@/lib/codeHash'
 import { mapWithLimit } from '@/lib/concurrency'
 import { estimateFee } from '@/lib/feegrant-sdk'
@@ -63,12 +63,35 @@ function purchaseShape(route?: Route): string {
 }
 
 /**
+ * The most gas a purchase may ask for: 0.1 SCRT at the lowest gas price, which
+ * is what the community faucet grants someone with nothing else to pay with.
+ * A purchase is the way out of having no gas; it must never cost more than
+ * that way out provides.
+ */
+export const MAX_PURCHASE_GAS = 2_000_000
+
+function estimatedPurchaseGas(route?: Route): number {
+  return PURCHASE_GAS + (route ? swapGas(route) : 0)
+}
+
+/**
+ * Whether a purchase along `route` fits `MAX_PURCHASE_GAS` by its estimate
+ * before the safety margin — the margin may be trimmed to fit, the estimate
+ * itself may not. Routes that do not are never offered for buying credits.
+ */
+export function purchaseFits(route?: Route): boolean {
+  return Math.floor(estimatedPurchaseGas(route) / GAS_BUFFER) <= MAX_PURCHASE_GAS
+}
+
+/**
  * The gas limit for buying credits out of sSCRT, after swapping along `route`
  * when there is one: what the same purchase used last time, with a small
- * margin, or the hand-sized estimate until it has been seen.
+ * margin, or the hand-sized estimate until it has been seen — never more than
+ * `MAX_PURCHASE_GAS`. (A 3-hop swap measured 1.41M in all, which leaves the
+ * unwrap and the vault room under it.)
  */
 export function purchaseGas(route?: Route): number {
-  return gasLimitFor(purchaseShape(route), PURCHASE_GAS + (route ? swapGas(route) : 0))
+  return Math.min(MAX_PURCHASE_GAS, gasLimitFor(purchaseShape(route), estimatedPurchaseGas(route)))
 }
 
 /** Record what a purchase that went through actually used, for `purchaseGas`. */
@@ -133,7 +156,7 @@ export async function swappableTokens(
       token !== target &&
       token !== STKD_SCRT_ADDRESS &&
       covers(permit, token) &&
-      findRoutes(pairs, token, target).length > 0
+      findRoutes(pairs, token, target).some((route) => target !== SSCRT_ADDRESS || purchaseFits(route))
   )
 }
 
@@ -226,9 +249,10 @@ export async function quoteInto(
   token: string,
   target: string,
   amount: bigint,
-  gasCost?: GasCost
+  gasCost?: GasCost,
+  allow: (route: Route) => boolean = () => true
 ): Promise<PaddedQuote | undefined> {
-  const routes = findRoutes(await listPairs(client), token, target)
+  const routes = findRoutes(await listPairs(client), token, target).filter(allow)
   if (routes.length === 0) return undefined
   return bestExactOutAnywhere(client, routes, await reservesFor(client, pairsOf(routes)), amount, gasCost)
 }
@@ -270,7 +294,12 @@ export function quoteForSscrt(
   amount: bigint
 ): Promise<PaddedQuote | undefined> {
   // sSCRT is SCRT, so a route's fee in uscrt is already in units of the output.
-  return quoteInto(client, token, SSCRT_ADDRESS, amount, (route) =>
-    BigInt(estimateFee(purchaseGas(route), GAS_PRICE_USCRT))
+  return quoteInto(
+    client,
+    token,
+    SSCRT_ADDRESS,
+    amount,
+    (route) => BigInt(estimateFee(purchaseGas(route), GAS_PRICE_USCRT)),
+    purchaseFits
   )
 }

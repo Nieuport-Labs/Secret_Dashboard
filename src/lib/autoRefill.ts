@@ -9,6 +9,7 @@ import {
   balancesOf,
   bestExactOutAnywhere,
   PURCHASE_GAS,
+  purchaseFits,
   purchaseGas,
   purchaseMessages,
   slippageFor,
@@ -148,7 +149,7 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
   const pairs = await listPairs(queryClient)
   const routable = (await swappableTokens(queryClient, permit)).map((token) => ({
     token,
-    routes: findRoutes(pairs, token, SSCRT_ADDRESS)
+    routes: findRoutes(pairs, token, SSCRT_ADDRESS).filter(purchaseFits)
   }))
   if (routable.length === 0) return undefined
 

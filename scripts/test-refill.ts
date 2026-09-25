@@ -308,5 +308,24 @@ check('asking for the whole pool is refused', swapIn(X, Y, Y, FEE_NUM, FEE_DEN) 
   check('shapes are kept apart', gasLimitFor('buy:y', 2_200_000) === 2_200_000)
 }
 
+{
+  const { MAX_PURCHASE_GAS, purchaseFits, purchaseGas } = await import('../src/lib/gasPurchase.ts')
+  const ref = (address: string) => ({ address, codeHash: 'h' })
+  const hop = (name: string, stable = false) => ({
+    pair: { contract: ref(name), token0: ref('A'), token1: ref('B'), stable },
+    from: ref('A'),
+    to: ref('B')
+  })
+  const threeHops = [hop('p1'), hop('p2'), hop('p3')]
+  const throughStable = [hop('s1', true), hop('p4')]
+  check("a purchase through three pools still fits the faucet's 2M", purchaseFits(threeHops))
+  check('and asks for no more than that', purchaseGas(threeHops) <= MAX_PURCHASE_GAS, purchaseGas(threeHops))
+  check(
+    'one whose estimate is over it is not offered at all',
+    !purchaseFits([...throughStable, hop('p5', true)])
+  )
+  check('without a swap it is far under', purchaseGas() < 1_000_000, purchaseGas())
+}
+
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)
