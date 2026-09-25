@@ -63,10 +63,9 @@ function purchaseShape(route?: Route): string {
 }
 
 /**
- * The most gas a purchase may ask for: 0.1 SCRT at the lowest gas price, which
- * is what the community faucet grants someone with nothing else to pay with.
- * A purchase is the way out of having no gas; it must never cost more than
- * that way out provides.
+ * The most gas a purchase may ask for. A purchase is the way out of running
+ * low on gas; it must not itself cost much, so a route that would need more
+ * is not offered.
  */
 export const MAX_PURCHASE_GAS = 2_000_000
 

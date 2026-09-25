@@ -318,7 +318,7 @@ check('asking for the whole pool is refused', swapIn(X, Y, Y, FEE_NUM, FEE_DEN) 
   })
   const threeHops = [hop('p1'), hop('p2'), hop('p3')]
   const throughStable = [hop('s1', true), hop('p4')]
-  check("a purchase through three pools still fits the faucet's 2M", purchaseFits(threeHops))
+  check("a purchase through three pools still fits the 2M cap", purchaseFits(threeHops))
   check('and asks for no more than that', purchaseGas(threeHops) <= MAX_PURCHASE_GAS, purchaseGas(threeHops))
   check(
     'one whose estimate is over it is not offered at all',

@@ -50,8 +50,8 @@ import { SSCRT_ADDRESS } from '@/tokens/registry'
  *    ShadeSwap first (`planSwap` picks which).
  *
  * When all of that comes to less than 5 it buys what it can; when it comes to
- * nothing, it offers the gas credits dialog — where any token can pay, and the
- * community faucet covers the fee — or the bridge.
+ * nothing, it offers the gas credits dialog — where any token can pay — or the
+ * bridge.
  *
  * The same rules as the profile write that also rides along (see `sendTx`):
  * the refill must never be why someone's own transaction failed. So it is left

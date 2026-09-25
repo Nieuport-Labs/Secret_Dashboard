@@ -12,7 +12,6 @@ import {
   GAS,
   GAS_PRICE_USCRT,
   GAS_VAULT_ADDRESS,
-  LOWEST_GAS_PRICE_USCRT,
   explorerTxUrl
 } from '@/chains/secret4'
 import { usePermit } from '@/hooks/usePermit'
@@ -21,7 +20,6 @@ import { cn } from '@/lib/cn'
 import { errorMessage } from '@/lib/errors'
 import { formatAmount, toBaseUnits } from '@/lib/format'
 import { queryNativeBalance } from '@/lib/bank'
-import { claimStarterGrant, faucetGranter } from '@/lib/faucet'
 import { availableFee, estimateFee } from '@/lib/feegrant-sdk'
 import {
   balancesOf,
@@ -46,6 +44,9 @@ interface Props {
 }
 
 const PRESETS = ['0.5', '1', '5']
+
+/** Why a purchase out of a private token cannot go ahead when nothing covers its fee. */
+const NOTHING_PAYS = `You have no ${DISPLAY_DENOM} and no gas credits to pay this purchase's fee. Bridge in a little ${DISPLAY_DENOM} (Bridge → Get gas), or ask someone to send you some.`
 
 /** Paying with public SCRT, straight from the bank balance. */
 const NATIVE = 'native'
@@ -187,9 +188,8 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
 
   /*
    * Who pays this purchase's fee. Out of a private token, nobody may be able
-   * to: no credits, no SCRT — the very situation credits are bought to end.
-   * Then the Secret community faucet does, with a starter grant claimed when
-   * the button is pressed.
+   * to: no credits, no SCRT — and then it is said before the button is
+   * pressed, not after.
    */
   const route = swapping && quote.kind === 'ready' ? quote.quote.route : undefined
   const gasLimit = purchaseGas(route)
@@ -200,6 +200,8 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
     (vaultCredit(grants) ?? 0n) < BigInt(estimateFee(gasLimit, GAS_PRICE_USCRT)) &&
     BigInt(balances.native) < BigInt(estimateFee(gasLimit, GAS_PRICE_USCRT))
 
+  if (!amountError && !payError && nothingPays) payError = NOTHING_PAYS
+
   const ready =
     Boolean(client && address && baseUnits) &&
     !amountError &&
@@ -207,15 +209,13 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
     (!swapping || quote.kind === 'ready')
 
   /*
-   * Who pays a purchase's fee, in this order — the faucet strictly last:
+   * Who pays a purchase's fee, in this order:
    *
    * 1. a grant the fee payer would pick anyway (gas credits, a sponsor);
-   * 2. gas credits even when the fee setting says otherwise, since the
-   *    alternative is a free grant somebody else pays for;
+   * 2. gas credits even when the fee setting says otherwise, since there is
+   *    nothing else;
    * 3. the account's own SCRT, read fresh rather than from a list that may
-   *    not have loaded — an unread balance is not an empty one;
-   * 4. the community faucet: a grant it already made here if one is left,
-   *    else a new one.
+   *    not have loaded — an unread balance is not an empty one.
    */
   const feePayerFor = async (
     gasLimit: number,
@@ -236,28 +236,7 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
     )
     if (native >= fee) return { gasPrice: GAS_PRICE_USCRT }
 
-    // At the usual price if it fits, else at the lowest every node takes.
-    const priceWithin = (limit: bigint) =>
-      [GAS_PRICE_USCRT, LOWEST_GAS_PRICE_USCRT].find(
-        (candidate) => BigInt(estimateFee(gasLimit, candidate)) <= limit
-      )
-    const starter = faucetGranter()
-    const standing = grants.find(
-      (grant) =>
-        grant.granter === starter && (!grant.expiration || grant.expiration.getTime() > Date.now() + 60_000)
-    )
-    const standingLeft = standing ? (availableFee(standing) ?? fee) : 0n
-    const standingPrice = standing ? priceWithin(standingLeft) : undefined
-    if (standing && standingPrice !== undefined) return { feeGranter: standing.granter, gasPrice: standingPrice }
-
-    const claimed = await claimStarterGrant(address!)
-    const price = priceWithin(claimed.spendLimit)
-    if (price === undefined) {
-      return {
-        error: `This route's fee (${formatAmount(estimateFee(gasLimit, LOWEST_GAS_PRICE_USCRT))} ${DISPLAY_DENOM}) is more than the Secret faucet covers (${formatAmount(claimed.spendLimit.toString())} ${DISPLAY_DENOM}). Pay with sSCRT, which needs no swap.`
-      }
-    }
-    return { feeGranter: claimed.granter, gasPrice: price }
+    return { error: NOTHING_PAYS }
   }
 
   const buy = async () => {
@@ -360,14 +339,13 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
   const selected = options.find((option) => option.id === payWith) ?? options[0]
   // With a swap, what it costs in the token is the one thing worth reading
   // here, so it takes the place of the balance line.
-  const payDetail =
-    (!swapping
-      ? selected.detail
-      : quote.kind === 'ready'
-        ? `≈ ${formatAmount(quote.quote.amountIn.toString(), { decimals: payToken?.decimals ?? 6 })} ${paySymbol} · swapped on ShadeSwap`
-        : quote.kind === 'loading'
-          ? 'Getting a price…'
-          : selected.detail) + (nothingPays ? ' · fee paid by the Secret faucet' : '')
+  const payDetail = !swapping
+    ? selected.detail
+    : quote.kind === 'ready'
+      ? `≈ ${formatAmount(quote.quote.amountIn.toString(), { decimals: payToken?.decimals ?? 6 })} ${paySymbol} · swapped on ShadeSwap`
+      : quote.kind === 'loading'
+        ? 'Getting a price…'
+        : selected.detail
 
   if (status.kind === 'done') {
     return (
