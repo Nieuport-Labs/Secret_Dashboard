@@ -79,13 +79,17 @@ docker run --rm -v "$(pwd)":/contract \
   ghcr.io/scrtlabs/secret-contract-optimizer:1.0.13
 ```
 
-That writes `contract.wasm.gz`.
+That writes `optimized-wasm/secret_dashboard_profile.wasm.gz` — 63kB against
+the 200kB `cargo build` produces. Upload that one, not the plain `cargo`
+artifact: the optimiser is what makes the bytecode reproducible, and a
+reproducible build is the only thing by which anyone can later check that what
+is deployed matches this source.
 
 ## Deploy
 
 ```bash
-secretcli tx compute store contract.wasm.gz --from <key> --gas 4000000 -y
-secretcli tx compute instantiate <code-id> '{}' --from <key> --label secret-dashboard-profile-v1 -y
+secretcli tx compute store optimized-wasm/secret_dashboard_profile.wasm.gz   --from <key> --chain-id secret-4 --gas 4000000 -y
+secretcli tx compute instantiate <code-id> '{}'   --from <key> --chain-id secret-4 --label secret-dashboard-profile-v1 --gas 300000 -y
 ```
 
 No admin is set on purpose. The contract has no privileged action, so an admin
