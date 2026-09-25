@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react'
+
 import { cn } from '@/lib/cn'
 import { fromBaseUnits, toBaseUnits } from '@/lib/format'
 
@@ -34,6 +36,8 @@ export default function ShareSlider({ amount, onAmount, available, decimals, inv
 
   const percent = has && !invalid ? Number((base * 100n) / BigInt(available)) : 0
 
+  const shown = Math.min(100, Math.max(0, percent))
+
   const setPercent = (share: number) => {
     if (available === undefined) return
     const next = (BigInt(available) * BigInt(share)) / 100n
@@ -47,7 +51,8 @@ export default function ShareSlider({ amount, onAmount, available, decimals, inv
         min={0}
         max={100}
         step={1}
-        value={Math.min(100, Math.max(0, percent))}
+        value={shown}
+        style={{ '--fill': shown } as CSSProperties}
         disabled={!has}
         onChange={(event) => setPercent(Number(event.target.value))}
         aria-label="Fraction of balance"

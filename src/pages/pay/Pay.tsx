@@ -83,7 +83,7 @@ export default function Pay() {
         code, so the invoice lines up with the top of the code. One column on a
         phone, the invoice first.
       */}
-      <div className="mx-auto grid w-full max-w-[860px] flex-1 content-center gap-x-12 gap-y-8 pb-[12vh] pt-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-start md:gap-y-4">
+      <div className="mx-auto grid w-full max-w-[860px] flex-1 content-center gap-x-6 gap-y-8 pb-[12vh] pt-8 md:grid-cols-[260px_minmax(0,1fr)] md:items-start md:gap-y-4">
         <div className="flex min-w-0 flex-col items-center gap-4 text-center md:col-start-2 md:row-start-2 md:items-start md:text-left">
           {/*
             The amount first — it is what the invoice is — with its token
@@ -91,7 +91,12 @@ export default function Pay() {
             it is the part a payer can check, it just no longer has to lead.
           */}
           <div className="flex flex-col items-center gap-3 md:items-start">
-            <AssetAmount amount={invoice.amount} symbol={invoice.asset.symbol} image={invoice.asset.image} />
+            <AssetAmount
+              amount={invoice.amount}
+              symbol={invoice.asset.symbol}
+              image={invoice.asset.image}
+              className="md:justify-start"
+            />
             <span className="rounded-pill border border-border px-2 py-0.5 text-label text-text-muted">
               {invoice.asset.private ? 'Private transfer' : 'Public transfer'}
             </span>

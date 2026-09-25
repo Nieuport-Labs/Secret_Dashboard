@@ -1,8 +1,9 @@
 import { Fuel } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 
 import BuyCreditsModal from '@/components/gas/BuyCreditsModal'
 import { formatAmount } from '@/lib/format'
+import { useBuyCreditsDialog } from '@/store/buyCreditsDialog'
 import { useFeePayer, vaultCredit } from '@/store/feePayer'
 import { useWallet } from '@/store/wallet'
 
@@ -17,7 +18,9 @@ export default function GasCreditsChip() {
   const address = useWallet((state) => state.address)
   const grants = useFeePayer((state) => state.grants)
   const refresh = useFeePayer((state) => state.refresh)
-  const [buyOpen, setBuyOpen] = useState(false)
+  const buyOpen = useBuyCreditsDialog((state) => state.open)
+  const showBuy = useBuyCreditsDialog((state) => state.show)
+  const hideBuy = useBuyCreditsDialog((state) => state.hide)
 
   useEffect(() => {
     void refresh()
@@ -38,13 +41,13 @@ export default function GasCreditsChip() {
           made the header strip read as a row of buttons. */}
       <button
         type="button"
-        onClick={() => setBuyOpen(true)}
+        onClick={showBuy}
         className="state-layer flex items-center gap-1.5 rounded-control px-2.5 py-1.5 text-base font-medium text-accent"
       >
         <Fuel size={14} aria-hidden />
         {label}
       </button>
-      <BuyCreditsModal open={buyOpen} onClose={() => setBuyOpen(false)} />
+      <BuyCreditsModal open={buyOpen} onClose={hideBuy} />
     </>
   )
 }

@@ -1,27 +1,91 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { queryAllBalances } from '@/lib/bank'
-import { mapWithLimit } from '@/lib/concurrency'
+import { hedged, mapWithLimit } from '@/lib/concurrency'
 import { errorMessage } from '@/lib/errors'
 import { fiatValue } from '@/lib/format'
 import { fetchPrices } from '@/lib/prices'
-import { queryBalance, type BalanceOutcome, type Snip20Auth } from '@/lib/snip20'
+import { grpcAvailable } from '@/lib/grpcQuery'
+import { queryBalance, queryBalancesBatched, type BalanceOutcome, type Snip20Auth } from '@/lib/snip20'
 import { loadWatchlist, rememberTokens } from '@/lib/watchlist'
 import { allTokenAddresses, allTokens, tokenByAddress, type TokenInfo } from '@/tokens/registry'
 import { tokenAddressForBankDenom } from '@/tokens/routes'
 import { DENOM } from '@/chains/secret4'
 import { useSettings } from '@/store/settings'
-import { useWallet } from '@/store/wallet'
+import { queryClientPool, useWallet } from '@/store/wallet'
+
+const CACHE_KEY = (address: string) => `secret-dashboard:balances:v1:${address}`
+
+/**
+ * The last balances read for an account, kept in this browser so the list is
+ * there the moment the page opens instead of after a sweep. Amounts only, for
+ * tokens that answered; the next read replaces them, and a token missing from
+ * it is not carried over. Nothing leaves the device: this is what the wallet
+ * screen already showed, stored where only this browser reads it.
+ */
+function cachedBalances(address: string): TokenBalance[] {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY(address))
+    if (!raw) return []
+    const entries = JSON.parse(raw) as Array<[string, string]>
+    return entries.flatMap(([contract, amount]) => {
+      const token = tokenByAddress(contract)
+      return token ? [{ token, outcome: { status: 'ok' as const, amount } }] : []
+    })
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Keep what a read found. A watchlist read covers fewer tokens than a sweep,
+ * so it updates the entries it read and keeps the others; a sweep replaces
+ * the lot.
+ */
+function rememberBalances(address: string, rows: TokenBalance[], sweep: boolean): void {
+  try {
+    const read = new Map(
+      rows.flatMap((row) =>
+        row.outcome.status === 'ok' ? [[row.token.address, row.outcome.amount] as const] : []
+      )
+    )
+    const kept = sweep
+      ? new Map<string, string>()
+      : new Map(
+          cachedBalances(address).map((row) => [
+            row.token.address,
+            (row.outcome as { amount: string }).amount
+          ])
+        )
+    for (const [contract, amount] of read) kept.set(contract, amount)
+    localStorage.setItem(CACHE_KEY(address), JSON.stringify([...kept].filter(([, amount]) => amount !== '0')))
+  } catch {
+    // Only a head start.
+  }
+}
 
 /** CoinGecko's id for SCRT itself. */
 const SCRT_PRICE_ID = 'secret'
 
 /**
- * How many contract reads run at once. Deliberately modest: the chain has two
- * working public providers, and a sweep of the whole registry is 96 encrypted
- * queries.
+ * How many contract reads run at once, per LCD.
+ *
+ * Measured on secret-4 (2026-09): the public LCDs speak HTTP/2, so the
+ * browser's six-per-host limit does not apply and every read shares one
+ * connection. A read takes 230–475 ms, nearly all of it the node running the
+ * query in its enclave, so the sweep's length is how many rounds it takes —
+ * 67 tokens six at a time was eleven rounds. Sixteen is four or five, and
+ * still modest enough that a node does not start refusing.
  */
-const QUERY_CONCURRENCY = 6
+const QUERY_CONCURRENCY = 16
+
+/**
+ * A read still unanswered after this long is asked a second time, of another
+ * node where there is one, and whichever answer comes first is used. Most
+ * reads take a quarter of a second; a few took over two, and a sweep is only
+ * as fast as its slowest read. The second request is only ever sent for those.
+ */
+const HEDGE_AFTER_MS = 1_000
 
 /**
  * Balances are re-read on this interval regardless of push notifications.
@@ -150,6 +214,15 @@ export function useBalances(auth: Snip20Auth | undefined, owner?: string, contra
 
   const scanAll = useCallback(() => setRequest((r) => ({ nonce: r.nonce + 1, sweep: true })), [])
 
+  // Last visit's balances, on screen at once while this visit's read runs.
+  useEffect(() => {
+    if (!address || pinned || auth === undefined) return
+    const cached = cachedBalances(address)
+    if (cached.length > 0) setTokens((current) => (current.length > 0 ? current : cached))
+    // Once per account; the read that follows replaces these.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, authKey])
+
   useEffect(() => {
     if (!address) return
     const timer = setInterval(refresh, REFRESH_INTERVAL_MS)
@@ -243,14 +316,63 @@ export function useBalances(auth: Snip20Auth | undefined, owner?: string, contra
       }
       setScrtPrice(prices.get(SCRT_PRICE_ID))
 
-      const outcomes = await mapWithLimit(
-        contracts,
-        QUERY_CONCURRENCY,
-        async (contract) => [contract, await queryBalance(client, auth!, contract)] as const,
-        (done, total) => {
-          if (!cancelled && sweep) setScanProgress([done, total])
-        }
-      )
+      // With the gRPC path up, most tokens come back a batch at a time; only
+      // what that could not read goes through the lanes below.
+      let done = 0
+      const progress = (count: number) => {
+        done += count
+        if (!cancelled && sweep) setScanProgress([done, contracts.length])
+      }
+      let batched: Map<string, BalanceOutcome> | undefined
+      if (grpcAvailable()) {
+        let reported = 0
+        batched = await queryBalancesBatched(client, auth!, contracts, (answered) => {
+          progress(answered - reported)
+          reported = answered
+        }).catch(() => undefined)
+      }
+      const settled = batched
+        ? contracts.filter((contract) => batched!.get(contract)?.status !== 'error')
+        : []
+      const remaining = contracts.filter((contract) => !settled.includes(contract))
+      if (batched) done = settled.length
+
+      /*
+       * Spread across every LCD that answers, a lane each: two providers finish
+       * a sweep in about half the time one does. A read that is slow or fails
+       * is asked again of the next node (`hedged`) before it counts as failed.
+       */
+      const pool = await queryClientPool()
+      const lanes = pool.length > 0 ? pool : [client]
+      const laneOutcomes = (
+        await Promise.all(
+          lanes.map((laneClient, lane) =>
+            mapWithLimit(
+              remaining.filter((_, index) => index % lanes.length === lane),
+              QUERY_CONCURRENCY,
+              async (contract) => {
+                // The backup asks the next node along, or the same one again
+                // when it is the only one — a slow answer is often one busy
+                // backend behind a load balancer, not the whole provider.
+                const backup = lanes[(lane + 1) % lanes.length]
+                const outcome = await hedged(
+                  () => queryBalance(laneClient, auth!, contract),
+                  () => queryBalance(backup, auth!, contract),
+                  HEDGE_AFTER_MS,
+                  // A permit problem is an answer, not a slow node.
+                  (answer) => answer.status !== 'error'
+                )
+                progress(1)
+                return [contract, outcome] as const
+              }
+            )
+          )
+        )
+      ).flat()
+      const outcomes = [
+        ...settled.map((contract) => [contract, batched!.get(contract)!] as const),
+        ...laneOutcomes
+      ]
 
       if (cancelled) return
 
@@ -276,7 +398,10 @@ export function useBalances(auth: Snip20Auth | undefined, owner?: string, contra
       // Anything with a balance is worth reading again next time without a
       // sweep — but only when this read was the registry-wide kind. A pinned
       // read knows less than the watchlist does and must not overwrite it.
-      if (!pinned) rememberTokens(address, held)
+      if (!pinned) {
+        rememberTokens(address, held)
+        rememberBalances(address, rows, sweep)
+      }
 
       setTokens(rows)
       setLoading(false)

@@ -1,6 +1,7 @@
 import type { SecretNetworkClient } from 'secretjs'
 
-import { codeHashFor } from '@/lib/codeHash'
+import { batchQuery } from '@/lib/batchQuery'
+import { codeHashFor, codeHashesFor } from '@/lib/codeHash'
 import { errorMessage } from '@/lib/errors'
 import { covers, withPermit, type Permit } from '@/lib/permit'
 
@@ -81,6 +82,31 @@ export async function queryTokenInfo(
   return info
 }
 
+/** A balance reply, read into an outcome. */
+function balanceOutcome(reply: BalanceReply | undefined): BalanceOutcome {
+  // A rejected permit comes back as a normal reply carrying an error object,
+  // not as a thrown exception — so this branch is not optional.
+  if (reply?.viewing_key_error) {
+    return {
+      status: 'unauthorized',
+      message: reply.viewing_key_error.msg ?? 'The token rejected this permit.'
+    }
+  }
+
+  const amount = reply?.balance?.amount
+  if (typeof amount !== 'string') {
+    return { status: 'error', message: `Unexpected reply: ${JSON.stringify(reply).slice(0, 160)}` }
+  }
+
+  return { status: 'ok', amount }
+}
+
+function balanceQuery(auth: Snip20Auth): object {
+  return auth.kind === 'permit'
+    ? withPermit(auth.permit, { balance: {} })
+    : { balance: { address: auth.address, key: auth.key } }
+}
+
 export async function queryBalance(
   client: SecretNetworkClient,
   auth: Snip20Auth,
@@ -93,27 +119,10 @@ export async function queryBalance(
     const reply = (await client.query.compute.queryContract({
       contract_address: contractAddress,
       code_hash: codeHash,
-      query:
-        auth.kind === 'permit'
-          ? withPermit(auth.permit, { balance: {} })
-          : { balance: { address: auth.address, key: auth.key } }
+      query: balanceQuery(auth)
     })) as BalanceReply
 
-    // A rejected permit comes back as a normal reply carrying an error object,
-    // not as a thrown exception — so this branch is not optional.
-    if (reply?.viewing_key_error) {
-      return {
-        status: 'unauthorized',
-        message: reply.viewing_key_error.msg ?? 'The token rejected this permit.'
-      }
-    }
-
-    const amount = reply?.balance?.amount
-    if (typeof amount !== 'string') {
-      return { status: 'error', message: `Unexpected reply: ${JSON.stringify(reply).slice(0, 160)}` }
-    }
-
-    return { status: 'ok', amount }
+    return balanceOutcome(reply)
   } catch (error) {
     // Via the helper: a contract rejecting the permit comes back as secretjs's
     // thrown JSON body, which "[object Object]" hid — classifying a permit
@@ -141,6 +150,53 @@ export async function queryBalances(
     contractAddresses.map(async (address) => [address, await queryBalance(client, auth, address)] as const)
   )
   return new Map(entries)
+}
+
+/**
+ * Balances for many tokens through the batch router, a handful per request.
+ *
+ * Only worth it where the query can travel as a request body — the gRPC path
+ * (`lib/grpcQuery.ts`): a permit is several kB, and through the LCD's URL each
+ * one goes alone anyway (`lib/batchQuery.ts`). A token that could not be read
+ * this way says so in its outcome, and the caller reads it on its own.
+ */
+export async function queryBalancesBatched(
+  client: SecretNetworkClient,
+  auth: Snip20Auth,
+  contractAddresses: string[],
+  onProgress?: (done: number, total: number) => void
+): Promise<Map<string, BalanceOutcome>> {
+  const outcomes = new Map<string, BalanceOutcome>()
+  const asked = contractAddresses.filter((address) => {
+    if (auth.kind === 'permit' && !covers(auth.permit, address)) {
+      outcomes.set(address, { status: 'not-covered' })
+      return false
+    }
+    return true
+  })
+
+  const hashes = await codeHashesFor(client, asked)
+
+  const query = balanceQuery(auth)
+  const answers = await batchQuery(
+    client,
+    asked
+      .filter((address) => hashes.has(address))
+      .map((address) => ({ id: address, contract: { address, codeHash: hashes.get(address)! }, query })),
+    // Each permit is checked by signature inside the router's one query; ten
+    // stays well inside a node's query gas, and a refused batch is halved.
+    { size: 10, onChunk: onProgress, lcdFallback: false }
+  )
+
+  for (const address of asked) {
+    const answer = answers.get(address)
+    if (!answer) outcomes.set(address, { status: 'error', message: 'No answer.' })
+    else if (answer.ok) outcomes.set(address, balanceOutcome(answer.value as BalanceReply))
+    else if (/unauthorized|permit|signature/i.test(answer.error)) {
+      outcomes.set(address, { status: 'unauthorized', message: answer.error })
+    } else outcomes.set(address, { status: 'error', message: answer.error })
+  }
+  return outcomes
 }
 
 export interface Transfer {

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Button from '@/components/ui/Button'
 import Picker from '@/components/ui/Picker'
 import Modal from '@/components/ui/Modal'
+import ToggleRow from '@/components/ui/ToggleRow'
 import { DEFAULT_LCD_URLS, DEFAULT_RPC_URLS, DISPLAY_DENOM } from '@/chains/secret4'
 import {
   forgetResolvedEndpoints,
@@ -17,11 +18,13 @@ import { errorMessage } from '@/lib/errors'
 import { availableFee, type FeeGrant } from '@/lib/feegrant-sdk'
 import { formatAmount, shortenAddress } from '@/lib/format'
 import { queryTokenInfo } from '@/lib/snip20'
+import { canAuthorizeDevice } from '@/lib/settingsSync'
 import { rememberTokens } from '@/lib/watchlist'
 import { cn } from '@/lib/cn'
 import { useCustomTokens } from '@/store/customTokens'
 import { useFeePayer } from '@/store/feePayer'
 import { useSettings, type FeeMode, type Theme } from '@/store/settings'
+import { authorizeAndSync, useSettingsSync, type SyncStatus } from '@/store/settingsSync'
 import { useWallet } from '@/store/wallet'
 
 interface Props {
@@ -70,6 +73,27 @@ export default function SettingsModal({ open, onClose }: Props) {
       */}
       <div className="grid gap-x-10 gap-y-6 md:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-6">
+          <section className="flex flex-col gap-3">
+            <h3 className="text-base font-semibold">Gas and assets</h3>
+            <ToggleRow
+              label="Auto-refill gas credits"
+              tag="Recommended"
+              description={
+                settings.gasMode === 'autorefill'
+                  ? 'The app keeps your gas credits topped up, never below 5.'
+                  : `Off: fees come out of your own ${DISPLAY_DENOM}, and watching that balance is up to you.`
+              }
+              checked={settings.gasMode === 'autorefill'}
+              onChange={(on) => settings.set('gasMode', on ? 'autorefill' : 'scrt')}
+            />
+            <ToggleRow
+              label="Expert mode"
+              description={`Lets you unwrap non-${DISPLAY_DENOM} assets to their public state.`}
+              checked={settings.assetMode === 'expert'}
+              onChange={(on) => settings.set('assetMode', on ? 'expert' : 'easy')}
+            />
+          </section>
+
           <section className="flex flex-col gap-3">
             <h3 className="text-base font-semibold">Transaction fees</h3>
 
@@ -155,12 +179,80 @@ export default function SettingsModal({ open, onClose }: Props) {
         </div>
 
         <div className="flex min-w-0 flex-col gap-6">
+          <SyncSection />
           <EndpointSection />
           <PermitSection />
           <CustomTokensSection />
         </div>
       </div>
     </Modal>
+  )
+}
+
+const SYNC_STATUS: Record<SyncStatus, string> = {
+  idle: 'Not synced yet.',
+  syncing: 'Syncing…',
+  synced: 'Synced with your account. Other devices pick up changes when they next load.',
+  unauthorized: 'Changes are kept on this device only until it is allowed to sync.',
+  unsupported: 'This wallet cannot sign messages, so settings stay on this device.',
+  'not-on-chain':
+    'Kept on this device for now. Settings sync once this account has received its first transaction.',
+  offline: 'The settings server could not be reached. Changes are kept here and sent later.',
+  error: 'The last sync failed. Changes are kept here and sent with the next one.'
+}
+
+/**
+ * Where the settings live. Everything above follows the connected account
+ * between devices, except the endpoints; this says whether that is working,
+ * and offers the one wallet prompt that makes it work on this device.
+ */
+function SyncSection() {
+  const address = useWallet((state) => (state.status === 'connected' ? state.address : undefined))
+  const walletId = useWallet((state) => state.walletId)
+  const status = useSettingsSync((state) => state.status)
+  const message = useSettingsSync((state) => state.message)
+  const [authorizing, setAuthorizing] = useState(false)
+
+  if (!address || !walletId) {
+    return (
+      <section className="flex flex-col gap-3">
+        <h3 className="text-base font-semibold">Sync</h3>
+        <p className="text-sm text-text-muted">
+          Connect a wallet to sync these settings across your devices.
+        </p>
+      </section>
+    )
+  }
+
+  const canAuthorize = status === 'unauthorized' && canAuthorizeDevice(walletId)
+
+  return (
+    <section className="flex flex-col gap-3">
+      <h3 className="text-base font-semibold">Sync</h3>
+      <p className="text-sm text-text-muted">
+        {canAuthorizeDevice(walletId) ? SYNC_STATUS[status] : SYNC_STATUS.unsupported}
+      </p>
+      {message && status !== 'synced' && status !== 'syncing' ? (
+        <p className="text-sm text-text-faint">{message}</p>
+      ) : null}
+      {canAuthorize ? (
+        <Button
+          variant="soft"
+          shape="control"
+          size="sm"
+          loading={authorizing}
+          onClick={() => {
+            setAuthorizing(true)
+            void authorizeAndSync(walletId, address).finally(() => setAuthorizing(false))
+          }}
+        >
+          Sync this device
+        </Button>
+      ) : null}
+      <p className="text-sm text-text-faint">
+        Endpoints stay on this device. Syncing takes one free signature per device, not one per change.
+      </p>
+    </section>
   )
 }
 

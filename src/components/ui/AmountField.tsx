@@ -17,6 +17,8 @@ interface Props {
   decimals: number
   error?: string
   label?: string
+  /** What `available` is, on the line above the figure. */
+  availableLabel?: string
   /**
    * Choices for the trigger beside the figure. Omitted where the asset is not
    * the user's to pick — an unwrap has exactly one thing it can return.
@@ -44,6 +46,7 @@ export default function AmountField({
   decimals,
   error,
   label = 'Amount',
+  availableLabel = 'Balance',
   options,
   optionsLabel = 'Token',
   value,
@@ -57,7 +60,7 @@ export default function AmountField({
         <span className="text-label text-text-muted">{label}</span>
         {available !== undefined ? (
           <span className="text-label tabular-nums text-text-faint">
-            Balance {formatAmount(available, { decimals })} {symbol}
+            {availableLabel} {formatAmount(available, { decimals })} {symbol}
           </span>
         ) : null}
       </div>

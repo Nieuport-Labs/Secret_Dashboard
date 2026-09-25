@@ -58,7 +58,8 @@ export default function Onboarding() {
             Every transaction costs a fraction of a {DISPLAY_DENOM}, which is why an account holding none
             cannot do anything at all — not even accept help. This dashboard works around that in two places:
             someone else can cover your fees with a grant, and bridging in can swap a slice of what you send
-            into gas on the way.
+            into gas on the way. Once you can pay one fee, gas credits can be bought with any private token
+            you hold.
           </p>
           <p>
             Unlike most chains, what your transaction <em>does</em> is encrypted. Anyone can see that you sent

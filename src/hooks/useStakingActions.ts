@@ -5,13 +5,17 @@ import { GAS } from '@/chains/secret4'
 import {
   MSG_BEGIN_REDELEGATE,
   MSG_DELEGATE,
+  MSG_EXECUTE_CONTRACT,
   MSG_SET_AUTO_RESTAKE,
   MSG_UNDELEGATE,
   MSG_WITHDRAW_REWARD
 } from '@/lib/msgTypes'
+import { codeHashFor } from '@/lib/codeHash'
 import { errorMessage } from '@/lib/errors'
 import { sendTx } from '@/lib/sendTx'
+import { redeemMsg } from '@/lib/snip20'
 import { coin, stakingMessages } from '@/lib/staking'
+import { SSCRT_ADDRESS } from '@/tokens/registry'
 import { useWallet } from '@/store/wallet'
 
 export type ActionState =
@@ -55,20 +59,43 @@ export function useStakingActions(onSuccess?: () => void) {
     [client, address, onSuccess]
   )
 
+  /**
+   * Stake `amount` with a validator, out of public SCRT or, with `fromSscrt`,
+   * out of sSCRT: unwrapped and staked in the same transaction, so the SCRT
+   * the unwrap frees is delegated before anything else can spend it.
+   */
   const delegate = useCallback(
-    async (validatorAddress: string, amount: string) => {
+    async (validatorAddress: string, amount: string, fromSscrt = false) => {
       if (!address) return
       const { MsgDelegate } = await stakingMessages()
+      const stake = new MsgDelegate({
+        delegator_address: address,
+        validator_address: validatorAddress,
+        amount: coin(amount)
+      })
+      if (!fromSscrt) {
+        await broadcast([stake], GAS.delegate, [MSG_DELEGATE])
+        return
+      }
+      const queryClient = useWallet.getState().queryClient
+      if (!queryClient) return
+      const [{ MsgExecuteContract }, codeHash] = await Promise.all([
+        import('secretjs'),
+        codeHashFor(queryClient, SSCRT_ADDRESS)
+      ])
       await broadcast(
         [
-          new MsgDelegate({
-            delegator_address: address,
-            validator_address: validatorAddress,
-            amount: coin(amount)
-          })
+          new MsgExecuteContract({
+            sender: address,
+            contract_address: SSCRT_ADDRESS,
+            code_hash: codeHash,
+            msg: redeemMsg(amount),
+            sent_funds: []
+          }),
+          stake
         ],
-        GAS.delegate,
-        [MSG_DELEGATE]
+        GAS.unwrap + GAS.delegate,
+        [MSG_EXECUTE_CONTRACT, MSG_DELEGATE]
       )
     },
     [address, broadcast]

@@ -7,7 +7,12 @@ import { cn } from '@/lib/cn'
 
 interface Props {
   open: boolean
-  onClose: () => void
+  /**
+   * Left out for a dialog that must be finished, not dismissed — the first-run
+   * questions. Without it there is no close button, and neither the scrim nor
+   * Escape closes it.
+   */
+  onClose?: () => void
   title: string
   description?: string
   /**
@@ -47,7 +52,7 @@ export default function Modal({
   size = 'md',
   children
 }: Props) {
-  const panel = useFocusTrap(open, onClose)
+  const panel = useFocusTrap(open, onClose ?? ignore)
 
   if (!open) return null
 
@@ -58,6 +63,7 @@ export default function Modal({
         aria-label="Close"
         tabIndex={-1}
         onClick={onClose}
+        disabled={!onClose}
         className="absolute inset-0 bg-scrim backdrop-blur-sm"
       />
 
@@ -110,14 +116,16 @@ export default function Modal({
               {description ? <p className="mt-1 text-base text-text-muted">{description}</p> : null}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="state-layer -m-1.5 shrink-0 rounded-pill p-1.5 text-text-muted"
-          >
-            <X size={18} aria-hidden />
-          </button>
+          {onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="state-layer -m-1.5 shrink-0 rounded-pill p-1.5 text-text-muted"
+            >
+              <X size={18} aria-hidden />
+            </button>
+          ) : null}
         </div>
         {children}
       </div>
@@ -125,3 +133,5 @@ export default function Modal({
     document.body
   )
 }
+
+function ignore(): void {}

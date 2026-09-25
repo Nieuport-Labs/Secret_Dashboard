@@ -34,7 +34,7 @@ import {
   type TokenInfo
 } from '@/tokens/registry'
 import { bankDenomFor } from '@/tokens/routes'
-import { useSettings } from '@/store/settings'
+import { canUnwrap, useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 
 interface Props {
@@ -143,6 +143,7 @@ export default function BalanceList({
 }: Props) {
   const navigate = useNavigate()
   const currency = useSettings((state) => state.currency)
+  const assetMode = useSettings((state) => state.assetMode)
   const address = useWallet((state) => state.address)
   /** These balances belong to an account that acts by proposing, not by signing. */
   const proposing = mode === 'propose'
@@ -476,7 +477,11 @@ export default function BalanceList({
                       </MenuItem>
                     ) : null}
 
-                    {row.private && row.contract && bankDenomFor(row.contract) ? (
+                    {/* Easy mode unwraps sSCRT only — see `canUnwrap`. */}
+                    {row.private &&
+                    row.contract &&
+                    bankDenomFor(row.contract) &&
+                    canUnwrap(assetMode, row.contract) ? (
                       <MenuItem
                         icon={<ShieldOff size={16} aria-hidden />}
                         onClick={() => onUnwrap(row.contract!)}

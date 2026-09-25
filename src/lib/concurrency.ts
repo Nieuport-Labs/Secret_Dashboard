@@ -29,3 +29,64 @@ export async function mapWithLimit<T, R>(
   await Promise.all(runners)
   return results
 }
+
+/**
+ * `first()`, and — if it has not answered well within `delay` ms, or has
+ * already failed — `second()` as well; whichever answers well first wins. When
+ * neither does, the first one's answer is returned.
+ *
+ * A hedged request: the cure for a tail of slow answers, at the cost of a
+ * second request only for the answers that were slow.
+ */
+export function hedged<T>(
+  first: () => Promise<T>,
+  second: () => Promise<T>,
+  delay: number,
+  good: (answer: T) => boolean
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let done = false
+    let hedging = false
+    const results: Array<{ value: T } | { error: unknown } | undefined> = []
+
+    const finishIfAllIn = () => {
+      if (done || results.filter(Boolean).length < (hedging ? 2 : 1)) return
+      done = true
+      // Neither answered well: the first one's answer, or the second's if the first threw.
+      const answer = results.find((result) => result !== undefined && 'value' in result)
+      if (answer && 'value' in answer) resolve(answer.value)
+      else reject((results[0] as { error: unknown } | undefined)?.error)
+    }
+
+    const track = (index: number, attempt: Promise<T>) =>
+      attempt.then(
+        (value) => {
+          results[index] = { value }
+          if (!done && good(value)) {
+            done = true
+            clearTimeout(timer)
+            resolve(value)
+            return
+          }
+          // A bad first answer starts the hedge now rather than after the delay.
+          if (index === 0) hedge()
+          finishIfAllIn()
+        },
+        (error: unknown) => {
+          results[index] = { error }
+          if (index === 0) hedge()
+          finishIfAllIn()
+        }
+      )
+
+    const hedge = () => {
+      if (done || hedging) return
+      hedging = true
+      clearTimeout(timer)
+      void track(1, second())
+    }
+
+    const timer = setTimeout(hedge, delay)
+    void track(0, first())
+  })
+}

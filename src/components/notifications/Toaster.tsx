@@ -1,8 +1,9 @@
-import { AlertCircle, CheckCircle2, Clock, ExternalLink, Loader2, X } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock, ExternalLink, Fuel, Loader2, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
+import { useBuyCreditsDialog } from '@/store/buyCreditsDialog'
 import { useNotifications, type Toast } from '@/store/notifications'
 import { useTransactions, type TrackedTx } from '@/store/transactions'
 
@@ -42,6 +43,7 @@ export default function Toaster() {
 
 function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
   const navigate = useNavigate()
+  const showBuy = useBuyCreditsDialog((state) => state.show)
 
   return (
     <div className="glass-panel pointer-events-auto w-full rounded-card p-4 motion-safe:animate-[toast-in_var(--duration-medium)_var(--ease-emphasised)]">
@@ -50,6 +52,41 @@ function ToastCard({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
           <AlertCircle size={16} aria-hidden className="mt-px shrink-0 text-negative" />
           <p className="text-base">{toast.message}</p>
         </div>
+      ) : toast.kind === 'gas-empty' ? (
+        <>
+          <div className="flex items-start gap-2.5">
+            <Fuel size={16} aria-hidden className="mt-0.5 shrink-0 text-accent" />
+            <p className="text-base">{toast.message}</p>
+          </div>
+          <div className="mt-3 flex gap-2.5">
+            {/* In the app, not off to a swap site: the dialog swaps any
+                token the account holds, fee included. */}
+            <Button
+              variant="primary"
+              shape="control"
+              className="flex-1"
+              onClick={() => {
+                onDismiss()
+                showBuy()
+              }}
+            >
+              Buy gas credits
+            </Button>
+            <Button
+              variant="secondary"
+              shape="control"
+              onClick={() => {
+                onDismiss()
+                navigate('/bridge')
+              }}
+            >
+              Bridge
+            </Button>
+            <Button variant="secondary" shape="control" onClick={onDismiss}>
+              Dismiss
+            </Button>
+          </div>
+        </>
       ) : (
         <>
           <div className="flex items-center justify-between gap-3">
