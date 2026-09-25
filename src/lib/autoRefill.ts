@@ -9,6 +9,7 @@ import {
   balancesOf,
   bestExactOutAnywhere,
   PURCHASE_GAS,
+  purchaseGas,
   purchaseMessages,
   slippageFor,
   swappableTokens
@@ -21,7 +22,6 @@ import {
   pairsOf,
   quoteIn,
   reservesFor,
-  swapGas,
   swapMessage,
   type Quote,
   type Route
@@ -123,7 +123,7 @@ function noticeNoSscrt(): void {
 
 interface SwapPlan {
   message: Msg
-  gas: number
+  route: Route
   /** sSCRT the swap is guaranteed to return; the router refuses anything less. */
   minOut: bigint
 }
@@ -180,12 +180,14 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
 
   for (const { balance, best, routes } of valued) {
     // Enough to cover `need` with room for slippage: pay only for that.
-    const exact = await bestExactOutAnywhere(queryClient, routes, reserves, need)
+    const exact = await bestExactOutAnywhere(queryClient, routes, reserves, need, (route) =>
+      BigInt(estimateFee(purchaseGas(route), GAS_PRICE_USCRT))
+    )
 
     if (exact && exact.amountIn <= balance) {
       return {
         message: await swapMessage(queryClient, address, exact.route, exact.amountIn, need),
-        gas: swapGas(exact.route),
+        route: exact.route,
         minOut: need
       }
     }
@@ -195,7 +197,7 @@ async function planSwap(address: string, permit: Permit, need: bigint): Promise<
     if (minOut < MIN_SWAP_OUT) continue
     return {
       message: await swapMessage(queryClient, address, best.route, best.amountIn, minOut),
-      gas: swapGas(best.route),
+      route: best.route,
       minOut
     }
   }
@@ -257,7 +259,8 @@ export async function refillFor(
 
   return {
     amount,
-    gas: (unwrap > 0n ? REFILL_GAS : GAS.buyGasCredit) + (swap?.gas ?? 0),
+    // A swap always comes with an unwrap, of what it returns.
+    gas: unwrap > 0n ? purchaseGas(swap?.route) : GAS.buyGasCredit,
     messages: await purchaseMessages(queryClient, address, { unwrap, total: amount }, swap?.message)
   }
 }

@@ -248,5 +248,65 @@ check('asking for the whole pool is refused', swapIn(X, Y, Y, FEE_NUM, FEE_DEN) 
   check("while the path keeps the pair's record, which the router checks", path[0].token0.code_hash === 'h')
 }
 
+{
+  const { bestExactOut } = await import('../src/lib/gasPurchase.ts')
+  const ref = (address: string) => ({ address, codeHash: 'h' })
+  const pair = (address: string, a: string, b: string) => ({
+    contract: ref(address),
+    token0: ref(a),
+    token1: ref(b),
+    stable: false
+  })
+  // A direct pool a little dearer than a three-hop way round.
+  const pairs = [
+    pair('d', 'USDC', 'SSCRT'),
+    pair('a', 'USDC', 'X'),
+    pair('b', 'X', 'Y'),
+    pair('c', 'Y', 'SSCRT')
+  ]
+  const deep = 10n ** 15n
+  const reserves = new Map([
+    ['d', { amount0: deep, amount1: (deep * 97n) / 100n, feeNum: 3n, feeDen: 1000n }],
+    ['a', { amount0: deep, amount1: deep, feeNum: 0n, feeDen: 1000n }],
+    ['b', { amount0: deep, amount1: deep, feeNum: 0n, feeDen: 1000n }],
+    ['c', { amount0: deep, amount1: deep, feeNum: 0n, feeDen: 1000n }]
+  ])
+  const routes = findRoutes(pairs, 'USDC', 'SSCRT')
+  const fee = (route: { length: number }) => BigInt(route.length) * 35_000n
+  const small = 1_000_000n
+  check('on price alone, the longer route wins', bestExactOut(routes, reserves, small)?.route.length === 3)
+  check(
+    "with each hop's fee counted, a small purchase takes the direct pool",
+    bestExactOut(routes, reserves, small, fee)?.route.length === 1
+  )
+  check(
+    'and a large one still the longer route, where the fees are small beside the price',
+    bestExactOut(routes, reserves, 1_000_000_000n, fee)?.route.length === 3
+  )
+}
+
+{
+  const store = new Map<string, string>()
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key)
+    }
+  })
+  const { gasLimitFor, rememberGasUsed } = await import('../src/lib/gasMemory.ts')
+  check('an unseen shape gets the hand-sized limit', gasLimitFor('buy:x', 2_200_000) === 2_200_000)
+  rememberGasUsed('buy:x', 1_406_932)
+  rememberGasUsed('buy:x', 1_390_000)
+  const learned = gasLimitFor('buy:x', 2_200_000)
+  check(
+    'a seen one gets what it used, with a small margin over the most',
+    learned > 1_406_932 && learned < 1_600_000,
+    learned
+  )
+  check('shapes are kept apart', gasLimitFor('buy:y', 2_200_000) === 2_200_000)
+}
+
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed > 0) process.exit(1)

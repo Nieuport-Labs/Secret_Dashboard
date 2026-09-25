@@ -1,8 +1,10 @@
 import type { Msg, SecretNetworkClient } from 'secretjs'
 
-import { DENOM, GAS, GAS_VAULT_ADDRESS } from '@/chains/secret4'
+import { DENOM, GAS, GAS_PRICE_USCRT, GAS_VAULT_ADDRESS } from '@/chains/secret4'
 import { codeHashFor } from '@/lib/codeHash'
 import { mapWithLimit } from '@/lib/concurrency'
+import { estimateFee } from '@/lib/feegrant-sdk'
+import { gasLimitFor, rememberGasUsed } from '@/lib/gasMemory'
 import { covers, type Permit } from '@/lib/permit'
 import {
   bestSimulated,
@@ -12,6 +14,7 @@ import {
   pairsOf,
   quoteOut,
   reservesFor,
+  swapGas,
   type Quote,
   type Reserves,
   type Route
@@ -48,6 +51,30 @@ export type PaddedQuote = Quote & { slippageBps: bigint }
 
 /** Unwrap plus the vault's execute; a swap adds its own. */
 export const PURCHASE_GAS = GAS.unwrap + GAS.buyGasCredit
+
+/**
+ * A purchase's shape for `lib/gasMemory.ts`: the token it swaps and every pool
+ * on the way, since each token contract and each pool costs its own gas.
+ */
+function purchaseShape(route?: Route): string {
+  return route
+    ? `buy-credits:${route[0].from.address}>${route.map((hop) => hop.pair.contract.address).join('>')}`
+    : 'buy-credits:sscrt'
+}
+
+/**
+ * The gas limit for buying credits out of sSCRT, after swapping along `route`
+ * when there is one: what the same purchase used last time, with a small
+ * margin, or the hand-sized estimate until it has been seen.
+ */
+export function purchaseGas(route?: Route): number {
+  return gasLimitFor(purchaseShape(route), PURCHASE_GAS + (route ? swapGas(route) : 0))
+}
+
+/** Record what a purchase that went through actually used, for `purchaseGas`. */
+export function rememberPurchaseGas(route: Route | undefined, gasUsed: number): void {
+  rememberGasUsed(purchaseShape(route), gasUsed)
+}
 
 /**
  * Buy `total` of credit for `address`, of which `unwrap` comes out of sSCRT
@@ -111,6 +138,27 @@ export async function swappableTokens(
 }
 
 /**
+ * What a route's own transaction costs in fees, in units of what comes out —
+ * when that is SCRT or sSCRT, simply its fee in uscrt. A longer route can buy
+ * a little more per token and still cost more once its extra hops are paid for,
+ * and for the small amounts gas credits are bought in, a hop's fee is not
+ * small: so routes are compared on both.
+ */
+export type GasCost = (route: Route) => bigint
+
+/** `quote`'s price plus its route's fee, in the input token: what it really costs. */
+function totalCost(quote: Quote, gasCost?: GasCost): bigint {
+  if (!gasCost || quote.amountOut <= 0n) return quote.amountIn
+  return quote.amountIn + (gasCost(quote.route) * quote.amountIn) / quote.amountOut
+}
+
+function cheapestOf(quotes: Quote[], gasCost?: GasCost): Quote | undefined {
+  return quotes
+    .map((quote) => ({ quote, cost: totalCost(quote, gasCost) }))
+    .sort((a, b) => (a.cost === b.cost ? 0 : a.cost < b.cost ? -1 : 1))[0]?.quote
+}
+
+/**
  * The cheapest way along `routes` to get `amount` out, padded by the slippage
  * its own price impact calls for — so `amount` is what the swap can promise as
  * its minimum. Pure arithmetic on reserves already read: the impact and the
@@ -119,18 +167,18 @@ export async function swappableTokens(
 export function bestExactOut(
   routes: Route[],
   reserves: Map<string, Reserves>,
-  amount: bigint
+  amount: bigint,
+  gasCost?: GasCost
 ): PaddedQuote | undefined {
-  const cheapest = (candidates: Route[], out: bigint) =>
+  const quotesFor = (candidates: Route[], out: bigint) =>
     candidates
       .map((route) => quoteOut(route, reserves, out))
       .filter((quote): quote is Quote => quote !== undefined)
-      .sort((a, b) => (a.amountIn === b.amountIn ? 0 : a.amountIn < b.amountIn ? -1 : 1))[0]
 
-  const bare = cheapest(routes, amount)
+  const bare = cheapestOf(quotesFor(routes, amount), gasCost)
   if (!bare) return undefined
   const slippageBps = slippageFor(bare.impactBps)
-  const padded = cheapest([bare.route], (amount * 10_000n) / (10_000n - slippageBps))
+  const [padded] = quotesFor([bare.route], (amount * 10_000n) / (10_000n - slippageBps))
   return padded ? { ...padded, slippageBps } : undefined
 }
 
@@ -143,19 +191,30 @@ export async function bestExactOutAnywhere(
   client: SecretNetworkClient,
   routes: Route[],
   reserves: Map<string, Reserves>,
-  amount: bigint
+  amount: bigint,
+  gasCost?: GasCost
 ): Promise<PaddedQuote | undefined> {
   const local = bestExactOut(
     routes.filter((route) => !isSimulated(route)),
     reserves,
-    amount
+    amount,
+    gasCost
   )
   const stable = routes.filter(isSimulated)
   if (stable.length === 0) return local
-  const simulated = await bestSimulated(client, stable, reserves, amount, slippageFor, local?.amountIn).catch(
-    () => undefined
-  )
-  return simulated && (!local || simulated.amountIn < local.amountIn) ? simulated : local
+  // Fees only make a stable route dearer, so one whose price alone cannot
+  // beat the best constant-product total is not worth refining.
+  const simulated = await bestSimulated(
+    client,
+    stable,
+    reserves,
+    amount,
+    slippageFor,
+    local ? totalCost(local, gasCost) : undefined
+  ).catch(() => undefined)
+  if (!simulated) return local
+  if (!local) return simulated
+  return totalCost(simulated, gasCost) < totalCost(local, gasCost) ? simulated : local
 }
 
 /**
@@ -166,11 +225,12 @@ export async function quoteInto(
   client: SecretNetworkClient,
   token: string,
   target: string,
-  amount: bigint
+  amount: bigint,
+  gasCost?: GasCost
 ): Promise<PaddedQuote | undefined> {
   const routes = findRoutes(await listPairs(client), token, target)
   if (routes.length === 0) return undefined
-  return bestExactOutAnywhere(client, routes, await reservesFor(client, pairsOf(routes)), amount)
+  return bestExactOutAnywhere(client, routes, await reservesFor(client, pairsOf(routes)), amount, gasCost)
 }
 
 /**
@@ -209,5 +269,8 @@ export function quoteForSscrt(
   token: string,
   amount: bigint
 ): Promise<PaddedQuote | undefined> {
-  return quoteInto(client, token, SSCRT_ADDRESS, amount)
+  // sSCRT is SCRT, so a route's fee in uscrt is already in units of the output.
+  return quoteInto(client, token, SSCRT_ADDRESS, amount, (route) =>
+    BigInt(estimateFee(purchaseGas(route), GAS_PRICE_USCRT))
+  )
 }

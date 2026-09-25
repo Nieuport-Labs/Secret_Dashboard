@@ -21,7 +21,8 @@
     "test:settings": "node --experimental-transform-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-settings.ts",
     "test:refill": "node --experimental-transform-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-refill.ts",
     "test:batch": "node --experimental-transform-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-batch.ts",
-    "test:grpc": "node --experimental-transform-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-grpc.ts"
+    "test:grpc": "node --experimental-transform-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-grpc.ts",
+    "test:faucet": "node --experimental-transform-types --no-warnings --import ./scripts/register-alias.mjs scripts/test-faucet.ts"
   },
   "dependencies": {
     "@cosmjs/amino": "^0.32.4",

@@ -11,6 +11,7 @@ import {
   type Selection
 } from '@/lib/feegrant-sdk'
 import { errorMessage } from '@/lib/errors'
+import { faucetGranter } from '@/lib/faucet'
 import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 
@@ -73,15 +74,21 @@ export const useFeePayer = create<FeePayerState>()((set, get) => ({
 
   resolve: (gasLimit, msgTypeUrls) => {
     const { feeMode, feeGranter } = useSettings.getState()
-    return selectFeeGrant(get().grants, {
-      mode: feeMode,
-      granter: feeGranter || undefined,
-      // The same gas price the signing library is given. An estimate below what
-      // is actually charged is the one way to have a grant judged able to cover
-      // a transaction it then fails.
-      fee: estimateFee(gasLimit, GAS_PRICE_USCRT),
-      msgTypeUrls
-    })
+    // A starter grant from the community faucet is for buying gas credits,
+    // which asks for it by name (`BuyCreditsModal`); nothing else spends it.
+    const starter = faucetGranter()
+    return selectFeeGrant(
+      get().grants.filter((grant) => grant.granter !== starter),
+      {
+        mode: feeMode,
+        granter: feeGranter || undefined,
+        // The same gas price the signing library is given. An estimate below what
+        // is actually charged is the one way to have a grant judged able to cover
+        // a transaction it then fails.
+        fee: estimateFee(gasLimit, GAS_PRICE_USCRT),
+        msgTypeUrls
+      }
+    )
   },
 
   granterFor: (gasLimit, msgTypeUrls) => get().resolve(gasLimit, msgTypeUrls).granter

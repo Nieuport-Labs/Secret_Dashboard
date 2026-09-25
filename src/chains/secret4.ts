@@ -34,6 +34,14 @@ export const BECH32_VALCONS_PREFIX = 'secretvalcons'
 export const GAS_PRICE_USCRT = 0.1
 
 /**
+ * The chain registry's fixed minimum, which every public node accepts (they
+ * report 0.0125). Used only where the fee has to fit a small budget it would
+ * not fit at `GAS_PRICE_USCRT` — a starter grant from the community faucet —
+ * and never to judge whether a grant covers something in general.
+ */
+export const LOWEST_GAS_PRICE_USCRT = 0.05
+
+/**
  * Margin applied on top of every hand-sized gas limit below. Real executions
  * sit close to their estimate but occasionally exceed it (state size, branch
  * taken, chain load), and running out of gas burns the fee while doing

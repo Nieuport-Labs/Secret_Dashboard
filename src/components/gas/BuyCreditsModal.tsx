@@ -12,6 +12,7 @@ import {
   GAS,
   GAS_PRICE_USCRT,
   GAS_VAULT_ADDRESS,
+  LOWEST_GAS_PRICE_USCRT,
   explorerTxUrl
 } from '@/chains/secret4'
 import { usePermit } from '@/hooks/usePermit'
@@ -19,10 +20,19 @@ import { useBalances } from '@/hooks/useBalances'
 import { cn } from '@/lib/cn'
 import { errorMessage } from '@/lib/errors'
 import { formatAmount, toBaseUnits } from '@/lib/format'
-import { balancesOf, PURCHASE_GAS, purchaseMessages, quoteForSscrt, swappableTokens } from '@/lib/gasPurchase'
+import { claimStarterGrant } from '@/lib/faucet'
+import { estimateFee } from '@/lib/feegrant-sdk'
+import {
+  balancesOf,
+  purchaseGas,
+  purchaseMessages,
+  quoteForSscrt,
+  rememberPurchaseGas,
+  swappableTokens
+} from '@/lib/gasPurchase'
 import { buyGasCredit } from '@/lib/gasVault'
 import { MSG_EXECUTE_CONTRACT } from '@/lib/msgTypes'
-import { swapGas, swapMessage, type Quote } from '@/lib/shadeSwap'
+import { swapMessage, type Quote } from '@/lib/shadeSwap'
 import { broadcastTracked } from '@/lib/txProgress'
 import { transactionsCovered, useFeePayer } from '@/store/feePayer'
 import { useSettings } from '@/store/settings'
@@ -173,6 +183,20 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
     }
   }
 
+  /*
+   * Who pays this purchase's fee. Out of a private token, nobody may be able
+   * to: no credits, no SCRT — the very situation credits are bought to end.
+   * Then the Secret community faucet does, with a starter grant claimed when
+   * the button is pressed.
+   */
+  const route = swapping && quote.kind === 'ready' ? quote.quote.route : undefined
+  const gasLimit = purchaseGas(route)
+  const nothingPays =
+    payWith !== NATIVE &&
+    balances.native !== undefined &&
+    !granterFor(gasLimit, [MSG_EXECUTE_CONTRACT]) &&
+    BigInt(balances.native) < BigInt(estimateFee(gasLimit, GAS_PRICE_USCRT))
+
   const ready =
     Boolean(client && address && baseUnits) &&
     !amountError &&
@@ -209,21 +233,38 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
           { unwrap: credits, total: credits },
           swap
         )
-        const gasLimit = PURCHASE_GAS + (route ? swapGas(route.route) : 0)
+        const gasLimit = purchaseGas(route?.route)
+        const types = messages.map(() => MSG_EXECUTE_CONTRACT)
+        let feeGranter = granterFor(gasLimit, types)
+        let gasPrice = GAS_PRICE_USCRT
+        if (!feeGranter && BigInt(balances.native ?? '0') < BigInt(estimateFee(gasLimit, GAS_PRICE_USCRT))) {
+          const starter = await claimStarterGrant(address)
+          // At the usual price if it fits, else at the lowest every node takes.
+          const price = [GAS_PRICE_USCRT, LOWEST_GAS_PRICE_USCRT].find(
+            (candidate) => BigInt(estimateFee(gasLimit, candidate)) <= starter.spendLimit
+          )
+          if (price === undefined) {
+            setStatus({
+              kind: 'failed',
+              message: `This route's fee (${formatAmount(estimateFee(gasLimit, LOWEST_GAS_PRICE_USCRT))} ${DISPLAY_DENOM}) is more than the Secret faucet covers (${formatAmount(starter.spendLimit.toString())} ${DISPLAY_DENOM}). Pay with sSCRT, which needs no swap.`
+            })
+            return
+          }
+          feeGranter = starter.granter
+          gasPrice = price
+        }
         tx = await broadcastTracked(
           { label: `Buy ${amount} ${creditsUnit}`, detail: `with ${paySymbol}` },
           client,
           messages,
           {
             gasLimit,
-            gasPriceInFeeDenom: GAS_PRICE_USCRT,
+            gasPriceInFeeDenom: gasPrice,
             feeDenom: DENOM,
-            feeGranter: granterFor(
-              gasLimit,
-              messages.map(() => MSG_EXECUTE_CONTRACT)
-            )
+            feeGranter
           }
         )
+        if (tx.code === 0) rememberPurchaseGas(route?.route, tx.gasUsed)
       }
 
       if (tx.code !== 0) {
@@ -274,13 +315,14 @@ function BuyCredits({ onClose }: { onClose: () => void }) {
   const selected = options.find((option) => option.id === payWith) ?? options[0]
   // With a swap, what it costs in the token is the one thing worth reading
   // here, so it takes the place of the balance line.
-  const payDetail = !swapping
-    ? selected.detail
-    : quote.kind === 'ready'
-      ? `≈ ${formatAmount(quote.quote.amountIn.toString(), { decimals: payToken?.decimals ?? 6 })} ${paySymbol} · swapped on ShadeSwap`
-      : quote.kind === 'loading'
-        ? 'Getting a price…'
-        : selected.detail
+  const payDetail =
+    (!swapping
+      ? selected.detail
+      : quote.kind === 'ready'
+        ? `≈ ${formatAmount(quote.quote.amountIn.toString(), { decimals: payToken?.decimals ?? 6 })} ${paySymbol} · swapped on ShadeSwap`
+        : quote.kind === 'loading'
+          ? 'Getting a price…'
+          : selected.detail) + (nothingPays ? ' · fee paid by the Secret faucet' : '')
 
   if (status.kind === 'done') {
     return (
