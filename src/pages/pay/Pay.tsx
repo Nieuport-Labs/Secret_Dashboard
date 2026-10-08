@@ -1,7 +1,7 @@
 import { EyeOff, FileWarning, Wallet } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import PublicWalletCorner from '@/components/layout/PublicWalletCorner'
 import Button from '@/components/ui/Button'
@@ -11,7 +11,7 @@ import ConnectToSendModal from '@/components/wallet/ConnectToSendModal'
 import PayInvoiceModal from '@/components/wallet/PayInvoiceModal'
 import { cn } from '@/lib/cn'
 import { shortenAddress } from '@/lib/format'
-import { invoiceUri, invoiceUrl, parseInvoice } from '@/lib/invoice'
+import { invoiceExpiry, invoiceUri, invoiceUrl, readInvoice } from '@/lib/invoice'
 import { profilePath } from '@/lib/profileLink'
 import { useProfileIdentity } from '@/hooks/useProfileIdentity'
 import { usePrivacy } from '@/store/privacy'
@@ -20,7 +20,11 @@ import { useWallet } from '@/store/wallet'
 type Target = 'uri' | 'link'
 
 /**
- * An invoice, at `/pay/secret1abc…?asset=…&amount=…`.
+ * An invoice, at `/pay/secret1abc…?asset=…&amount=…&id=…`.
+ *
+ * The link is read by `secret-pay`, the same as DarkShell reads it, so an
+ * invoice from either opens here — and an expired one, or one for another
+ * chain, is refused before anything can be signed.
  *
  * Built like the profile page and for the same visitor — someone who may never
  * have seen this dashboard — so it sits outside the shell too. The code is on
@@ -33,7 +37,7 @@ type Target = 'uri' | 'link'
  */
 export default function Pay() {
   const { address = '' } = useParams<{ address: string }>()
-  const [params] = useSearchParams()
+  const location = useLocation()
   const navigate = useNavigate()
 
   const hidden = usePrivacy((state) => state.hidden)
@@ -43,7 +47,7 @@ export default function Pay() {
   const [paying, setPaying] = useState(false)
   const [target, setTarget] = useState<Target>('uri')
 
-  const parsed = parseInvoice(address, params)
+  const parsed = readInvoice(`${window.location.origin}${location.pathname}${location.search}`)
   const payee = identity.name ?? shortenAddress(address, 10, 6)
 
   useEffect(() => {
@@ -55,7 +59,7 @@ export default function Pay() {
     }
     // `parsed` is rebuilt every render; what it depends on is listed instead.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payee, address, params])
+  }, [payee, address, location.search])
 
   if ('error' in parsed) {
     return (
@@ -63,7 +67,7 @@ export default function Pay() {
         <EmptyState
           icon={FileWarning}
           title="Not a valid invoice"
-          description={`${parsed.error} A link may have been copied incompletely.`}
+          description={parsed.error}
           action={<Button onClick={() => navigate('/wallet')}>Open Secret Dashboard</Button>}
         />
       </div>
@@ -71,7 +75,8 @@ export default function Pay() {
   }
 
   const { invoice } = parsed
-  const isSelf = Boolean(connected) && connected === address
+  const expiry = invoiceExpiry(invoice)
+  const isSelf = Boolean(connected) && connected === invoice.to
   const value = target === 'uri' ? invoiceUri(invoice) : invoiceUrl(invoice)
 
   return (
@@ -102,6 +107,11 @@ export default function Pay() {
             </span>
           </div>
 
+          {/* Plain text: whoever made the link wrote it. */}
+          {invoice.request.message ? (
+            <p className="max-w-full break-words text-base">{invoice.request.message}</p>
+          ) : null}
+
           <div className="flex min-w-0 max-w-full flex-col gap-0.5">
             <span className="text-base text-text-muted">
               From{' '}
@@ -109,7 +119,14 @@ export default function Pay() {
                 {payee}
               </Link>
             </span>
-            <span className="break-address font-mono text-label text-text-faint">{address}</span>
+            <span className="break-address font-mono text-label text-text-faint">{invoice.to}</span>
+            {invoice.request.id ? (
+              <span className="text-label text-text-faint">
+                <span className="font-mono">{invoice.request.id}</span>
+                {' · '}
+                {expiry ? `Valid until ${expiry.toLocaleString()}` : 'Never expires'}
+              </span>
+            ) : null}
           </div>
 
           {isSelf ? (

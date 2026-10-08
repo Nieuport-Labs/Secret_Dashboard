@@ -1,5 +1,5 @@
 /**
- * Teaches Node two things Vite already knows: the `@/` alias, and that an
+ * Teaches Node what Vite already knows: the `@/` and `secret-pay` aliases, and that an
  * import without a file extension means a TypeScript file.
  *
  * The scripts in here run on plain Node, no bundler, so they keep working when
@@ -10,6 +10,7 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const SRC = new URL('../src/', import.meta.url)
+const SECRET_PAY = new URL('../packages/secret-pay/src/index.ts', import.meta.url)
 
 /** App source imports are extensionless; Node needs the real filename. */
 function withExtension(url) {
@@ -21,6 +22,8 @@ function withExtension(url) {
 }
 
 export function resolve(specifier, context, nextResolve) {
+  if (specifier === 'secret-pay') return nextResolve(SECRET_PAY.href, context)
+
   if (specifier.startsWith('@/')) {
     return nextResolve(withExtension(new URL(specifier.slice(2), SRC)).href, context)
   }

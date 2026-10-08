@@ -25,6 +25,9 @@ import { tokenAddressForBankDenom } from '@/tokens/routes'
  * - `swap`: any other private token, swapped for that SNIP-20 on ShadeSwap
  *   with the invoice amount as the minimum return, then sent as the invoice
  *   asks (unwrapped first when it asks for the public form).
+ *
+ * An invoice with an id is always private (`readInvoice` refuses the others):
+ * the id rides as the memo of the final SNIP-20 transfer, encrypted with it.
  */
 
 export type PaySource =
@@ -47,8 +50,11 @@ export async function paymentMessages(
   to: string,
   asset: InvoiceAsset,
   amount: bigint,
-  source: PaySource
+  source: PaySource,
+  /** The invoice id, sent as the SNIP-20 transfer's memo. Only private assets can carry one. */
+  memo?: string
 ): Promise<PaymentPlan> {
+  if (memo && !asset.private) throw new Error('A memo can only travel with a private transfer.')
   const { MsgExecuteContract, MsgSend } = await import('secretjs')
   const bankSend = () =>
     new MsgSend({
@@ -65,7 +71,7 @@ export async function paymentMessages(
           sender,
           contract_address: asset.id,
           code_hash: await codeHashFor(client, asset.id),
-          msg: transferMsg(to, amount.toString()),
+          msg: transferMsg(to, amount.toString(), memo),
           sent_funds: []
         })
       ],
@@ -95,7 +101,7 @@ export async function paymentMessages(
         sender,
         contract_address: token,
         code_hash: codeHash,
-        msg: transferMsg(to, amount.toString()),
+        msg: transferMsg(to, amount.toString(), memo),
         sent_funds: []
       })
     )

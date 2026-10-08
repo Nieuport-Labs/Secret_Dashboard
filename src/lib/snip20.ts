@@ -251,11 +251,17 @@ export function redeemMsg(amount: string): { redeem: { amount: string } } {
   return { redeem: { amount } }
 }
 
+/**
+ * A private transfer. `memo` travels inside the encrypted message, so only the
+ * sender and the recipient can read it — which is what lets it carry an
+ * invoice id. Left out of the message entirely when empty.
+ */
 export function transferMsg(
   recipient: string,
-  amount: string
-): { transfer: { recipient: string; amount: string } } {
-  return { transfer: { recipient, amount } }
+  amount: string,
+  memo?: string
+): { transfer: { recipient: string; amount: string; memo?: string } } {
+  return { transfer: { recipient, amount, ...(memo ? { memo } : {}) } }
 }
 
 /**
