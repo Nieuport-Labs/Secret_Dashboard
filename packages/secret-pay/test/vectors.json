@@ -1,0 +1,71 @@
+{
+  "valid": [
+    {
+      "name": "bare address",
+      "input": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad",
+      "request": { "chain": "secret-4", "address": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad" },
+      "canonical": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad"
+    },
+    {
+      "name": "address requiring sSCRT (alias)",
+      "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=sscrt",
+      "request": { "chain": "secret-4", "address": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad", "asset": "secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek" },
+      "canonical": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek"
+    },
+    {
+      "name": "short form",
+      "input": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad:sSCRT",
+      "request": { "chain": "secret-4", "address": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad", "asset": "secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek" }
+    },
+    {
+      "name": "Secret_Dashboard invoice URI",
+      "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek&amount=12.5",
+      "request": { "chain": "secret-4", "address": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad", "asset": "secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek", "amount": "12.5" }
+    },
+    {
+      "name": "Secret_Dashboard web link (native SCRT)",
+      "input": "https://dashboard.example/pay/secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=uscrt&amount=3",
+      "request": { "chain": "secret-4", "address": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad", "asset": "uscrt", "amount": "3" }
+    },
+    {
+      "name": "full invoice with memo, id, expiry, label, message",
+      "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=sscrt&amount=0.250&memo=order%2042&id=INV-7Q2M9K4D&exp=1893456000&label=Corner%20Cafe&message=Thanks!",
+      "request": {
+        "chain": "secret-4",
+        "address": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad",
+        "asset": "secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek",
+        "amount": "0.25",
+        "memo": "order 42",
+        "id": "INV-7Q2M9K4D",
+        "exp": 1893456000,
+        "label": "Corner Cafe",
+        "message": "Thanks!"
+      },
+      "canonical": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek&amount=0.25&memo=order%2042&id=INV-7Q2M9K4D&exp=1893456000&label=Corner%20Cafe&message=Thanks!"
+    },
+    {
+      "name": "amount without asset is native",
+      "input": "SECRET:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?amount=1",
+      "request": { "chain": "secret-4", "address": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad", "asset": "uscrt", "amount": "1" }
+    },
+    {
+      "name": "unknown optional parameter is preserved",
+      "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=scrt&x-pos=7",
+      "request": { "chain": "secret-4", "address": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad", "asset": "uscrt", "extra": { "x-pos": "7" } }
+    }
+  ],
+  "invalid": [
+    { "name": "empty", "input": "  ", "error": "empty" },
+    { "name": "garbage", "input": "hello world", "error": "unrecognized" },
+    { "name": "bad checksum", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0raq", "error": "bad_address" },
+    { "name": "unknown required param", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?req-refund=1", "error": "unsupported_required_param" },
+    { "name": "duplicate param", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?amount=1&amount=2", "error": "duplicate_param" },
+    { "name": "negative amount", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=sscrt&amount=-1", "error": "bad_amount" },
+    { "name": "zero amount", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=sscrt&amount=0", "error": "bad_amount" },
+    { "name": "exponent amount", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=sscrt&amount=1e3", "error": "bad_amount" },
+    { "name": "too many decimals", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=sscrt&amount=0.0000001", "error": "too_many_decimals" },
+    { "name": "unknown symbol", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=doge", "error": "unknown_asset" },
+    { "name": "bad expiry", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?exp=tomorrow", "error": "bad_exp" },
+    { "name": "web link without /pay/", "input": "https://example.com/secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad", "error": "unrecognized" }
+  ]
+}

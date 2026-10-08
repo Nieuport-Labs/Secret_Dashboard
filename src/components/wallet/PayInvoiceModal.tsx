@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronDown, ExternalLink, Eye, Loader2, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ExternalLink, Eye, Loader2, Lock, ShieldCheck } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import Button from '@/components/ui/Button'
@@ -11,7 +11,7 @@ import { cn } from '@/lib/cn'
 import { errorMessage } from '@/lib/errors'
 import { formatAmount, shortenAddress } from '@/lib/format'
 import { balancesOf, quoteInto, swappableTokens } from '@/lib/gasPurchase'
-import { invoiceBaseUnits, type Invoice } from '@/lib/invoice'
+import { invoiceBaseUnits, invoiceExpired, type Invoice } from '@/lib/invoice'
 import { paymentMessages, settlementToken, type PaySource } from '@/lib/invoicePayment'
 import type { Quote } from '@/lib/shadeSwap'
 import { sendTx } from '@/lib/sendTx'
@@ -54,6 +54,9 @@ type QuoteState =
  * private token that can be swapped for it on ShadeSwap in the same
  * transaction (`lib/invoicePayment.ts`). The recipient gets the invoice's
  * amount of the invoice's asset either way.
+ *
+ * The invoice id goes with it as the SNIP-20 transfer's memo — shown, and not
+ * editable, because it is how the recipient recognises the payment.
  */
 export default function PayInvoiceModal({ open, onClose, invoice, onPaid }: Props) {
   return (
@@ -195,6 +198,7 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
 
   // Why the chosen way of paying cannot cover the invoice, if it cannot.
   let payError: string | undefined
+  if (invoiceExpired(invoice)) payError = 'This invoice has expired.'
   if (payWith === DIRECT && directHeld !== undefined && directHeld < amount)
     payError = `Not enough ${asset.symbol}.`
   if (payWith === UNWRAP && token && (held.get(token) ?? 0n) < amount) payError = `Not enough ${paySymbol}.`
@@ -210,6 +214,11 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
 
   const pay = async () => {
     if (!client || !queryClient || !address || !ready) return
+    // It may have expired while the dialog sat open.
+    if (invoiceExpired(invoice)) {
+      setStatus({ kind: 'failed', message: 'This invoice has expired.' })
+      return
+    }
     const source: PaySource =
       payWith === DIRECT
         ? { kind: 'direct' }
@@ -219,7 +228,15 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
 
     setStatus({ kind: 'sending' })
     try {
-      const plan = await paymentMessages(queryClient, address, invoice.to, asset, amount, source)
+      const plan = await paymentMessages(
+        queryClient,
+        address,
+        invoice.to,
+        asset,
+        amount,
+        source,
+        invoice.memo
+      )
       const tx = await sendTx(client, plan.messages, plan.gasLimit, plan.msgTypes, {
         label: `Pay ${invoice.amount} ${asset.symbol}`,
         detail:
@@ -312,6 +329,19 @@ function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () => void
           )}
         </div>
       </div>
+
+      {invoice.memo ? (
+        <div className="-mt-2 flex flex-col gap-1.5 rounded-card border border-border bg-surface px-4 py-3">
+          <span className="flex items-center gap-1.5 text-label text-text-muted">
+            <Lock size={12} aria-hidden />
+            Memo · set by the invoice
+          </span>
+          <span className="break-address font-mono text-sm">{invoice.memo}</span>
+          <span className="text-label text-text-faint">
+            Encrypted in the transfer — only you and the recipient can read it.
+          </span>
+        </div>
+      ) : null}
 
       {/* What pays for it — the same picker row as Send and gas credits. */}
       <button

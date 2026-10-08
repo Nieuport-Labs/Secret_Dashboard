@@ -1,0 +1,39 @@
+{
+  "name": "secret-pay",
+  "version": "1.0.0",
+  "description": "Secret Payment URI — a payment-request and invoice URI standard for Secret Network, with a zero-dependency reference implementation.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "SPEC.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "secret-network",
+    "payment-uri",
+    "invoice",
+    "snip-20",
+    "bip-21",
+    "cosmos"
+  ],
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^5.0.3"
+  }
+}

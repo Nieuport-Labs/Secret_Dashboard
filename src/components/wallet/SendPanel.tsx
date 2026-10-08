@@ -5,9 +5,11 @@ import {
   ExternalLink,
   Eye,
   Loader2,
+  Lock,
   ShieldCheck
 } from 'lucide-react'
 import { useEffect, useId, useMemo, useState } from 'react'
+import { MAX_MEMO_BYTES } from 'secret-pay'
 
 import AmountHero from '@/components/ui/AmountHero'
 import Button from '@/components/ui/Button'
@@ -19,6 +21,7 @@ import { chainImageUrl } from '@/chains/sources'
 import { cn } from '@/lib/cn'
 import { formatAmount, fromBaseUnits, shortenAddress, toBaseUnits } from '@/lib/format'
 import { destinationOf, planIbcSend, type IbcPlan } from '@/lib/ibcSend'
+import { invoiceExpired, readInvoice, sendAssetId, type Invoice } from '@/lib/invoice'
 import type { Balances } from '@/hooks/useBalances'
 import { useWalletActions } from '@/hooks/useWalletActions'
 import { useSettings } from '@/store/settings'
@@ -94,6 +97,12 @@ function unitPriceOf(amount: string, decimals: number, fiat: number | undefined)
  * worth saying out loud: a bank transfer is public and a SNIP-20 transfer is
  * not. That is the reason most of these tokens exist, so the form says which
  * one is about to happen.
+ *
+ * A private send can carry a memo, encrypted with the transfer. Pasting an
+ * invoice — a `secret:` URI or a `/pay/…` link — into the recipient turns the
+ * form into paying it: recipient, asset and amount come from the invoice, and
+ * the memo is its id, which is how the recipient recognises the payment, so
+ * none of them can be typed over.
  */
 export default function SendPanel({
   open,
@@ -111,6 +120,12 @@ export default function SendPanel({
   const [recipient, setRecipient] = useState(prefilled ?? '')
   const [amount, setAmount] = useState('')
   const [picking, setPicking] = useState(false)
+  const [memo, setMemo] = useState('')
+  const [showMemo, setShowMemo] = useState(false)
+  /** An invoice pasted into the recipient, which then decides everything but what pays. */
+  const [invoice, setInvoice] = useState<Invoice | undefined>()
+  /** Why something pasted as an invoice cannot be paid. */
+  const [invoiceError, setInvoiceError] = useState<string | undefined>()
   const currency = useSettings((state) => state.currency)
 
   // A panel that reopens showing the last transfer's receipt is a panel that
@@ -119,6 +134,10 @@ export default function SendPanel({
     if (!open) return
     setRecipient(prefilled ?? '')
     setAmount('')
+    setMemo('')
+    setShowMemo(false)
+    setInvoice(undefined)
+    setInvoiceError(undefined)
     actions.reset()
     if (asset) setAssetId(asset)
     // Only when the panel opens; `actions` is rebuilt on every render.
@@ -172,6 +191,36 @@ export default function SendPanel({
 
   const loadingTokens = balances.loading || balances.scanning
 
+  const payInvoice = (next: Invoice) => {
+    setInvoice(next)
+    setInvoiceError(undefined)
+    setRecipient(next.to)
+    setAssetId(sendAssetId(next.asset.id))
+    setAmount(next.amount)
+    setMemo(next.memo ?? '')
+    setShowMemo(Boolean(next.memo))
+  }
+
+  const clearInvoice = () => {
+    setInvoice(undefined)
+    setInvoiceError(undefined)
+    setRecipient(prefilled ?? '')
+    setAmount('')
+    setMemo('')
+    setShowMemo(false)
+  }
+
+  /** A typed address stays text; a pasted URI or link is read as an invoice. */
+  const typeRecipient = (value: string) => {
+    const text = value.trim()
+    if (/^(?:web\+)?secret:|^https?:\/\//i.test(text)) {
+      const read = readInvoice(text)
+      if ('invoice' in read) return payInvoice(read.invoice)
+      setInvoiceError(read.error)
+    } else setInvoiceError(undefined)
+    setRecipient(value)
+  }
+
   const trimmed = recipient.trim()
   const destination = trimmed ? destinationOf(trimmed) : undefined
   const chain = destination?.kind === 'chain' ? destination.chain : undefined
@@ -186,7 +235,8 @@ export default function SendPanel({
     meta: formatAmount(row.amount, { decimals: row.decimals })
   }))
 
-  const selected = sendable.find((row) => row.id === assetId) ?? sendable[0]
+  const held = sendable.find((row) => row.id === assetId)
+  const selected = held ?? sendable[0]
   const isPrivate = selected?.private ?? false
   const decimals = selected?.decimals ?? DECIMALS
   const symbol = selected?.symbol ?? DISPLAY_DENOM
@@ -201,29 +251,56 @@ export default function SendPanel({
     amountError = error instanceof Error ? error.message : 'Not a number.'
   }
   if (!amountError && available !== undefined && BigInt(base) > BigInt(available)) {
-    amountError = 'More than you hold.'
+    amountError = invoice ? `Not enough ${symbol} to pay this invoice.` : 'More than you hold.'
   }
+  // The fallback row is some other asset; paying an invoice with it would be
+  // paying a different invoice.
+  if (invoice && !held && !loadingTokens)
+    amountError = `You hold no ${invoice.asset.symbol} to pay this invoice.`
+
+  const memoBytes = new TextEncoder().encode(memo).length
+  const memoError =
+    memoBytes > MAX_MEMO_BYTES ? `Memo is ${memoBytes} bytes; the limit is ${MAX_MEMO_BYTES}.` : undefined
 
   const plan: IbcPlan | undefined = chain && selected ? planIbcSend(selected, chain) : undefined
 
-  const recipientError = !destination
-    ? undefined
-    : destination.kind === 'invalid'
-      ? trimmed.startsWith('secret1')
-        ? 'That address fails its checksum — a character is wrong.'
-        : 'Not a valid address — a character is wrong or missing.'
-      : destination.kind === 'unknown'
-        ? `"${destination.prefix}1…" is an address on a chain this dashboard has no route to.`
-        : chain && plan && !plan.ok
-          ? `${symbol} cannot be sent to ${chain.name}. Pick another asset.`
-          : undefined
+  const recipientError = invoiceError
+    ? invoiceError
+    : !destination
+      ? undefined
+      : destination.kind === 'invalid'
+        ? trimmed.startsWith('secret1')
+          ? 'That address fails its checksum — a character is wrong.'
+          : 'Not a valid address — a character is wrong or missing.'
+        : destination.kind === 'unknown'
+          ? `"${destination.prefix}1…" is an address on a chain this dashboard has no route to.`
+          : chain && plan && !plan.ok
+            ? `${symbol} cannot be sent to ${chain.name}. Pick another asset.`
+            : undefined
 
-  const ready = Boolean(trimmed) && !recipientError && Boolean(amount) && !amountError && BigInt(base) > 0n
+  // A memo only travels in a private transfer on this chain; it is not sent otherwise.
+  const memoApplies = isPrivate && !chain
+  const sentMemo = memoApplies ? memo.trim() || undefined : undefined
+
+  const ready =
+    Boolean(trimmed) &&
+    !recipientError &&
+    Boolean(amount) &&
+    !amountError &&
+    !(memoApplies && memoError) &&
+    (!invoice || Boolean(held)) &&
+    BigInt(base) > 0n
 
   const submit = () => {
     if (!ready || !selected) return
+    if (invoice && invoiceExpired(invoice)) {
+      setInvoiceError('This invoice has expired.')
+      return
+    }
     const summary = {
-      label: `Send ${amount} ${symbol}${chain ? ` to ${chain.name}` : ''}`,
+      label: invoice
+        ? `Pay ${amount} ${symbol}`
+        : `Send ${amount} ${symbol}${chain ? ` to ${chain.name}` : ''}`,
       detail: `to ${shortenAddress(trimmed)}`
     }
     if (chain) {
@@ -238,7 +315,7 @@ export default function SendPanel({
         forward: plan.forward,
         summary
       })
-    } else if (selected.private) void actions.sendToken(selected.id, trimmed, base, summary)
+    } else if (selected.private) void actions.sendToken(selected.id, trimmed, base, summary, sentMemo)
     else void actions.sendNative(trimmed, base, selected.denom ?? DENOM, summary)
   }
 
@@ -249,6 +326,7 @@ export default function SendPanel({
           hash={actions.state.hash}
           chainName={chain?.name}
           onAgain={() => {
+            clearInvoice()
             setAmount('')
             // Back to the locked recipient, not to blank — "send another" from
             // a donation still means to the same person.
@@ -263,19 +341,22 @@ export default function SendPanel({
             <span className="text-label text-text-muted">You&rsquo;re sending</span>
             <AmountHero
               amount={amount}
-              onAmount={setAmount}
+              // Set by the invoice, like everything else it names.
+              onAmount={invoice ? () => undefined : setAmount}
               symbol={symbol}
               decimals={decimals}
               unitPrice={unitPrice}
               currency={currency}
             />
-            <ShareSlider
-              amount={amount}
-              onAmount={setAmount}
-              available={available}
-              decimals={decimals}
-              invalid={Boolean(amountError)}
-            />
+            {invoice ? null : (
+              <ShareSlider
+                amount={amount}
+                onAmount={setAmount}
+                available={available}
+                decimals={decimals}
+                invalid={Boolean(amountError)}
+              />
+            )}
           </div>
 
           {/*
@@ -287,7 +368,7 @@ export default function SendPanel({
           <button
             type="button"
             onClick={() => setPicking(true)}
-            disabled={options.length === 0 && !loadingTokens}
+            disabled={Boolean(invoice) || (options.length === 0 && !loadingTokens)}
             aria-haspopup="dialog"
             className="state-layer -mt-2 flex items-center gap-3 rounded-card border border-border bg-surface px-4 py-3 text-left disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -342,7 +423,7 @@ export default function SendPanel({
               <span className="text-label text-text-muted">To</span>
               <input
                 value={recipient}
-                onChange={(event) => setRecipient(event.target.value)}
+                onChange={(event) => typeRecipient(event.target.value)}
                 placeholder="Address on Secret, Cosmos Hub, Osmosis…"
                 spellCheck={false}
                 autoComplete="off"
@@ -352,13 +433,29 @@ export default function SendPanel({
                   true here is that the address is settled — it should still be
                   reachable, selectable and copyable.
                 */
-                readOnly={recipientLocked}
-                aria-describedby={recipientLocked ? lockedNoteId : undefined}
+                readOnly={recipientLocked || Boolean(invoice)}
+                aria-describedby={recipientLocked || invoice ? lockedNoteId : undefined}
                 className={cn(
                   'break-address bg-transparent font-mono text-sm outline-none placeholder:font-sans placeholder:text-text-faint',
-                  recipientLocked && 'cursor-default text-text-muted'
+                  (recipientLocked || invoice) && 'cursor-default text-text-muted'
                 )}
               />
+              {invoice ? (
+                <span id={lockedNoteId} className="flex flex-col gap-1 text-label text-text-faint">
+                  {invoice.request.message ? (
+                    <span className="break-words text-text-muted">{invoice.request.message}</span>
+                  ) : null}
+                  <span className="flex items-center justify-between gap-2">
+                    <span>
+                      Paying invoice{' '}
+                      {invoice.request.id ? <span className="font-mono">{invoice.request.id}</span> : null}
+                    </span>
+                    <button type="button" onClick={clearInvoice} className="text-accent hover:underline">
+                      Clear
+                    </button>
+                  </span>
+                </span>
+              ) : null}
               {recipientLocked ? (
                 <span id={lockedNoteId} className="text-label text-text-faint">
                   Set by the profile you opened this from.
@@ -377,6 +474,48 @@ export default function SendPanel({
               ) : null}
             </label>
           )}
+
+          {/*
+            The memo, for a private send only: it is encrypted with the
+            transfer, and a bank send would publish it. Tucked away until asked
+            for — most sends have none — except when an invoice set it.
+          */}
+          {memoApplies ? (
+            showMemo || invoice?.memo ? (
+              <label className="-mt-2 flex flex-col gap-1.5 rounded-card border border-border bg-surface px-4 py-3">
+                <span className="flex items-center gap-1.5 text-label text-text-muted">
+                  {invoice?.memo ? <Lock size={12} aria-hidden /> : null}
+                  {invoice?.memo ? 'Memo · set by the invoice' : 'Memo'}
+                </span>
+                <input
+                  value={memo}
+                  onChange={(event) => setMemo(event.target.value)}
+                  readOnly={Boolean(invoice?.memo)}
+                  placeholder="Private — only you and the recipient can read it"
+                  spellCheck={false}
+                  autoComplete="off"
+                  className={cn(
+                    'bg-transparent text-sm outline-none placeholder:text-text-faint',
+                    invoice?.memo && 'cursor-default font-mono text-text-muted'
+                  )}
+                />
+                {memoError ? (
+                  <span className="text-label text-negative" role="alert">
+                    {memoError}
+                  </span>
+                ) : null}
+              </label>
+            ) : (
+              <Button
+                variant="text"
+                size="sm"
+                className="-mt-3 self-center"
+                onClick={() => setShowMemo(true)}
+              >
+                + Add memo
+              </Button>
+            )
+          ) : null}
 
           {/*
             Which of the two transactions this is. Someone reaching for a
@@ -406,7 +545,8 @@ export default function SendPanel({
             ) : (
               <>
                 <ShieldCheck size={14} aria-hidden className="mt-px shrink-0 text-accent" />A SNIP-20 transfer
-                is encrypted. The chain records that you called the contract, not who was paid or how much.
+                is encrypted. The chain records that you called the contract, not who was paid, how much, or
+                the memo.
               </>
             )}
           </p>
@@ -425,13 +565,15 @@ export default function SendPanel({
             disabled={!ready}
             onClick={submit}
           >
-            {!trimmed
-              ? 'Enter a recipient'
-              : !amount
-                ? 'Enter an amount'
-                : chain
-                  ? `Send ${symbol} to ${chain.name}`
-                  : `Send ${symbol}`}
+            {invoice
+              ? `Pay ${amount} ${symbol}`
+              : !trimmed
+                ? 'Enter a recipient'
+                : !amount
+                  ? 'Enter an amount'
+                  : chain
+                    ? `Send ${symbol} to ${chain.name}`
+                    : `Send ${symbol}`}
           </Button>
         </>
       )}

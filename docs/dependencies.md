@@ -56,3 +56,16 @@ security gain.
 
 Worth revisiting if `elliptic` ever ships a fix, or if the app ever grows a
 reason to sign something itself — at which point this stops being theoretical.
+
+## `secret-pay` — vendored from DarkShell
+
+Invoices use `secret-pay`, the payment-URI package DarkShell ships, so both
+apps write and read the same links. It is not published to npm, so
+`packages/secret-pay/` is an unmodified copy of `packages/secret-pay/` from
+[Nieuport-Labs/darkshell](https://github.com/Nieuport-Labs/darkshell) at
+`5fc060187224eba9eecba6ea06475a1cb6213ebb`, resolved from source the way
+DarkShell does it: a `paths` entry in `tsconfig.app.json` (which Vite follows
+through `vite-tsconfig-paths`) and the same alias in `scripts/alias-hook.mjs`.
+
+Do not edit it here. To update, copy the directory again from DarkShell and
+change the commit above; once it is on npm, replace the copy with a dependency.

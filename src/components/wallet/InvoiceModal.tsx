@@ -1,4 +1,4 @@
-import { Check, ChevronDown, EyeOff, Share2 } from 'lucide-react'
+import { Check, ChevronDown, Copy, EyeOff, Share2 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useEffect, useMemo, useState } from 'react'
 
@@ -10,7 +10,18 @@ import { PickerDialog } from '@/components/ui/Picker'
 import { DENOM } from '@/chains/secret4'
 import { cn } from '@/lib/cn'
 import { shortenAddress } from '@/lib/format'
-import { invoiceAssets, invoiceBaseUnits, invoiceUri, invoiceUrl, type Invoice } from '@/lib/invoice'
+import {
+  invoiceAssets,
+  invoiceBaseUnits,
+  invoiceExpiry,
+  invoiceUri,
+  invoiceUrl,
+  MAX_MESSAGE,
+  newInvoice,
+  paymentRequest,
+  VALIDITY,
+  type Invoice
+} from '@/lib/invoice'
 import { fetchPrices } from '@/lib/prices'
 import { usePrivacy } from '@/store/privacy'
 import { useSettings } from '@/store/settings'
@@ -38,6 +49,11 @@ type Target = 'uri' | 'link'
 /**
  * Creating an invoice, in two dialogs.
  *
+ * The invoice is a `secret-pay` request — the format DarkShell reads and
+ * writes — with a fresh id the payer sends back as the transfer memo. It is
+ * kept nowhere: close the second dialog and it is gone, so the link has to be
+ * copied or shared first.
+ *
  * The first looks like Send on purpose — an amount, first and largest, and the
  * asset under it — because it is the same question asked from the other side.
  * What it leaves out is the address: an invoice is always paid to the account
@@ -51,23 +67,35 @@ type Target = 'uri' | 'link'
 export default function InvoiceModal({ open, onClose, onBack, address, purpose = 'invoice' }: Props) {
   const phone = purpose === 'phone'
   const expert = useSettings((state) => state.assetMode === 'expert')
-  // Easy mode asks for SCRT and private tokens only: the public vouchers are
-  // what expert mode's unwrapping is for.
+  /*
+   * An invoice asks for private tokens only: its id has to come back as the
+   * memo of a SNIP-20 transfer, and a bank send has nowhere private to put it.
+   * Paying from a phone is a tip, with no id to carry, so SCRT is offered
+   * there too — easy mode leaves the public vouchers to expert mode's
+   * unwrapping.
+   */
   const assets = useMemo(
-    () => invoiceAssets().filter((option) => expert || option.private || option.id === DENOM),
-    [expert]
+    () =>
+      invoiceAssets().filter((option) =>
+        phone ? expert || option.private || option.id === DENOM : option.private
+      ),
+    [expert, phone]
   )
 
-  const [assetId, setAssetId] = useState(DENOM)
+  const [assetId, setAssetId] = useState(phone ? DENOM : (assets[0]?.id ?? DENOM))
   const [amount, setAmount] = useState('')
+  const [message, setMessage] = useState('')
+  const [validity, setValidity] = useState(0)
   const [picking, setPicking] = useState(false)
   const [invoice, setInvoice] = useState<Invoice | undefined>()
 
   // A fresh form every time it is opened; an invoice from last time showing
-  // up again reads as if it was never sent.
+  // up again reads as if it was never sent. Nothing about it was kept.
   useEffect(() => {
     if (!open) return
     setAmount('')
+    setMessage('')
+    setValidity(0)
     setInvoice(undefined)
   }, [open])
 
@@ -163,6 +191,50 @@ export default function InvoiceModal({ open, onClose, onBack, address, purpose =
           </span>
         ) : null}
 
+        {phone ? null : (
+          <>
+            <label className="-mt-2 flex flex-col gap-1.5 rounded-card border border-border bg-surface px-4 py-3">
+              <span className="flex items-center justify-between text-label text-text-muted">
+                Description
+                <span className="tabular-nums text-text-faint">
+                  {message.length}/{MAX_MESSAGE}
+                </span>
+              </span>
+              <input
+                value={message}
+                onChange={(event) => setMessage(event.target.value.slice(0, MAX_MESSAGE))}
+                maxLength={MAX_MESSAGE}
+                placeholder="Optional — shown to the payer"
+                autoComplete="off"
+                className="bg-transparent text-base outline-none placeholder:text-text-faint"
+              />
+            </label>
+
+            <div className="-mt-2 flex flex-col gap-1.5 rounded-card border border-border bg-surface px-4 py-3">
+              <span className="text-label text-text-muted">Valid for</span>
+              <div className="flex items-center gap-1 rounded-pill border border-border p-1" role="group">
+                {VALIDITY.map((option) => (
+                  <button
+                    key={option.seconds}
+                    type="button"
+                    aria-pressed={validity === option.seconds}
+                    onClick={() => setValidity(option.seconds)}
+                    className={cn(
+                      'state-layer flex-1 rounded-pill px-2 py-1.5 text-sm font-medium',
+                      'transition-colors duration-[var(--duration-short)] ease-[var(--ease-standard)]',
+                      validity === option.seconds
+                        ? 'bg-accent-strong text-[var(--color-accent-text)]'
+                        : 'text-text-muted'
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
         {phone ? (
           <p className="text-label text-text-muted">
             Choose what to send, then scan the code with the wallet on your phone — nothing is signed in this
@@ -170,8 +242,8 @@ export default function InvoiceModal({ open, onClose, onBack, address, purpose =
           </p>
         ) : (
           <p className="text-label text-text-muted">
-            Paid to your connected account, {shortenAddress(address)}. The invoice is only a link — nothing is
-            stored, and it cannot be changed once shared.
+            Paid to your connected account, {shortenAddress(address)}, as a private transfer. The invoice is
+            only a link — nothing is stored, and it cannot be changed once shared.
           </p>
         )}
 
@@ -180,7 +252,13 @@ export default function InvoiceModal({ open, onClose, onBack, address, purpose =
           block
           size="lg"
           disabled={!valid}
-          onClick={() => setInvoice({ to: address, asset, amount: trimmed })}
+          onClick={() =>
+            setInvoice(
+              phone
+                ? paymentRequest(address, asset, trimmed)
+                : newInvoice({ to: address, asset, amount: trimmed, validity, message })
+            )
+          }
         >
           {!trimmed ? 'Enter an amount' : phone ? 'Show payment code' : 'Create invoice'}
         </Button>
@@ -200,12 +278,12 @@ export default function InvoiceModal({ open, onClose, onBack, address, purpose =
 }
 
 /**
- * The made invoice: its code, and a link to share.
+ * The made invoice: its code, and a link to copy or share.
  *
  * The code is the URI by default — that is what a wallet on a phone scans —
  * with a switch to the link, for a phone camera that should open the pay page
- * instead. Share always hands over the link, because a link is what can be
- * pasted into a chat and opened by anyone, wallet or not.
+ * instead. Copy and Share always hand over the link, because a link is what
+ * can be pasted into a chat and opened by anyone, wallet or not.
  */
 function InvoiceCreated({
   open,
@@ -227,14 +305,24 @@ function InvoiceCreated({
 
   const link = invoiceUrl(invoice)
   const value = phone || target === 'uri' ? invoiceUri(invoice) : link
+  const expiry = invoiceExpiry(invoice)
+  const canShare = typeof navigator.share === 'function'
 
-  const share = async () => {
+  const copy = async () => {
     try {
       await navigator.clipboard.writeText(link)
       setCopied(true)
       setTimeout(() => setCopied(false), 1600)
     } catch {
       // Refused clipboard access is not worth an error; the code is on screen.
+    }
+  }
+
+  const share = async () => {
+    try {
+      await navigator.share({ title: `Invoice ${invoice.request.id ?? ''}`.trim(), url: link })
+    } catch {
+      // Dismissed, or refused — the code and Copy are still there.
     }
   }
 
@@ -254,6 +342,16 @@ function InvoiceCreated({
               just left; saying it again here is noise. */}
           {phone ? null : ` to ${shortenAddress(invoice.to)}`}
         </span>
+        {invoice.request.message ? (
+          <p className="break-words text-base text-text-muted">{invoice.request.message}</p>
+        ) : null}
+        {invoice.request.id ? (
+          <span className="text-label text-text-faint">
+            <span className="font-mono">{invoice.request.id}</span>
+            {' · '}
+            {expiry ? `Valid until ${expiry.toLocaleString()}` : 'Never expires'}
+          </span>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-3">
@@ -309,15 +407,33 @@ function InvoiceCreated({
           so there is nothing to type there.
         </p>
       ) : (
-        <Button
-          variant="primary"
-          block
-          size="lg"
-          icon={copied ? <Check size={16} aria-hidden /> : <Share2 size={16} aria-hidden />}
-          onClick={() => void share()}
-        >
-          {copied ? 'Link copied' : 'Share'}
-        </Button>
+        <>
+          <div className="flex gap-2">
+            <Button
+              variant={canShare ? 'secondary' : 'primary'}
+              block
+              size="lg"
+              icon={copied ? <Check size={16} aria-hidden /> : <Copy size={16} aria-hidden />}
+              onClick={() => void copy()}
+            >
+              {copied ? 'Copied' : 'Copy link'}
+            </Button>
+            {canShare ? (
+              <Button
+                variant="primary"
+                block
+                size="lg"
+                icon={<Share2 size={16} aria-hidden />}
+                onClick={() => void share()}
+              >
+                Share
+              </Button>
+            ) : null}
+          </div>
+          <p className="text-label text-text-faint">
+            Nothing is saved. Once this closes, the invoice exists only where you sent it.
+          </p>
+        </>
       )}
     </Modal>
   )

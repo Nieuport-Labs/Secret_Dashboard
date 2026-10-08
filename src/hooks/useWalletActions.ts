@@ -84,10 +84,10 @@ export function useWalletActions(onSuccess?: () => void) {
 
   /**
    * A SNIP-20 transfer. Private: the chain sees a contract execution, not who
-   * was paid or how much.
+   * was paid or how much — nor the memo, which is encrypted with the rest.
    */
   const sendToken = useCallback(
-    async (contract: string, recipient: string, amount: string, summary?: TxSummary) => {
+    async (contract: string, recipient: string, amount: string, summary?: TxSummary, memo?: string) => {
       if (!address || !queryClient) return
       const { MsgExecuteContract } = await import('secretjs')
       await broadcast(
@@ -96,7 +96,7 @@ export function useWalletActions(onSuccess?: () => void) {
             sender: address,
             contract_address: contract,
             code_hash: await codeHashFor(queryClient, contract),
-            msg: transferMsg(recipient, amount),
+            msg: transferMsg(recipient, amount, memo),
             sent_funds: []
           })
         ],
