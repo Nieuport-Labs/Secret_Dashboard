@@ -187,12 +187,12 @@ export function paymentRequest(to: string, asset: InvoiceAsset, amount: string):
 }
 
 /**
- * `secret:<address>?…` — what goes into the QR code. `secret-pay` 1.1 writes
- * the URI without a scheme; the dashboard keeps `secret:` in its QR codes so a
- * phone's camera still offers to open a wallet (readers accept both).
+ * `<address>?…` — the payment URI, without a scheme (`secret-pay` 1.1): for a
+ * wallet's own scanner. A phone camera opens a wallet from the link instead
+ * (`invoiceUrl`), which DarkShell claims through `/.well-known/assetlinks.json`.
  */
 export function invoiceUri(invoice: Invoice): string {
-  return `secret:${encodePaymentUri(invoice.request)}`
+  return encodePaymentUri(invoice.request)
 }
 
 /** The shareable `/pay/…` link, built from the live origin, for the same reason as `profileUrl`. */

@@ -56,7 +56,7 @@ export default function Pay() {
   const identity = useProfileIdentity(address)
 
   const [paying, setPaying] = useState(false)
-  const [target, setTarget] = useState<Target>('uri')
+  const [target, setTarget] = useState<Target>('link')
 
   // DarkShell brings the payer back with its outcome appended; the invoice is read without it
   const parsed = readInvoice(withoutReturn(`${window.location.origin}${location.pathname}${location.search}`))
@@ -248,8 +248,9 @@ export default function Pay() {
         </div>
 
         {/*
-          URI by default — that is what a wallet on a phone scans. The link is
-          for a phone camera that should open this page instead.
+          The link by default: a phone camera opens it, and with DarkShell
+          installed it opens straight in DarkShell's payment sheet (assetlinks),
+          otherwise this page. The URI is for a wallet's own scanner.
         */}
         <div className="flex items-center gap-1 justify-self-center rounded-pill border border-border p-1 md:col-start-1 md:row-start-1 md:justify-self-start">
           {(['uri', 'link'] as Target[]).map((option) => (
