@@ -186,9 +186,13 @@ export function paymentRequest(to: string, asset: InvoiceAsset, amount: string):
   return fromRequest({ chain: CHAIN_ID, address: to, asset: asset.id, amount: normalized }, asset)
 }
 
-/** `secret:<address>?…` — what goes into the QR code. */
+/**
+ * `secret:<address>?…` — what goes into the QR code. `secret-pay` 1.1 writes
+ * the URI without a scheme; the dashboard keeps `secret:` in its QR codes so a
+ * phone's camera still offers to open a wallet (readers accept both).
+ */
 export function invoiceUri(invoice: Invoice): string {
-  return encodePaymentUri(invoice.request)
+  return `secret:${encodePaymentUri(invoice.request)}`
 }
 
 /** The shareable `/pay/…` link, built from the live origin, for the same reason as `profileUrl`. */
@@ -216,6 +220,7 @@ const PARSE_ERRORS: Record<ParseErrorCode, string> = {
   bad_amount: 'The amount in this link is invalid.',
   too_many_decimals: 'The amount in this link has more decimal places than its asset.',
   bad_exp: 'The expiry in this link is invalid.',
+  bad_return: 'The page this link returns to is not a secure (https) address.',
   memo_too_long: 'The reference in this link is too long.',
   duplicate_param: 'This link names the same parameter twice.',
   unsupported_required_param: 'This link needs a feature this dashboard does not support.'

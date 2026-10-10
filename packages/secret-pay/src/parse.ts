@@ -6,7 +6,7 @@ import type { ParseErrorCode, ParseResult, PaymentRequest } from './types.js';
 export const ADDRESS_PREFIX = 'secret';
 export const MAX_MEMO_BYTES = 256;
 
-const KNOWN = new Set(['asset', 'amount', 'memo', 'id', 'exp', 'label', 'message', 'chain']);
+const KNOWN = new Set(['asset', 'amount', 'memo', 'id', 'exp', 'label', 'message', 'return', 'chain']);
 
 /** Parameters understood by this version that may also appear with a `req-` prefix. */
 const KNOWN_REQUIRED = new Set<string>();
@@ -15,7 +15,7 @@ type Fail = { ok: false; error: ParseErrorCode; detail?: string };
 const fail = (error: ParseErrorCode, detail?: string): Fail => ({ ok: false, error, detail });
 
 /**
- * Parses anything a user might paste or scan: a `secret:` URI, a `…/pay/<addr>`
+ * Parses anything a user might paste or scan: `<addr>?…`, a `secret:` URI, a `…/pay/<addr>`
  * web link, the short form `<addr>:<SYMBOL>`, or a bare address.
  */
 export function parsePayment(input: string): ParseResult {
@@ -42,6 +42,10 @@ export function parsePayment(input: string): ParseResult {
 	// short form: <address>:<asset>
 	const short = /^([a-z0-9]+1[02-9ac-hj-np-z]+):([^\s:?]+)$/i.exec(raw);
 	if (short) return build(short[1]!, `asset=${encodeURIComponent(short[2]!)}`, 'short');
+
+	// address with parameters: <address>?asset=…&amount=…
+	const withQuery = /^([a-z0-9]+1[02-9ac-hj-np-z]+)\?([^#]*)$/i.exec(raw);
+	if (withQuery) return build(withQuery[1]!, withQuery[2]!, 'uri');
 
 	// bare address
 	if (/^[a-z0-9]+1[02-9ac-hj-np-z]+$/i.test(raw)) return build(raw, '', 'address');
@@ -133,9 +137,28 @@ function build(address: string, search: string, source: 'uri' | 'link' | 'short'
 	if (label) req.label = label;
 	const message = params.get('message');
 	if (message) req.message = message;
+	const ret = params.get('return');
+	if (ret !== undefined && ret !== '') {
+		if (!isReturnUrl(ret)) return fail('bad_return', ret);
+		req.return = ret;
+	}
 	if (Object.keys(extra).length) req.extra = extra;
 
 	return { ok: true, request: req, source };
+}
+
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** A `return` URL must be https (or http on the developer's own machine), without credentials. */
+export function isReturnUrl(value: string): boolean {
+	let u: URL;
+	try {
+		u = new URL(value);
+	} catch {
+		return false;
+	}
+	if (u.username || u.password) return false;
+	return u.protocol === 'https:' || (u.protocol === 'http:' && LOCAL_HOSTS.has(u.hostname));
 }
 
 /** True once the request's expiry has passed. `now` is unix seconds. */

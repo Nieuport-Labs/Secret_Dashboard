@@ -21,6 +21,8 @@ export interface PaymentRequest {
 	label?: string;
 	/** human-readable note for the payer */
 	message?: string;
+	/** where the payer's wallet sends the payer back after paying or cancelling (https, or http on localhost) */
+	return?: string;
 	/** unknown optional parameters, preserved for round-tripping */
 	extra?: Record<string, string>;
 }
@@ -34,6 +36,7 @@ export type ParseErrorCode =
 	| 'bad_amount'
 	| 'too_many_decimals'
 	| 'bad_exp'
+	| 'bad_return'
 	| 'memo_too_long'
 	| 'duplicate_param'
 	| 'unsupported_required_param'

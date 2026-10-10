@@ -4,7 +4,7 @@ import type { PaymentRequest } from './types.js';
 export const SCHEME = 'secret';
 
 /** Parameter order used by the encoder; keeps output stable for tests and diffs. */
-const ORDER = ['asset', 'amount', 'memo', 'id', 'exp', 'label', 'message', 'chain'] as const;
+const ORDER = ['asset', 'amount', 'memo', 'id', 'exp', 'label', 'message', 'return', 'chain'] as const;
 
 function query(req: PaymentRequest): string {
 	const pairs: [string, string][] = [];
@@ -16,10 +16,14 @@ function query(req: PaymentRequest): string {
 	return pairs.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
 }
 
-/** `secret:<address>?asset=…&amount=…` — what goes into a QR code. */
+/**
+ * `<address>?asset=…&amount=…` — what goes into a QR code and a shared text.
+ * No `secret:` scheme: the bech32 prefix already says which chain it is.
+ * (Readers still accept `secret:` URIs.)
+ */
 export function encodePaymentUri(req: PaymentRequest): string {
 	const q = query(req);
-	return `${SCHEME}:${req.address}${q ? `?${q}` : ''}`;
+	return `${req.address}${q ? `?${q}` : ''}`;
 }
 
 /** `https://host/pay/<address>?…` — the shareable web link. */

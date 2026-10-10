@@ -4,13 +4,13 @@
       "name": "bare address",
       "input": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad",
       "request": { "chain": "secret-4", "address": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad" },
-      "canonical": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad"
+      "canonical": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad"
     },
     {
       "name": "address requiring sSCRT (alias)",
       "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=sscrt",
       "request": { "chain": "secret-4", "address": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad", "asset": "secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek" },
-      "canonical": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek"
+      "canonical": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek"
     },
     {
       "name": "short form",
@@ -41,7 +41,7 @@
         "label": "Corner Cafe",
         "message": "Thanks!"
       },
-      "canonical": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek&amount=0.25&memo=order%2042&id=INV-7Q2M9K4D&exp=1893456000&label=Corner%20Cafe&message=Thanks!"
+      "canonical": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek&amount=0.25&memo=order%2042&id=INV-7Q2M9K4D&exp=1893456000&label=Corner%20Cafe&message=Thanks!"
     },
     {
       "name": "amount without asset is native",
@@ -52,6 +52,12 @@
       "name": "unknown optional parameter is preserved",
       "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=scrt&x-pos=7",
       "request": { "chain": "secret-4", "address": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad", "asset": "uscrt", "extra": { "x-pos": "7" } }
+    },
+    {
+      "name": "invoice with a return URL",
+      "input": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=sscrt&amount=3&id=INV-7Q2M9K4D&return=https%3A%2F%2Fshop.example%2Fdone%3Forder%3D42",
+      "request": { "chain": "secret-4", "address": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad", "asset": "secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek", "amount": "3", "id": "INV-7Q2M9K4D", "return": "https://shop.example/done?order=42" },
+      "canonical": "secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek&amount=3&id=INV-7Q2M9K4D&return=https%3A%2F%2Fshop.example%2Fdone%3Forder%3D42"
     }
   ],
   "invalid": [
@@ -66,6 +72,8 @@
     { "name": "too many decimals", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=sscrt&amount=0.0000001", "error": "too_many_decimals" },
     { "name": "unknown symbol", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?asset=doge", "error": "unknown_asset" },
     { "name": "bad expiry", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?exp=tomorrow", "error": "bad_exp" },
+    { "name": "javascript return URL", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?return=javascript%3Aalert(1)", "error": "bad_return" },
+    { "name": "plain http return URL", "input": "secret:secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad?return=http%3A%2F%2Fshop.example%2F", "error": "bad_return" },
     { "name": "web link without /pay/", "input": "https://example.com/secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad", "error": "unrecognized" }
   ]
 }

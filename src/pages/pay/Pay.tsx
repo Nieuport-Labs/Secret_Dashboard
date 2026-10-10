@@ -1,4 +1,4 @@
-import { EyeOff, FileWarning, Wallet } from 'lucide-react'
+import { CircleCheck, CircleX, EyeOff, FileWarning, Loader2, Smartphone, Wallet } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -11,10 +11,21 @@ import ConnectToSendModal from '@/components/wallet/ConnectToSendModal'
 import PayInvoiceModal from '@/components/wallet/PayInvoiceModal'
 import { cn } from '@/lib/cn'
 import { shortenAddress } from '@/lib/format'
+import { explorerTxUrl } from '@/chains/secret4'
+import {
+  canPayWithDarkShell,
+  darkShellUrl,
+  returnedFor,
+  txState,
+  withoutReturn,
+  type TxState
+} from '@/lib/darkshellPay'
+import { resolveLcdUrl } from '@/lib/endpoint'
 import { invoiceExpiry, invoiceUri, invoiceUrl, readInvoice } from '@/lib/invoice'
 import { profilePath } from '@/lib/profileLink'
 import { useProfileIdentity } from '@/hooks/useProfileIdentity'
 import { usePrivacy } from '@/store/privacy'
+import { useSettings } from '@/store/settings'
 import { useWallet } from '@/store/wallet'
 
 type Target = 'uri' | 'link'
@@ -47,7 +58,38 @@ export default function Pay() {
   const [paying, setPaying] = useState(false)
   const [target, setTarget] = useState<Target>('uri')
 
-  const parsed = readInvoice(`${window.location.origin}${location.pathname}${location.search}`)
+  // DarkShell brings the payer back with its outcome appended; the invoice is read without it
+  const parsed = readInvoice(withoutReturn(`${window.location.origin}${location.pathname}${location.search}`))
+  const lcdOverride = useSettings((state) => state.lcdOverride)
+  const returned = 'invoice' in parsed ? returnedFor(parsed.invoice) : null
+  const paidTx = returned?.status === 'paid' ? returned.tx : undefined
+  const [txStatus, setTxStatus] = useState<TxState | 'unknown'>('pending')
+
+  // "paid" in the URL is only what DarkShell said: look the transaction up before showing it
+  useEffect(() => {
+    if (!paidTx || !('invoice' in parsed)) return
+    const invoice = parsed.invoice
+    let stop = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const check = async (left: number) => {
+      try {
+        const state = await txState(await resolveLcdUrl(lcdOverride), paidTx, invoice)
+        if (stop) return
+        setTxStatus(state)
+        if (state === 'pending' && left > 0) timer = setTimeout(() => void check(left - 1), 3000)
+        if (state === 'pending' && left === 0) setTxStatus('unknown')
+      } catch {
+        if (!stop) timer = setTimeout(() => void check(left - 1), 3000)
+      }
+    }
+    void check(20)
+    return () => {
+      stop = true
+      clearTimeout(timer)
+    }
+    // `parsed` is rebuilt every render; the invoice is fixed by the URL, which `paidTx` comes from
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paidTx, lcdOverride])
   const payee = identity.name ?? shortenAddress(address, 10, 6)
 
   useEffect(() => {
@@ -129,10 +171,66 @@ export default function Pay() {
             ) : null}
           </div>
 
-          {isSelf ? (
+          {paidTx ? (
+            /* back from DarkShell: what the chain says about the payment it sent */
+            <div className="flex max-w-full flex-col items-center gap-1 md:items-start" role="status">
+              <span className="flex items-center gap-2 text-title">
+                {txStatus === 'confirmed' ? (
+                  <CircleCheck size={20} className="text-positive" aria-hidden />
+                ) : txStatus === 'failed' || txStatus === 'other' ? (
+                  <CircleX size={20} className="text-negative" aria-hidden />
+                ) : (
+                  <Loader2 size={18} className="animate-spin text-text-muted" aria-hidden />
+                )}
+                {txStatus === 'confirmed'
+                  ? 'Paid'
+                  : txStatus === 'failed'
+                    ? 'The payment failed'
+                    : txStatus === 'other'
+                      ? 'This transaction did not pay this invoice'
+                      : txStatus === 'unknown'
+                        ? 'Sent — not in a block yet'
+                        : 'Confirming the payment…'}
+              </span>
+              <a
+                href={explorerTxUrl(paidTx)}
+                target="_blank"
+                rel="noreferrer"
+                className="break-address font-mono text-label text-text-faint hover:underline"
+              >
+                {paidTx}
+              </a>
+            </div>
+          ) : isSelf ? (
             <p className="text-base text-text-muted">
               This is your invoice. Share the link, and whoever opens it can pay it from here.
             </p>
+          ) : canPayWithDarkShell() ? (
+            <div className="flex w-full max-w-[320px] flex-col gap-2">
+              <Button
+                variant="primary"
+                size="lg"
+                block
+                icon={<Smartphone size={16} aria-hidden />}
+                onClick={() => {
+                  window.location.href = darkShellUrl(invoice)
+                }}
+              >
+                Pay with DarkShell
+              </Button>
+              <Button
+                variant="secondary"
+                size="lg"
+                block
+                icon={<Wallet size={16} aria-hidden />}
+                onClick={() => setPaying(true)}
+              >
+                Pay with another wallet
+              </Button>
+              {returned?.status === 'cancelled' ? (
+                <p className="text-center text-label text-text-faint">Payment cancelled in DarkShell.</p>
+              ) : null}
+            </div>
           ) : (
             <Button
               variant="primary"
