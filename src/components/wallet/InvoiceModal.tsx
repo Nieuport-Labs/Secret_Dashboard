@@ -293,18 +293,19 @@ function InvoiceCreated({
   onClose
 }: {
   open: boolean
-  /** Paying from a phone: the URI only — no link to share, nothing to switch. */
+  /** Paying from a phone: the link only (a camera opens it in a wallet) — nothing to share or switch. */
   phone: boolean
   invoice: Invoice
   onBack: () => void
   onClose: () => void
 }) {
   const hidden = usePrivacy((state) => state.hidden)
-  const [target, setTarget] = useState<Target>('uri')
+  const [target, setTarget] = useState<Target>('link')
   const [copied, setCopied] = useState(false)
 
   const link = invoiceUrl(invoice)
-  const value = phone || target === 'uri' ? invoiceUri(invoice) : link
+  // a phone camera opens the link (in DarkShell when installed); the URI is for a wallet's scanner
+  const value = phone || target === 'link' ? link : invoiceUri(invoice)
   const expiry = invoiceExpiry(invoice)
   const canShare = typeof navigator.share === 'function'
 

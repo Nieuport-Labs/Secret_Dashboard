@@ -17,7 +17,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
     "baseUrl": ".",
-    "paths": { "@/*": ["./src/*"], "secret-pay": ["./packages/secret-pay/src/index.ts"] }
+    "paths": { "@/*": ["./src/*"], "secret-pay": ["./packages/secret-pay/src/index.ts"], "secret-pay/*": ["./packages/secret-pay/src/*"] }
   },
   "include": ["src", "scripts"]
 }

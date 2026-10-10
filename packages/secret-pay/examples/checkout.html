@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>secret-pay checkout example</title>
+		<!--
+			Serve the package folder after `npm run build`, e.g. `npx serve .` or
+			`python -m http.server`, then open /examples/checkout.html. On Android
+			(adb reverse tcp:8088 tcp:8088) the button opens DarkShell's payment sheet.
+		-->
+		<style>
+			body { font: 16px/1.5 system-ui, sans-serif; max-width: 30rem; margin: 2rem auto; padding: 0 1rem; color: #111; }
+			label { display: block; margin: 0.75rem 0 0.25rem; font-size: 0.875rem; color: #555; }
+			input { width: 100%; box-sizing: border-box; padding: 0.6rem; font: inherit; border: 1px solid #ccc; border-radius: 0.5rem; }
+			button { margin-top: 1.25rem; width: 100%; padding: 0.9rem; font: inherit; font-weight: 600; color: #fff; background: #111; border: 0; border-radius: 999px; }
+			code { display: block; margin-top: 1rem; padding: 0.75rem; background: #f3f3f3; border-radius: 0.5rem; word-break: break-all; font-size: 0.75rem; }
+			.result { margin-top: 1rem; padding: 0.75rem; border-radius: 0.5rem; background: #eef8ef; }
+			.result.cancelled { background: #f8f1ee; }
+		</style>
+	</head>
+	<body>
+		<h1>Corner Cafe</h1>
+		<div id="result"></div>
+		<label for="address">Pay to (your secret1… address)</label>
+		<input id="address" value="secret16dyfc744j0lrhae0xpfjxl5cnx2hu80h0p0rad" />
+		<label for="amount">Amount (sSCRT)</label>
+		<input id="amount" value="1.5" inputmode="decimal" />
+		<button id="pay" type="button">Pay with DarkShell</button>
+		<code id="uri"></code>
+
+		<script type="module">
+			import { newInvoiceId } from '../dist/index.js';
+			import { checkout, readReturn } from '../dist/checkout.js';
+
+			const SSCRT = 'secret1k0jntykt7e4g3y88ltc60czgjuqdy4c9e8fzek';
+			const $ = (id) => document.getElementById(id);
+
+			// back from the wallet: show the outcome (a hint only; confirm it with secret-pay/verify)
+			const r = readReturn();
+			if (r) {
+				$('result').className = `result ${r.status}`;
+				$('result').textContent = r.status === 'paid' ? `Paid. Invoice ${r.id ?? ''}, transaction ${r.tx ?? '?'}` : 'Payment cancelled.';
+			}
+
+			function invoice() {
+				return {
+					chain: 'secret-4',
+					address: $('address').value.trim(),
+					asset: SSCRT,
+					amount: $('amount').value.trim(),
+					id: newInvoiceId(),
+					label: 'Corner Cafe',
+					message: 'Example order',
+					exp: Math.floor(Date.now() / 1000) + 30 * 60,
+				};
+			}
+
+			$('pay').onclick = () => {
+				const back = new URL(location.href);
+				back.search = '';
+				const c = checkout(invoice(), { returnUrl: back.toString(), fallbackOrigin: 'https://dashboard.nieuportlabs.cz' });
+				$('uri').textContent = c.uri;
+				location.href = c.url;
+			};
+		</script>
+	</body>
+</html>

@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "cash.darkshell.wallet",
+      "sha256_cert_fingerprints": [
+        "8C:F6:AC:72:E9:1D:1F:56:89:72:AA:BF:DF:98:49:1A:51:B8:21:F0:6F:59:8A:E9:02:58:22:7E:20:B5:8D:AA"
+      ]
+    }
+  }
+]

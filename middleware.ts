@@ -26,7 +26,7 @@ import { isValidBech32 } from './src/lib/bech32.js'
 export const config = {
   // Anything that is not the API, a static asset, or index.html itself —
   // fetching index.html from inside this function must not re-enter it.
-  matcher: ['/((?!api/|assets/|img/|fonts/|favicon\\.svg|index\\.html).*)']
+  matcher: ['/((?!api/|assets/|img/|fonts/|\\.well-known/|favicon\\.svg|index\\.html).*)']
 }
 
 const BOT_UA =

@@ -74,7 +74,7 @@ describe('encode', () => {
 	it('round-trips URI and link', () => {
 		const uri = encodePaymentUri(inv);
 		expect(uri).toBe(
-			`secret:${ADDR}?asset=${SSCRT}&amount=12.5&id=INV-7Q2M9K4D&exp=1893456000&message=Coffee%20%26%20cake`,
+			`${ADDR}?asset=${SSCRT}&amount=12.5&id=INV-7Q2M9K4D&exp=1893456000&message=Coffee%20%26%20cake`,
 		);
 		const back = parsePayment(uri);
 		expect(back.ok && back.request).toEqual(inv);

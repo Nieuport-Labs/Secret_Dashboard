@@ -186,7 +186,11 @@ export function paymentRequest(to: string, asset: InvoiceAsset, amount: string):
   return fromRequest({ chain: CHAIN_ID, address: to, asset: asset.id, amount: normalized }, asset)
 }
 
-/** `secret:<address>?…` — what goes into the QR code. */
+/**
+ * `<address>?…` — the payment URI, without a scheme (`secret-pay` 1.1): for a
+ * wallet's own scanner. A phone camera opens a wallet from the link instead
+ * (`invoiceUrl`), which DarkShell claims through `/.well-known/assetlinks.json`.
+ */
 export function invoiceUri(invoice: Invoice): string {
   return encodePaymentUri(invoice.request)
 }
@@ -216,6 +220,7 @@ const PARSE_ERRORS: Record<ParseErrorCode, string> = {
   bad_amount: 'The amount in this link is invalid.',
   too_many_decimals: 'The amount in this link has more decimal places than its asset.',
   bad_exp: 'The expiry in this link is invalid.',
+  bad_return: 'The page this link returns to is not a secure (https) address.',
   memo_too_long: 'The reference in this link is too long.',
   duplicate_param: 'This link names the same parameter twice.',
   unsupported_required_param: 'This link needs a feature this dashboard does not support.'
