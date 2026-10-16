@@ -50,7 +50,7 @@ function rememberWallet(id: WalletId | undefined): void {
 export function lastUsedWallet(): WalletId | undefined {
   try {
     const value = localStorage.getItem(LAST_WALLET_KEY)
-    return value === 'keplr' || value === 'starshell' ? value : undefined
+    return value === 'darkshell' || value === 'keplr' || value === 'starshell' ? value : undefined
   } catch {
     return undefined
   }

@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import Button from '@/components/ui/Button'
 import { DISPLAY_DENOM } from '@/chains/secret4'
 import { DAPPS, WHERE_TO_BUY } from '@/lib/dapps'
-import { isInstalled, WALLETS, type WalletId } from '@/lib/wallet'
+import { isInstalled, WALLET_IDS, WALLETS, type WalletId } from '@/lib/wallet'
 import { cn } from '@/lib/cn'
 import { useWallet } from '@/store/wallet'
 
@@ -194,7 +194,7 @@ function WalletStep({
     <div className="flex flex-col gap-4">
       <Prose>
         <p>
-          A wallet holds the key that signs for you. Neither this dashboard nor anyone else ever sees it. Both
+          A wallet holds the key that signs for you. Neither this dashboard nor anyone else ever sees it. All
           of these are browser extensions built for Secret Network.
         </p>
       </Prose>
@@ -206,7 +206,7 @@ function WalletStep({
         </p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {(['keplr', 'starshell'] as WalletId[]).map((id) => {
+          {WALLET_IDS.map((id) => {
             const wallet = WALLETS[id]
             const installed = isInstalled(id)
 

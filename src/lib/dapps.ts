@@ -64,6 +64,14 @@ export const DAPPS: Dapp[] = [
     tags: ['dApp', 'DeFi']
   },
   {
+    name: 'DarkShell',
+    link: 'https://github.com/Nieuport-Labs/darkshell/releases',
+    description:
+      'A private sSCRT account for your phone and browser: payments, invoices and Lightning, with network fees taken care of.',
+    icon: '/img/dapps/darkshell.webp',
+    tags: ['Wallet']
+  },
+  {
     name: 'Keplr Wallet',
     link: 'https://wallet.keplr.app/',
     description: 'The interchain wallet for the Cosmos ecosystem.',
