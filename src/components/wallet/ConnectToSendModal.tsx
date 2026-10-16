@@ -2,7 +2,7 @@ import { QrCode } from 'lucide-react'
 
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
-import { WALLETS, type WalletId } from '@/lib/wallet'
+import { WALLET_IDS, WALLETS } from '@/lib/wallet'
 import { useWallet } from '@/store/wallet'
 
 interface Props {
@@ -50,7 +50,7 @@ export default function ConnectToSendModal({
     <Modal open={open} onClose={onClose} title={title}>
       <p className="text-base text-text-muted">{message}</p>
       <div className="flex flex-col gap-2.5">
-        {(['keplr', 'starshell'] as WalletId[]).map((id) => (
+        {WALLET_IDS.map((id) => (
           <Button
             key={id}
             variant="secondary"

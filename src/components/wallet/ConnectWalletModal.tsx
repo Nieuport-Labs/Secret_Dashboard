@@ -4,12 +4,12 @@ import { useNavigate } from 'react-router-dom'
 
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
-import { WALLETS, type WalletId } from '@/lib/wallet'
+import { WALLET_IDS, WALLETS, type WalletId } from '@/lib/wallet'
 import { useConnectDialog } from '@/store/connectDialog'
 import { useWallet } from '@/store/wallet'
 
 /** The two this dashboard signs with. Both speak the Keplr provider API. */
-const OFFERED: WalletId[] = ['keplr', 'starshell']
+const OFFERED: WalletId[] = WALLET_IDS
 
 /**
  * The wallet picker (Figma 30:386), as a dialog.

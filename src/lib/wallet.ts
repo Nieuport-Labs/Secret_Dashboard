@@ -1,7 +1,7 @@
 /**
- * Wallet discovery and connection: Keplr and StarShell.
+ * Wallet discovery and connection: DarkShell, Keplr and StarShell.
  *
- * Both expose the same injected API, so the app talks to one interface and only
+ * All three expose the same injected API, so the app talks to one interface and only
  * the discovery differs. A minimal structural type is declared here rather than
  * pulling in `@keplr-wallet/types`, so that what the app actually depends on is
  * visible in one place.
@@ -73,6 +73,8 @@ declare global {
   interface Window {
     keplr?: KeplrLike
     leap?: KeplrLike
+    /** DarkShell's browser extension; it also takes `window.keplr` when no other wallet has */
+    darkshell?: KeplrLike
   }
 }
 
@@ -80,7 +82,10 @@ declare global {
 /* Discovery                                                                   */
 /* -------------------------------------------------------------------------- */
 
-export type WalletId = 'keplr' | 'starshell'
+export type WalletId = 'darkshell' | 'keplr' | 'starshell'
+
+/** In the order the connect dialogs offer them. */
+export const WALLET_IDS: WalletId[] = ['darkshell', 'keplr', 'starshell']
 
 export interface WalletDescriptor {
   id: WalletId
@@ -90,6 +95,12 @@ export interface WalletDescriptor {
 }
 
 export const WALLETS: Record<WalletId, WalletDescriptor> = {
+  darkshell: {
+    id: 'darkshell',
+    name: 'DarkShell',
+    icon: '/img/wallet-darkshell.png',
+    installUrl: 'https://github.com/Nieuport-Labs/darkshell/releases'
+  },
   keplr: {
     id: 'keplr',
     name: 'Keplr',
@@ -112,9 +123,13 @@ export const WALLETS: Record<WalletId, WalletDescriptor> = {
  * a Keplr-compatible object, the same as Keplr itself. There is no reliable
  * way to tell the two apart from here, so — like the reference — this app
  * does not try: both wallet entries resolve to whatever sits at `window.keplr`.
+ *
+ * DarkShell does have its own `window.darkshell`, so it is found even when Keplr
+ * holds `window.keplr`, and choosing Keplr never ends up signing with DarkShell
+ * by mistake unless DarkShell is the only wallet there.
  */
-export function getProvider(_id: WalletId): KeplrLike | undefined {
-  return window.keplr
+export function getProvider(id: WalletId): KeplrLike | undefined {
+  return id === 'darkshell' ? window.darkshell : window.keplr
 }
 
 export function isInstalled(id: WalletId): boolean {
@@ -196,7 +211,7 @@ export async function connect(id: WalletId): Promise<Connection> {
 /**
  * Fires when the user switches account or network in their wallet. Everything
  * keyed by address — balances, permits, fee grants — is wrong from that moment,
- * so this is not optional to handle.
+ * so this is not optional to handle. DarkShell fires the same event.
  */
 export function onAccountChange(handler: () => void): () => void {
   window.addEventListener('keplr_keystorechange', handler)
